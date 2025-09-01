@@ -573,4 +573,320 @@ obj
     const ast = parseCode(code);
     expect(ast.body.length).toBeGreaterThanOrEqual(2);
   });
+
+  test('parses extreme concurrency with mixed threads and coroutines', () => {
+    const code = `
+# Mixing pthreads, coroutines, and async
+thread = new Thread(() => {
+  co {
+    pthread_mutex_lock(&mutex)
+    defer pthread_mutex_unlock(&mutex)
+    
+    async def worker():
+      yield coro_suspend()
+      await async_task()
+      go func() {
+        ch <- result
+      }()
+    
+    # PHP coroutine
+    $gen = (function() {
+      yield from another_gen();
+      return $result;
+    })();
+  }
+})
+
+# Bash fork with Ruby threads
+fork do
+  Thread.new do
+    while true; do
+      ruby_block { |x|
+        synchronized(lock) {
+          x.process()
+        }
+      }
+      sleep 1
+    done
+  end
+end
+`;
+
+    const ast = parseCode(code);
+    expect(ast.body.length).toBeGreaterThanOrEqual(2);
+  });
+
+  test('parses fused data structures across languages', () => {
+    const code = `
+# Mixed collections
+collection := new ArrayList<HashMap<String, Vector<int>>>()
+dict = {key: new std::map<std::string, std::vector<int>>()}
+arr = [1, 2, new LinkedList<>()]
+
+# Go slice with PHP array
+slice := make([]map[string]interface{}, 10)
+$phpArr = array_merge($slice, ['extra' => true])
+
+# Ruby hash with C# dictionary
+hash = {a: 1, b: 2}
+dict = new Dictionary<string, object> { {"c", 3} }
+hash.merge!(dict.ToHash())
+
+# Python set with Java set
+py_set = {1, 2, 3}
+java_set = new HashSet<Integer>()
+java_set.addAll(py_set)
+`;
+
+    const ast = parseCode(code);
+    expect(ast.body.length).toBeGreaterThanOrEqual(8);
+  });
+
+  test('parses polyglot file I/O and system calls', () => {
+    const code = `
+# Mixed I/O
+File.open("file.txt", "r") do |f|
+  while line = f.gets
+    echo $line
+  end
+done
+
+# PHP with Bash
+$handle = fopen("file.txt", "w");
+if [ $? -eq 0 ]; then
+  fwrite($handle, "data");
+  fclose($handle);
+fi
+
+# C++ stream with Python
+std::ifstream ifs("file.txt");
+with open("output.txt", "w") as out:
+  for line in ifs:
+    out.write(line)
+
+# Go file with Java
+f, err := os.Open("file.txt")
+if err != nil { return }
+defer f.Close()
+Scanner scanner = new Scanner(f);
+while (scanner.hasNextLine()) {
+  System.out.println(scanner.nextLine());
+}
+`;
+
+    const ast = parseCode(code);
+    expect(ast.body.length).toBeGreaterThanOrEqual(4);
+  });
+
+  test('parses extreme conditional and loop fusions', () => {
+    const code = `
+# Nested conditions and loops
+if x > 0 then
+  case y of
+    1: do
+      for z in 0..10 {
+        while (w < 5) {
+          foreach ($item in $array as $key => $value) {
+            loop {
+              unless condition
+                redo if retry
+                next unless skip
+                break if done
+              end
+            }
+          }
+        }
+      }
+    esac
+  else
+    switch (type) {
+      case int: goto loop_start;
+      default: return;
+    }
+  fi
+done
+`;
+
+    const ast = parseCode(code);
+    expect(ast.body.length).toBeGreaterThanOrEqual(1);
+  });
+
+  test('parses mixed networking and HTTP handling', () => {
+    const code = `
+# Polyglot networking
+server = http.createServer((req, res) => {
+  $response = new Response();
+  go func() {
+    conn, err := net.Dial("tcp", "localhost:80")
+    if err != nil { return }
+    defer conn.Close()
+    conn.Write([]byte("GET / HTTP/1.1\r\n"))
+  }()
+  
+  # Ruby socket with Python
+  socket = Socket.new(:INET, :STREAM)
+  with socket.connect(addr):
+    socket.send("data")
+  
+  # C# HttpClient with Java
+  HttpClient client = new HttpClient();
+  URL url = new URL("http://example.com");
+  HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+  conn.setRequestMethod("GET");
+  using (var response = await client.GetAsync(url)) {
+    res.end(response.Content.ReadAsStringAsync());
+  }
+})
+`;
+
+    const ast = parseCode(code);
+    expect(ast.body.length).toBeGreaterThanOrEqual(1);
+  });
+
+  test('parses fused memory management patterns', () => {
+    const code = `
+# Memory management mix
+ptr = malloc(sizeof(int))
+defer free(ptr)
+
+# C++ smart pointers with Go GC
+unique_ptr<int> up(new int(42));
+shared_ptr<int> sp = make_shared<int>(43);
+runtime.GC()  # Force GC
+
+# Java try-with-resources with Python context
+try (BufferedReader br = new BufferedReader(new FileReader("file"))) {
+  with open("file") as f:
+    line = br.readLine() or f.readline()
+}
+
+# Ruby ensure with C# using
+begin
+  file = File.open("file")
+  using (StreamReader sr = new StreamReader("file")) {
+    content = sr.ReadToEnd()
+  }
+rescue
+  # handle
+ensure
+  file.close if file
+end
+`;
+
+    const ast = parseCode(code);
+    expect(ast.body.length).toBeGreaterThanOrEqual(4);
+  });
+
+  test('parses polyglot unit testing assertions', () => {
+    const code = `
+# Mixed testing
+assert x == 1, "x should be 1"
+expect(x).toBe(1)
+Assert.AreEqual(1, x)
+BOOST_CHECK_EQUAL(x, 1)
+assert_equal 1, x
+if [ $x -ne 1 ]; then exit 1; fi
+if x != 1 { t.Fatal("x != 1") }
+$this->assertEquals(1, $x)
+
+# Mocking mix
+mock = Mock()
+when(mock.method()).thenReturn(42)
+sinon.stub(obj, "method").returns(42)
+allow(obj).to receive(:method).and_return(42)
+Mockito.when(obj.method()).thenReturn(42)
+`;
+
+    const ast = parseCode(code);
+    expect(ast.body.length).toBeGreaterThanOrEqual(10);
+  });
+
+  test('parses extreme regex and pattern handling', () => {
+    const code = `
+# Regex fusion
+regex = /pattern/flags
+re = re.compile(r'pattern')
+pattern = new Regex(@"pattern")
+rx = %r{pattern}i
+re2 = regexp.MustCompile("pattern")
+
+# Matching
+if regex.test(str) {
+  match = str =~ rx
+  if match {
+    groups = re.match(str).groups()
+    std::regex_match(str, sm, re2)
+    preg_match('/pattern/', $str, $matches)
+  }
+}
+`;
+
+    const ast = parseCode(code);
+    expect(ast.body.length).toBeGreaterThanOrEqual(7);
+  });
+
+  test('parses mixed build and configuration syntax', () => {
+    const code = `
+# Build config mix
+cmake_minimum_required(VERSION 3.10)
+project(MyProject)
+
+# Cargo.toml like
+[package]
+name = "myproject"
+version = "0.1.0"
+
+# package.json with Gemfile
+{
+  "dependencies": {
+    "express": "^4.17.1"
+  }
+}
+gem 'rails', '~> 7.0'
+
+# Makefile with Bash
+all:
+    @echo "Building"
+    go build
+    php composer install
+    ruby bundle install
+`;
+
+    const ast = parseCode(code);
+    expect(ast.body.length).toBeGreaterThanOrEqual(6);
+  });
+
+  test('parses ultimate operator overloads and custom ops', () => {
+    const code = `
+# Operator overloads
+class Vec {
+  def +(other)
+    new Vec(x + other.x, y + other.y)
+  end
+  
+  operator+(const Vec& other) const {
+    return Vec(x + other.x, y + other.y);
+  }
+  
+  public static Vec operator +(Vec a, Vec b) {
+    return new Vec(a.x + b.x, a.y + b.y);
+  }
+  
+  func Add(other Vec) Vec {
+    return Vec{x + other.x, y + other.y}
+  }
+}
+
+# Custom operators
+infix operator ** { associativity left precedence 160 }
+def **(base, exp)
+  base.pow(exp)
+end
+
+let a = 2 ** 3 + 4 <=> 5 ? 6 : 7
+`;
+
+    const ast = parseCode(code);
+    expect(ast.body.length).toBeGreaterThanOrEqual(3);
+  });
 });
