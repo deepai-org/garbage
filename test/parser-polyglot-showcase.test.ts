@@ -731,4 +731,208 @@ console.log("User logged out:", logout.userId)
     const ast = parseCode(code);
     expect(ast.body.length).toBeGreaterThanOrEqual(4);
   });
+
+  test('parses real-world Python Django REST API code', () => {
+    const code = `
+"""
+Social authentication views using dj-rest-auth and django-allauth.
+
+This module provides OAuth endpoints for mobile apps (iOS/Android) that leverage
+the existing django-allauth infrastructure for user authentication and session management.
+"""
+
+import inspect
+
+from django.http import JsonResponse
+from django.middleware.csrf import get_token
+from django.utils.decorators import method_decorator
+from django.views.decorators.csrf import csrf_exempt, ensure_csrf_cookie
+from django.views.decorators.http import require_POST
+from rest_framework import status
+from rest_framework.response import Response
+
+from allauth.socialaccount.providers.google.views import GoogleOAuth2Adapter
+from allauth.socialaccount.providers.oauth2.client import OAuth2Client as _OAuth2Client
+from dj_rest_auth.registration.views import SocialLoginView
+
+from infra.system_notifications import system_notification
+from infra.user_ip import get_user_ip_from_request
+
+
+class PatchedOAuth2Client(_OAuth2Client):
+    """
+    Patched OAuth2Client to fix compatibility between dj-rest-auth and django-allauth.
+    
+    Issue: dj-rest-auth ≤7.0.1 passes scope/scope_delimiter, but django-allauth ≥0.62
+    changed the constructor, causing TypeError for duplicate scope_delimiter.
+    
+    This patch drops the incompatible arguments before calling the parent constructor.
+    Can be removed once dj-rest-auth is updated to handle this.
+    """
+    def __init__(self, *args, **kwargs):
+        sig = inspect.signature(super().__init__)
+        # allauth >= 0.62: no 'scope' in __init__
+        if 'scope' not in sig.parameters:
+            kwargs.pop('scope', None)
+        # Defensive: if scope_delimiter was passed positionally, drop kwarg
+        if len(args) >= 7 and 'scope_delimiter' in kwargs:
+            kwargs.pop('scope_delimiter', None)
+        super().__init__(*args, **kwargs)
+
+
+@ensure_csrf_cookie
+@require_POST
+def csrf_token(request):
+    """
+    Endpoint to get a CSRF token for mobile apps.
+
+    Mobile apps should call this first to get a CSRF token,
+    then include it in the X-CSRFToken header for subsequent requests.
+
+    Returns:
+    {
+        "csrftoken": "..."
+    }
+    """
+    return JsonResponse({"csrftoken": get_token(request)})
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class GoogleLogin(SocialLoginView):
+    """
+    Google OAuth login for mobile apps (iOS/Android).
+
+    CSRF-exempt endpoint for mobile authentication.
+
+    Expected POST JSON:
+    {
+        "code": "<serverAuthCode>"  # One-time authorization code from Google Sign-In (ONLY)
+    }
+
+    Returns:
+    - Sets sessionid cookie for authenticated session
+    - Returns user details and auth status
+
+    iOS Setup:
+    1. Configure GIDServerClientID with the web client ID
+    2. Request serverAuthCode from GIDSignInResult
+    3. POST the code to this endpoint
+
+    This view handles:
+    - Token exchange with Google
+    - User creation or linking via django-allauth
+    - Session creation and cookie setting
+    - All security checks (audience, issuer, etc.) via the provider
+
+    Note: This endpoint is CSRF-exempt for mobile apps. Web clients should use
+    the standard allauth Google login flow instead.
+    """
+    adapter_class = GoogleOAuth2Adapter
+    client_class = PatchedOAuth2Client  # Use patched client to fix scope_delimiter issue
+    # Mobile serverAuthCode exchange: use empty redirect_uri per Google docs
+    callback_url = ""
+
+    def post(self, request, *args, **kwargs):
+        """Override to add logging and IP tracking"""
+        ip_addr = get_user_ip_from_request(request)
+
+        # Log the authentication attempt
+        system_notification(
+            f"Mobile Google auth attempt via dj-rest-auth, IP={ip_addr}"
+        )
+
+        # Call parent implementation
+        response = super().post(request, *args, **kwargs)
+
+        # Log success if user was authenticated
+        if response.status_code == 200:
+            user_data = response.data.get('user', {})
+            system_notification(
+                f"Mobile Google auth successful: user={user_data.get('email', 'unknown')} "
+                f"(id={user_data.get('pk', 'unknown')}), IP={ip_addr}"
+            )
+
+        return response
+`;
+
+    const ast = parseCode(code);
+    expect(ast.body.length).toBeGreaterThanOrEqual(5); // Multiple imports, classes, functions
+    
+    // Verify it parsed key structures
+    const hasImports = ast.body.some((node: any) => node.kind === 'Import');
+    const hasClasses = ast.body.some((node: any) => node.kind === 'ClassDecl');
+    const hasFunctions = ast.body.some((node: any) => node.kind === 'FuncDecl');
+    
+    expect(hasImports || hasClasses || hasFunctions).toBe(true);
+  });
+
+  test('parses real-world Python image processing code', () => {
+    const code = `
+# function to resize input images if necessary
+import io
+
+from PIL import Image
+
+from infra.exifRotate import rotateJpegExif
+from infra.heif_images import convert_heif_to_jpeg
+
+MAX_SIZE_DEFAULT = 800
+
+
+def image_check(img_bytes, max_size):
+    try:
+        im = Image.open(io.BytesIO(img_bytes))
+    except Exception:
+        print('PIL could not open image, now trying HEIF decode')
+
+        decoded = convert_heif_to_jpeg(img_bytes)
+        im = Image.open(io.BytesIO(decoded))
+        print('HEIF decode successful!')
+
+    im = rotateJpegExif(im)
+    im_rgb = im.convert('RGB')
+
+    initial_width, initial_height = im.size
+
+    max_size = int(round(max_size))
+    im_rgb.thumbnail((max_size, max_size),
+                     Image.LANCZOS,
+                     reducing_gap=None)  # this resizes to fit in a square keeping aspect ratio and no cropping.
+
+    final_width, final_height = im_rgb.size
+
+    # print("final size: {}, {}", final_width, final_height)
+    scale_applied = float(final_width) / float(initial_width)
+
+    with io.BytesIO() as output:
+        im_rgb.save(output, format="JPEG", subsampling=0, quality=98)
+        contents = output.getvalue()
+        im_rgb.close()
+        im.close()
+        return (contents, scale_applied)
+
+
+def make_image_jpg_in_memory(image_bytes):
+    im = Image.open(io.BytesIO(image_bytes))
+    im_rgb = im.convert('RGB')
+    with io.BytesIO() as output:
+        im_rgb.save(output, format="JPEG", subsampling=0, quality=98)
+        contents = output.getvalue()
+        im_rgb.close()
+        im.close()
+        return contents
+`;
+
+    const ast = parseCode(code);
+    expect(ast.body.length).toBeGreaterThanOrEqual(4); // Imports, constant, and 2 functions
+    
+    // Verify it parsed key structures
+    const hasImports = ast.body.some((node: any) => node.kind === 'Import');
+    const hasFunctions = ast.body.some((node: any) => node.kind === 'FuncDecl');
+    const hasConstants = ast.body.some((node: any) => 
+      node.kind === 'VarDecl' || node.kind === 'ConstDecl' || node.kind === 'Assign'
+    );
+    
+    expect(hasImports || hasFunctions || hasConstants).toBe(true);
+  });
 });
