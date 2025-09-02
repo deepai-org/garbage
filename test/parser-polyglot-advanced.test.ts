@@ -96,7 +96,7 @@ async fn processStream<T>(input: Stream<T>) -> Result<Vec<T>, Error> {
       case ch <- item:
         continue
       default:
-        await sleep(100ms)
+        await sleep(100)
     }
   }
   

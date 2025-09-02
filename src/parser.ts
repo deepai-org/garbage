@@ -66,6 +66,12 @@ export class Parser {
     
     if (this.isAtEnd()) return null;
     
+    // If we're in a block and encounter a closing brace, return null
+    // This handles cases where a virtual semicolon appears before }
+    if (this.braceDepth > 0 && this.check("}")) {
+      return null;
+    }
+    
     // Check for short declaration first (including destructuring)
     if (this.peek().type === TokenType.Identifier) {
       const checkpoint = this.current;
@@ -104,7 +110,7 @@ export class Parser {
     if (value === "async" || value === "unsafe") {
       const next = this.peekNext();
       return next?.value === "fn" || next?.value === "fun" || 
-             next?.value === "function" || next?.value === "def" ||
+             next?.value === "function" || next?.value === "def" || next?.value === "func" ||
              next?.value === "async" || next?.value === "unsafe";
     }
     
@@ -112,7 +118,7 @@ export class Parser {
       type === TokenType.Keyword && (
         value === "import" || value === "require" ||
         value === "let" || value === "var" || value === "auto" ||
-        value === "fn" || value === "fun" || value === "function" || value === "def" ||
+        value === "fn" || value === "fun" || value === "function" || value === "def" || value === "func" ||
         value === "const" || value === "final" || value === "immutable" ||
         value === "class" || value === "struct" || value === "interface" ||
         value === "trait" || value === "enum" || value === "type" ||
@@ -2213,6 +2219,61 @@ export class Parser {
       // Traditional for loop with parentheses
       this.consume("(", "Expected '(' after 'for'");
       
+      // Check for for-of/for-in loops with const/let/var
+      if (this.check("const") || this.check("let") || this.check("var")) {
+        const checkpoint = this.current;
+        const declKeyword = this.advance(); // consume const/let/var
+        
+        if (this.peek().type === TokenType.Identifier) {
+          const variable = this.parseIdentifier();
+          
+          // Check for 'of' or 'in'
+          if (this.match("of", "in")) {
+            const iterType = this.previous()?.value; // "of" or "in"
+            const iterable = this.parseExpression();
+            this.consume(")", "Expected ')' after for-of/for-in");
+            const body = this.parseBlock();
+            
+            return {
+              kind: "Loop",
+              mode: "foreach",
+              variable,
+              iterable,
+              body,
+              span: this.createSpan(start, this.current - 1)
+            };
+          }
+        }
+        
+        // Not a for-of/for-in, restore position and parse normally
+        this.current = checkpoint;
+      }
+      
+      // Check for for-of/for-in without const/let/var (just identifier)
+      if (this.peek().type === TokenType.Identifier) {
+        const checkpoint = this.current;
+        const variable = this.parseIdentifier();
+        
+        if (this.match("of", "in")) {
+          const iterType = this.previous()?.value; // "of" or "in"
+          const iterable = this.parseExpression();
+          this.consume(")", "Expected ')' after for-of/for-in");
+          const body = this.parseBlock();
+          
+          return {
+            kind: "Loop",
+            mode: "foreach",
+            variable,
+            iterable,
+            body,
+            span: this.createSpan(start, this.current - 1)
+          };
+        }
+        
+        // Not a for-of/for-in, restore position
+        this.current = checkpoint;
+      }
+      
       let init: AST.Stmt | AST.Decl | undefined;
       if (!this.check(";")) {
         if (this.isDeclStart()) {
@@ -2222,6 +2283,11 @@ export class Parser {
         }
       } else {
         this.advance(); // consume ';'
+      }
+      
+      // Skip virtual semicolons that might appear
+      while (this.peek().virtualSemi) {
+        this.advance();
       }
       
       let test: AST.Expr | undefined;
