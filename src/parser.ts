@@ -997,7 +997,46 @@ export class Parser {
         continue;
       }
       
-      // Index access
+      // Member access and optional chaining
+      // Check for ?. first to handle both ?.property and ?.[index]
+      if (this.peek().value === "?.") {
+        const next = this.peekNext();
+        // DEBUG
+        if (typeof process !== 'undefined' && process.env.DEBUG_PARSER) {
+          console.log('Found ?. at position', this.current, 'next token:', next?.value);
+        }
+        if (next?.value === "[") {
+          // Optional chaining with bracket notation (?.[)
+          this.advance(); // consume ?.
+          this.advance(); // consume [
+          const index = this.parseExpression();
+          this.consume("]", "Expected ']' after index");
+          expr = {
+            kind: "Index",
+            object: expr,
+            index,
+            optional: true,
+            span: this.createSpanFrom(expr)
+          };
+          continue;
+        } else if (next && next.type === TokenType.Identifier) {
+          // Optional chaining with property access (?.property)
+          this.advance(); // consume ?.
+          const property = this.parseIdentifier();
+          expr = {
+            kind: "Member",
+            object: expr,
+            property,
+            optional: true,
+            span: this.createSpanFrom(expr)
+          };
+          continue;
+        }
+        // If ?. is not followed by [ or identifier, don't consume it
+        // This might be an error or part of something else
+      }
+      
+      // Regular index access
       if (this.match("[")) {
         const index = this.parseExpression();
         this.consume("]", "Expected ']' after index");
@@ -1005,15 +1044,15 @@ export class Parser {
           kind: "Index",
           object: expr,
           index,
+          optional: false,
           span: this.createSpanFrom(expr)
         };
         continue;
       }
       
-      // Member access (including pointer dereference)
-      if (this.match(".", "?.", ".*")) {
+      // Regular member access (including pointer dereference)
+      if (this.match(".", ".*")) {
         const op = this.previous()?.value;
-        const optional = op === "?.";
         const deref = op === ".*";
         
         // Special case for .*. pattern (pointer member access)
@@ -1039,10 +1078,11 @@ export class Parser {
             kind: "Member",
             object: expr,
             property,
-            optional,
+            optional: false,
             span: this.createSpanFrom(expr)
           };
         }
+        continue;
       } else if (this.check(".") && this.peekNext()?.value === "*") {
         // Handle case where .* was lexed as two separate tokens
         this.advance(); // consume .
@@ -2215,17 +2255,33 @@ export class Parser {
     const id = this.parseIdentifier();
     
     // Special handling for chan<T> syntax
-    if (id.name === "chan" && this.check("<")) {
-      this.advance(); // consume '<'
-      const elementType = this.parseType();
-      this.consume(">", "Expected '>' after channel element type");
-      
-      return {
-        kind: "ChanType",
-        direction: "both",
-        elementType,
-        span: this.createSpan(start, this.current - 1)
-      };
+    if (id.name === "chan") {
+      if (this.check("<")) {
+        this.advance(); // consume '<'
+        const elementType = this.parseType();
+        this.consume(">", "Expected '>' after channel element type");
+        
+        // Debug: ensure elementType is defined
+        if (!elementType) {
+          throw this.error(this.peek(), "Failed to parse channel element type");
+        }
+        
+        const result = {
+          kind: "ChanType" as const,
+          direction: "both" as const,
+          elementType: elementType,
+          span: this.createSpan(start, this.current - 1)
+        };
+        return result;
+      } else {
+        // chan without type parameter - treat as chan<any>
+        return {
+          kind: "ChanType",
+          direction: "both",
+          elementType: undefined,
+          span: this.createSpan(start, this.current - 1)
+        };
+      }
     }
     
     // Check for generic arguments
@@ -2837,6 +2893,36 @@ export class Parser {
       
       do {
         const propStart = this.current;
+        
+        // Check for spread property
+        if (this.match("...")) {
+          // Check for optional spread (...?)
+          const optional = this.match("?");
+          const argument = this.parseAssignmentExpression();
+          
+          properties.push({
+            key: {
+              kind: "Identifier",
+              name: "...",
+              span: this.createSpan(propStart, propStart)
+            },
+            value: {
+              kind: "Spread",
+              argument,
+              optional,
+              span: this.createSpan(propStart, this.current - 1)
+            } as AST.Expr,
+            shorthand: false,
+            computed: false,
+            span: this.createSpan(propStart, this.current - 1)
+          });
+          
+          // Continue to next property if there's a comma
+          if (this.match(",")) {
+            continue;
+          }
+          break;
+        }
         
         // Parse property key
         let key: AST.Identifier | AST.StringLiteral | AST.NumericLiteral;
