@@ -435,6 +435,7 @@ export interface Reassign {
 export interface FuncDecl {
   kind: "FuncDecl";
   name: Identifier;
+  genericParams?: Identifier[];
   params: Param[];
   returnType?: TypeNode;
   async?: boolean;
@@ -454,6 +455,7 @@ export interface Param {
 export interface TypeDecl {
   kind: "TypeDecl";
   name: Identifier;
+  genericParams?: Identifier[];
   definition: TypeNode;
   span: Span;
 }

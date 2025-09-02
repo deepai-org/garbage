@@ -104,8 +104,8 @@ export class Parser {
       type === TokenType.Keyword && (
         value === "import" || value === "require" ||
         value === "let" || value === "var" || value === "auto" ||
+        value === "fn" || value === "fun" || value === "function" || value === "def" ||
         value === "const" || value === "final" || value === "immutable" ||
-        value === "def" || value === "fun" || value === "fn" || value === "function" ||
         value === "class" || value === "struct" || value === "interface" ||
         value === "trait" || value === "enum" || value === "type" ||
         value === "async" || value === "unsafe" ||  // Add these modifiers
@@ -753,6 +753,24 @@ export class Parser {
   private parseExpression(minPrecedence = 0): AST.Expr {
     let left = this.parsePrimary();
     
+    // Check for single-parameter lambda without parentheses
+    if (left.kind === "Identifier" && this.check("=>")) {
+      this.advance(); // consume =>
+      const body = this.check("{") ? this.parseBlock() : this.parseExpression();
+      return {
+        kind: "Lambda",
+        params: [{
+          name: left as AST.Identifier,
+          type: undefined,
+          defaultValue: undefined,
+          span: left.span
+        }],
+        returnType: undefined,
+        body,
+        span: this.createSpanFrom(left)
+      };
+    }
+    
     while (true) {
       const op = this.peek();
       if (!this.isBinaryOp(op) && !this.isAssignmentOp(op)) {
@@ -1313,6 +1331,17 @@ export class Parser {
     const start = this.current - 1;
     
     const name = this.parseIdentifier();
+    
+    // Parse generic parameters if present
+    let genericParams: AST.Identifier[] | undefined;
+    if (this.match("<")) {
+      genericParams = [];
+      do {
+        genericParams.push(this.parseIdentifier());
+      } while (this.match(","));
+      this.consume(">", "Expected '>' after generic parameters");
+    }
+    
     const params = this.parseParameterList();
     
     let returnType: AST.TypeNode | undefined;
@@ -1373,6 +1402,7 @@ export class Parser {
     return {
       kind: "FuncDecl",
       name,
+      genericParams,
       params,
       returnType,
       async,
@@ -1396,6 +1426,7 @@ export class Parser {
     return {
       kind: "FuncDecl",
       name,
+      genericParams: undefined,
       params,
       returnType,
       async: false,
@@ -2260,8 +2291,21 @@ export class Parser {
       };
     }
     
+    // Handle function types with -> (right-associative)
+    // A -> B -> C is parsed as A -> (B -> C)
+    if (this.check("->")) {
+      this.advance(); // consume ->
+      const ret = this.parseType(); // recursive call for right-associativity
+      type = {
+        kind: "FuncType",
+        params: [type],
+        ret,
+        span: this.createSpanFrom(type)
+      };
+    }
+    
     // Handle union types
-    if (this.match("|")) {
+    else if (this.match("|")) {
       const types: AST.TypeNode[] = [type];
       do {
         types.push(this.parseSimpleType());
@@ -2338,8 +2382,9 @@ export class Parser {
         this.advance();
       }
       
-      // Check if followed by =>
-      const isFuncType = this.check("=>");
+      // Check if followed by => or ->
+      const isFuncType = this.check("=>") || this.check("->");
+      const arrow = this.check("=>") ? "=>" : "->";
       this.current = checkpoint;
       
       if (isFuncType) {
@@ -2359,7 +2404,7 @@ export class Parser {
         }
         
         this.consume(")", "Expected ')' in function type");
-        this.consume("=>", "Expected '=>' in function type");
+        this.consume(arrow, `Expected '${arrow}' in function type`);
         const ret = this.parseType();
         
         return {
@@ -2463,6 +2508,17 @@ export class Parser {
   private parseTypeDecl(): AST.TypeDecl {
     const start = this.current - 1;
     const name = this.parseIdentifier();
+    
+    // Parse generic parameters if present
+    let genericParams: AST.Identifier[] | undefined;
+    if (this.match("<")) {
+      genericParams = [];
+      do {
+        genericParams.push(this.parseIdentifier());
+      } while (this.match(","));
+      this.consume(">", "Expected '>' after generic parameters");
+    }
+    
     this.consume("=", "Expected '=' in type declaration");
     const definition = this.parseType();
     this.consumeSemicolon();
@@ -2470,6 +2526,7 @@ export class Parser {
     return {
       kind: "TypeDecl",
       name,
+      genericParams,
       definition,
       span: this.createSpan(start, this.current - 1)
     };
