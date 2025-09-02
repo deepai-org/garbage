@@ -1040,7 +1040,9 @@ export class Parser {
       // Check for lambda or async block
       if (this.check("(") || this.peek().type === TokenType.Identifier || this.check("{")) {
         // Parse as async lambda or async block
-        return this.parseAsyncLambda(start);
+        const lambda = this.parseAsyncLambda(start);
+        // Allow postfix operations on the lambda (like calls)
+        return this.parsePostfix(lambda);
       }
       // Otherwise it's an error
       throw this.error(this.peek(), "Expected lambda or block after async");
