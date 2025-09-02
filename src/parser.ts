@@ -1185,6 +1185,16 @@ export class Parser {
       };
     }
     
+    // this and super keywords
+    if (this.match("this", "super")) {
+      const token = this.previous()!;
+      return {
+        kind: "Identifier",
+        name: token.value,
+        span: this.createSpanFrom(token)
+      };
+    }
+    
     // Identifiers and sigil identifiers
     if (this.peek().type === TokenType.Identifier || 
         this.peek().type === TokenType.SigilIdentifier) {
@@ -1664,8 +1674,9 @@ export class Parser {
         // This is a Python-style indented block
         // parseIndentBlock will handle the rest
       } else if (this.check("return") || this.check("pass") || 
-                 this.check("raise") || this.check("yield")) {
-        // Single-line Python function body
+                 this.check("raise") || this.check("yield") ||
+                 this.check("this") || this.check("super")) {
+        // Single-line Python function body or statement starting with this/super
         // Don't parse as type, this is a statement
       } else {
         // This is a type annotation
@@ -1779,6 +1790,19 @@ export class Parser {
   
   private parseParameter(): AST.Param {
     const start = this.current;
+    
+    // Handle Ruby-style block parameter (&param)
+    let isBlockParam = false;
+    if (this.match("&")) {
+      isBlockParam = true;
+    }
+    
+    // Handle spread parameter (...param)
+    let isSpread = false;
+    if (this.match("...")) {
+      isSpread = true;
+    }
+    
     const name = this.parseIdentifier();
     
     let type: AST.TypeNode | undefined;
@@ -3099,9 +3123,108 @@ export class Parser {
     const members: AST.ClassMember[] = [];
     
     while (!this.check("}") && !this.isAtEnd()) {
-      // Parse class members
-      // This is simplified - full implementation would handle all member types
-      this.advance(); // Skip for now
+      // Skip virtual semicolons and regular semicolons
+      while (this.check(";") || this.peek().virtualSemi) {
+        this.advance();
+      }
+      
+      if (this.check("}")) break;
+      
+      try {
+        // Parse class member
+        const memberStart = this.current;
+        
+        // Handle Ruby-style def...end methods
+        if (this.match("def")) {
+          const method = this.parseFuncDecl();
+          members.push(method as any);
+          continue;
+        }
+        
+        // Handle regular function declarations
+        if (this.match("fn", "fun", "function", "func")) {
+          const method = this.parseFuncDecl();
+          members.push(method as any);
+          continue;
+        }
+        
+        // Handle async functions
+        if (this.match("async")) {
+          if (this.match("fn", "fun", "function", "func", "def")) {
+            const method = this.parseFuncDecl(true);
+            members.push(method as any);
+            continue;
+          }
+          // If not followed by function keyword, restore position
+          this.current = memberStart;
+        }
+        
+        // Handle property declarations
+        if (this.peek().type === TokenType.Identifier) {
+          const name = this.parseIdentifier();
+          
+          // Short declaration: name := value
+          if (this.match(":=")) {
+            const value = this.parseExpression();
+            members.push({
+              kind: "ClassProperty",
+              name,
+              value,
+              span: this.createSpan(memberStart, this.current - 1)
+            } as any);
+            continue;
+          }
+          
+          // Type annotation: name: Type = value
+          if (this.match(":")) {
+            const type = this.parseType();
+            let value: AST.Expr | undefined;
+            if (this.match("=")) {
+              value = this.parseExpression();
+            }
+            members.push({
+              kind: "ClassProperty",
+              name,
+              type,
+              value,
+              span: this.createSpan(memberStart, this.current - 1)
+            } as any);
+            continue;
+          }
+          
+          // Simple assignment: name = value
+          if (this.match("=")) {
+            const value = this.parseExpression();
+            members.push({
+              kind: "ClassProperty",
+              name,
+              value,
+              span: this.createSpan(memberStart, this.current - 1)
+            } as any);
+            continue;
+          }
+          
+          // If none of the above, we might have a method without parentheses
+          // or an invalid member - skip to next line
+          while (!this.isAtEnd() && !this.checkSemicolon() && !this.check("}")) {
+            this.advance();
+          }
+        } else {
+          // Unknown member type - skip this token
+          this.advance();
+        }
+        
+      } catch (error) {
+        if (error instanceof ParseError) {
+          this.errors.push(error);
+          // Skip to next potential member
+          while (!this.isAtEnd() && !this.check("}") && !this.checkSemicolon()) {
+            this.advance();
+          }
+        } else {
+          throw error;
+        }
+      }
     }
     
     this.consume("}", "Expected '}' after class body");
@@ -4315,6 +4438,12 @@ export class Parser {
   
   private checkSemicolon(): boolean {
     return this.check(";") || this.peek().virtualSemi || false;
+  }
+  
+  private skipSemicolons(): void {
+    while (this.check(";") || this.peek().virtualSemi) {
+      this.advance();
+    }
   }
   
   private synchronize(): void {
