@@ -2071,14 +2071,64 @@ export class Parser {
   
   private parseTry(): AST.Try {
     const start = this.current - 1;
-    const body = this.parseBlock();
+    
+    // Check for Python-style try with colon
+    let body: AST.Block;
+    if (this.match(":")) {
+      // Python-style - parse single statement or indented block
+      if (this.checkIndentBlock()) {
+        body = this.parseIndentBlock();
+      } else {
+        // Single statement on same line
+        const stmt = this.parseStatement();
+        body = {
+          kind: "Block",
+          statements: [stmt],
+          span: stmt.span
+        };
+      }
+    } else {
+      body = this.parseBlock();
+    }
+    
     const catches: AST.CatchClause[] = [];
     
     while (this.match("catch", "except", "rescue")) {
       let param: AST.Identifier | undefined;
       let type: AST.TypeNode | undefined;
       
-      if (this.match("(")) {
+      // Check for Python-style except with colon
+      if (this.match(":")) {
+        // Python-style except: or except Exception:
+        if (this.peek().type === TokenType.Identifier && !this.check("pass")) {
+          type = this.parseType();
+          if (this.match("as")) {
+            param = this.parseIdentifier();
+          }
+          this.consume(":", "Expected ':' after except clause");
+        }
+        
+        // Parse except body
+        let catchBody: AST.Block;
+        if (this.checkIndentBlock()) {
+          catchBody = this.parseIndentBlock();
+        } else {
+          // Single statement (often 'pass')
+          const stmt = this.parseStatement();
+          catchBody = {
+            kind: "Block",
+            statements: [stmt],
+            span: stmt.span
+          };
+        }
+        catches.push({
+          param,
+          type,
+          body: catchBody,
+          span: this.createSpan(this.current - 1, this.current)
+        });
+      } else if (this.match("(")) {
+        // Traditional catch with parentheses
         if (!this.check(")")) {
           param = this.parseIdentifier();
           if (this.match(":")) {
@@ -2086,20 +2136,43 @@ export class Parser {
           }
         }
         this.consume(")", "Expected ')' after catch clause");
+        
+        const catchBody = this.parseBlock();
+        catches.push({
+          param,
+          type,
+          body: catchBody,
+          span: this.createSpan(this.current - 1, this.current)
+        });
+      } else {
+        // No parentheses or colon, parse block directly
+        const catchBody = this.parseBlock();
+        catches.push({
+          param,
+          type,
+          body: catchBody,
+          span: this.createSpan(this.current - 1, this.current)
+        });
       }
-      
-      const catchBody = this.parseBlock();
-      catches.push({
-        param,
-        type,
-        body: catchBody,
-        span: this.createSpan(this.current - 1, this.current)
-      });
     }
     
     let finallyBody: AST.Block | undefined;
     if (this.match("finally")) {
-      finallyBody = this.parseBlock();
+      // Check for Python-style finally with colon
+      if (this.match(":")) {
+        if (this.checkIndentBlock()) {
+          finallyBody = this.parseIndentBlock();
+        } else {
+          const stmt = this.parseStatement();
+          finallyBody = {
+            kind: "Block",
+            statements: [stmt],
+            span: stmt.span
+          };
+        }
+      } else {
+        finallyBody = this.parseBlock();
+      }
     }
     
     return {
@@ -2115,13 +2188,45 @@ export class Parser {
     const start = this.current - 1;
     
     let resource: AST.Expr | AST.Decl;
-    if (this.isDeclStart()) {
+    
+    // Parse the resource expression
+    const expr = this.parseExpression();
+    
+    // Check for Python-style 'as' alias
+    if (this.match("as")) {
+      const alias = this.parseIdentifier();
+      // Create a variable declaration for the alias
+      resource = {
+        kind: "VarDecl",
+        names: [alias],
+        values: [expr],
+        span: this.createSpan(start, this.current - 1)
+      } as AST.VarDecl;
+    } else if (this.isDeclStart()) {
+      // Rewind and parse as declaration
+      this.current = start + 1;
       resource = this.parseDeclaration();
     } else {
-      resource = this.parseExpression();
+      resource = expr;
     }
     
-    const body = this.parseBlock();
+    // Parse body - check for Python-style colon
+    let body: AST.Block;
+    if (this.match(":")) {
+      if (this.checkIndentBlock()) {
+        body = this.parseIndentBlock();
+      } else {
+        // Single statement on same line
+        const stmt = this.parseStatement();
+        body = {
+          kind: "Block",
+          statements: [stmt],
+          span: stmt.span
+        };
+      }
+    } else {
+      body = this.parseBlock();
+    }
     
     return {
       kind: "Using",
