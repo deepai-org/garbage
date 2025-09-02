@@ -12,7 +12,8 @@ export type TypeNode =
   | UnionType
   | GenericType
   | FuncType
-  | ChanType;
+  | ChanType
+  | ImplType;
 
 export interface SimpleType {
   kind: "SimpleType";
@@ -50,6 +51,12 @@ export interface ChanType {
   kind: "ChanType";
   direction: "send" | "receive" | "both";
   elementType?: TypeNode;
+  span: Span;
+}
+
+export interface ImplType {
+  kind: "ImplType";
+  trait: TypeNode;
   span: Span;
 }
 

@@ -2374,6 +2374,16 @@ export class Parser {
     // Simple or generic type
     const id = this.parseIdentifier();
     
+    // Handle "impl Trait" pattern (Rust-style)
+    if (id.name === "impl" && this.peek().type === TokenType.Identifier) {
+      const traitType = this.parseSimpleType();
+      return {
+        kind: "ImplType",
+        trait: traitType,
+        span: this.createSpan(start, this.current - 1)
+      };
+    }
+    
     // Special handling for chan<T> syntax
     if (id.name === "chan") {
       if (this.check("<")) {
