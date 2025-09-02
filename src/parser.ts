@@ -348,9 +348,9 @@ export class Parser {
       return this.parsePass();
     }
     
-    // Begin/end blocks
+    // Begin/end blocks (Ruby-style with rescue/ensure)
     if (this.match("begin")) {
-      return this.parseKeywordBlock("begin");
+      return this.parseBeginBlock();
     }
     
     // Block statements - but could also be object destructuring
@@ -756,6 +756,136 @@ export class Parser {
            (value === "for" && this.isRubyStyle()) ||
            (value === "while" && this.isRubyStyle()) ||
            (value === "function" && this.isBashStyle());
+  }
+  
+  private parseBeginBlock(): AST.Try | AST.Block {
+    const start = this.current - 1;
+    const statements: (AST.Decl | AST.Stmt)[] = [];
+    
+    // Parse the main body until rescue/ensure/end
+    while (!this.check("rescue") && !this.check("ensure") && !this.check("end") && !this.isAtEnd()) {
+      // Skip virtual semicolons
+      if (this.peek().virtualSemi) {
+        this.advance();
+        continue;
+      }
+      
+      try {
+        const stmt = this.parseTopLevel();
+        if (stmt) statements.push(stmt);
+      } catch (error) {
+        if (error instanceof ParseError) {
+          this.errors.push(error);
+          this.synchronize();
+        } else {
+          throw error;
+        }
+      }
+    }
+    
+    // If we hit 'end' directly without rescue/ensure, it's just a block
+    if (this.check("end")) {
+      this.advance(); // consume 'end'
+      return {
+        kind: "Block",
+        statements,
+        span: this.createSpan(start, this.current - 1)
+      };
+    }
+    
+    const body: AST.Block = {
+      kind: "Block",
+      statements,
+      span: this.createSpan(start, this.current - 1)
+    };
+    
+    const catches: AST.CatchClause[] = [];
+    
+    // Handle rescue clauses
+    while (this.match("rescue")) {
+      let param: AST.Identifier | undefined;
+      let type: AST.TypeNode | undefined;
+      
+      // Check for rescue Type => var pattern
+      if (this.peek().type === TokenType.Identifier && !this.check("=>")) {
+        type = this.parseType();
+      }
+      
+      if (this.match("=>")) {
+        param = this.parseIdentifier();
+      }
+      
+      const rescueStatements: (AST.Decl | AST.Stmt)[] = [];
+      while (!this.check("rescue") && !this.check("ensure") && !this.check("end") && !this.isAtEnd()) {
+        if (this.peek().virtualSemi) {
+          this.advance();
+          continue;
+        }
+        
+        try {
+          const stmt = this.parseTopLevel();
+          if (stmt) rescueStatements.push(stmt);
+        } catch (error) {
+          if (error instanceof ParseError) {
+            this.errors.push(error);
+            this.synchronize();
+          } else {
+            throw error;
+          }
+        }
+      }
+      
+      catches.push({
+        param,
+        type,
+        body: {
+          kind: "Block",
+          statements: rescueStatements,
+          span: this.createSpan(this.current - 1, this.current)
+        },
+        span: this.createSpan(this.current - 1, this.current)
+      });
+    }
+    
+    // Handle ensure clause
+    let finallyBlock: AST.Block | undefined;
+    if (this.match("ensure")) {
+      const ensureStatements: (AST.Decl | AST.Stmt)[] = [];
+      while (!this.check("end") && !this.isAtEnd()) {
+        if (this.peek().virtualSemi) {
+          this.advance();
+          continue;
+        }
+        
+        try {
+          const stmt = this.parseTopLevel();
+          if (stmt) ensureStatements.push(stmt);
+        } catch (error) {
+          if (error instanceof ParseError) {
+            this.errors.push(error);
+            this.synchronize();
+          } else {
+            throw error;
+          }
+        }
+      }
+      
+      finallyBlock = {
+        kind: "Block",
+        statements: ensureStatements,
+        span: this.createSpan(this.current - 1, this.current)
+      };
+    }
+    
+    this.consume("end", "Expected 'end' to close begin block");
+    
+    return {
+      kind: "Try",
+      body,
+      catches,
+      finallyBody: finallyBlock,
+      span: this.createSpan(start, this.current - 1)
+    };
   }
   
   private parseKeywordBlock(keyword?: string): AST.Block {
@@ -1492,8 +1622,37 @@ export class Parser {
           span: this.createSpanFrom(stmt || this.previous())
         };
       }
-    } else {
+    } else if (this.check("{")) {
       body = this.parseBlock();
+    } else {
+      // Ruby-style def without braces - parse until 'end'
+      const statements: (AST.Decl | AST.Stmt)[] = [];
+      while (!this.check("end") && !this.isAtEnd()) {
+        if (this.peek().virtualSemi) {
+          this.advance();
+          continue;
+        }
+        
+        try {
+          const stmt = this.parseTopLevel();
+          if (stmt) statements.push(stmt);
+        } catch (error) {
+          if (error instanceof ParseError) {
+            this.errors.push(error);
+            this.synchronize();
+          } else {
+            throw error;
+          }
+        }
+      }
+      
+      this.consume("end", "Expected 'end' to close function");
+      
+      body = {
+        kind: "Block",
+        statements,
+        span: this.createSpan(start, this.current - 1)
+      };
     }
     
     return {
