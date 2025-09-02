@@ -829,13 +829,13 @@ export class Parser {
     // Handle async lambda/function expressions
     if (this.match("async")) {
       const start = this.current - 1;
-      // Check for lambda
-      if (this.check("(") || this.peek().type === TokenType.Identifier) {
-        // Parse as async lambda
+      // Check for lambda or async block
+      if (this.check("(") || this.peek().type === TokenType.Identifier || this.check("{")) {
+        // Parse as async lambda or async block
         return this.parseAsyncLambda(start);
       }
       // Otherwise it's an error
-      throw this.error(this.peek(), "Expected lambda after async");
+      throw this.error(this.peek(), "Expected lambda or block after async");
     }
     
     // Handle yield expression
@@ -3424,6 +3424,20 @@ export class Parser {
   }
   
   private parseAsyncLambda(start: number): AST.Lambda {
+    // Check for async block (no parameters, just a block)
+    if (this.check("{")) {
+      const block = this.parseBlock();
+      // Return an async block expression (wrapped in a lambda with no params)
+      return {
+        kind: "Lambda",
+        params: [],
+        returnType: undefined,
+        body: block,
+        async: true,
+        span: this.createSpan(start, this.current - 1)
+      } as AST.Lambda;
+    }
+    
     // Parse parameters - can be single identifier or parenthesized list
     let params: AST.Param[] = [];
     
