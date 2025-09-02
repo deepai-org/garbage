@@ -22,6 +22,9 @@ export class Parser {
   private indentStack: number[] = [];
   private keywordStack: ("do" | "case" | "begin" | "if" | "for" | "while" | "function")[] = [];
   
+  // Error recovery state
+  private syntheticTokenCounter = 0;
+  
   // Directives
   private nextStmtGenericMode: "on" | "off" | "auto" = "auto";
   
@@ -54,6 +57,66 @@ export class Parser {
       body,
       span: this.createSpan(0, this.tokens.length - 1)
     };
+  }
+  
+  // Error recovery helpers
+  private createSyntheticToken(type: TokenType, value: string): Token {
+    const pos = this.current > 0 ? this.tokens[this.current - 1].end : 0;
+    return {
+      type,
+      value,
+      start: pos,
+      end: pos,
+      line: this.current > 0 ? this.tokens[this.current - 1].line : 1,
+      column: this.current > 0 ? this.tokens[this.current - 1].column + 1 : 1,
+      synthetic: true
+    } as Token;
+  }
+  
+  private createMissingExpr(): AST.Expr {
+    const span = this.current > 0 ? 
+      this.createSpan(this.current - 1, this.current - 1) :
+      this.createSpan(0, 0);
+    
+    return {
+      kind: "Identifier",
+      name: "__missing__",
+      span
+    };
+  }
+  
+  private createMissingIdentifier(): AST.Identifier {
+    const span = this.current > 0 ? 
+      this.createSpan(this.current - 1, this.current - 1) :
+      this.createSpan(0, 0);
+    
+    return {
+      kind: "Identifier",
+      name: "__missing__",
+      span
+    };
+  }
+  
+  private must(expected: string, options?: { recoverWithSynthetic?: boolean }): boolean {
+    if (this.check(expected)) {
+      this.advance();
+      return true;
+    }
+    
+    if (options?.recoverWithSynthetic) {
+      // Record the error
+      this.errors.push(new ParseError(
+        `Expected '${expected}' but got '${this.peek().value}'`,
+        this.peek(),
+        `Insert '${expected}'`
+      ));
+      
+      // Return true to indicate we're recovering
+      // The caller should handle the missing token appropriately
+      return true;
+    }
+    
+    throw this.error(this.peek(), `Expected '${expected}'`);
   }
   
   private parseTopLevel(): AST.Decl | AST.Stmt | null {
@@ -1157,7 +1220,7 @@ export class Parser {
         return this.parseGeneratorComprehension(expr, start);
       }
       
-      this.consume(")", "Expected ')' after expression");
+      this.must(")", { recoverWithSynthetic: true });
       return this.parsePostfix(expr);
     }
     
@@ -1228,7 +1291,7 @@ export class Parser {
               args.push(this.parseAssignmentExpression());
             }
             
-            this.consume(")", "Expected ')' after make arguments");
+            this.must(")", { recoverWithSynthetic: true });
             expr = {
               kind: "Call",
               callee: expr,
@@ -1240,7 +1303,7 @@ export class Parser {
         }
         
         const args = this.parseArguments();
-        this.consume(")", "Expected ')' after arguments");
+        this.must(")", { recoverWithSynthetic: true });
         expr = {
           kind: "Call",
           callee: expr,
@@ -3948,7 +4011,7 @@ export class Parser {
     let args: AST.Expr[] = [];
     if (this.match("(")) {
       args = this.parseArguments();
-      this.consume(")", "Expected ')' after arguments");
+      this.must(")", { recoverWithSynthetic: true });
     }
     
     return {
@@ -4016,7 +4079,9 @@ export class Parser {
       return this.parseBacktickIdentifier();
     }
     
-    throw this.error(token, "Expected identifier");
+    // Return missing identifier instead of throwing
+    this.errors.push(new ParseError("Expected identifier", token));
+    return this.createMissingIdentifier();
   }
   
   private shouldReinterpretAsIdentifier(): boolean {
@@ -4101,6 +4166,11 @@ export class Parser {
       args.push(this.parseAssignmentExpression());
       
       while (this.match(",")) {
+        // Tolerate trailing comma
+        if (this.check(")")) {
+          break; // Trailing comma
+        }
+        
         args.push(this.parseAssignmentExpression());
       }
     }
