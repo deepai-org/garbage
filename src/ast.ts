@@ -137,6 +137,7 @@ export interface Index {
   kind: "Index";
   object: Expr;
   index: Expr;
+  optional?: boolean;
   span: Span;
 }
 

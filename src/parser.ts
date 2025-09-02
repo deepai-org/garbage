@@ -1550,56 +1550,108 @@ export class Parser {
     this.consume("{", "Expected '{' after switch expression");
     
     while (!this.check("}") && !this.isAtEnd()) {
-      if (this.match("case") || (isMatch && this.peek().type === TokenType.Identifier)) {
-        // For match expressions, patterns can be identifiers like Some(v), None, _
-        const patterns: AST.Expr[] = [];
-        
-        if (isMatch && !this.previous() || this.previous()?.value !== "case") {
-          // Match-style pattern (e.g., Some(v), None, _)
-          patterns.push(this.parseMatchPattern());
-        } else {
-          // Switch-style case
-          patterns.push(this.parseExpression());
-          while (this.match(",")) {
-            patterns.push(this.parseExpression());
-          }
-        }
-        
-        // Check for guard clause (if condition)
-        let guard: AST.Expr | undefined;
-        if (this.match("if")) {
-          guard = this.parseExpression();
-        }
-        
-        // Match uses =>, switch uses :
-        if (isMatch) {
-          this.consume("=>", "Expected '=>' after match pattern");
-        } else {
-          this.consume(":", "Expected ':' after case pattern");
-        }
-        
-        const body = this.parseCaseBody();
-        
-        // Check for fallthrough
-        const fallthrough = this.checkFallthrough();
-        
-        cases.push({
-          patterns,
-          guard,
-          body,
-          fallthrough,
-          span: this.createSpan(start, this.current - 1)
-        });
-      } else if (this.match("default") || (isMatch && this.match("_"))) {
-        // Default case or wildcard pattern
-        if (isMatch && this.previous()?.value === "_") {
-          this.consume("=>", "Expected '=>' after wildcard pattern");
-        } else {
-          this.consume(":", "Expected ':' after default");
-        }
+      // Skip virtual semicolons
+      while (this.peek().virtualSemi) {
+        this.advance();
+      }
+      
+      // Check again after skipping virtual semicolons
+      if (this.check("}") || this.isAtEnd()) {
+        break;
+      }
+      
+      const caseStart = this.current;
+      
+      // Handle default case
+      if (this.match("default")) {
+        this.consume(":", "Expected ':' after default");
         defaultCase = this.parseCaseBody();
+        
+        // Check for comma in match expressions
+        if (isMatch && this.check(",")) {
+          this.advance();
+        }
+        continue;
+      }
+      
+      // Handle regular case
+      const patterns: AST.Expr[] = [];
+      
+      // Check for wildcard default in match expressions
+      if (isMatch && this.check("_")) {
+        const wildcardStart = this.current;
+        this.advance(); // consume _
+        
+        // Skip virtual semicolons
+        while (this.peek().virtualSemi) {
+          this.advance();
+        }
+        
+        if (this.check("=>")) {
+          // This is a wildcard default case
+          this.consume("=>", "Expected '=>' after wildcard pattern");
+          defaultCase = this.parseMatchCaseBody();
+          
+          // Check for comma in match expressions
+          if (this.check(",")) {
+            this.advance();
+          }
+          continue;
+        } else {
+          // Not a wildcard, backtrack
+          this.current = wildcardStart;
+        }
+      }
+      
+      if (this.match("case")) {
+        // Traditional switch case
+        patterns.push(this.parseExpression());
+        while (this.match(",")) {
+          patterns.push(this.parseExpression());
+        }
+      } else if (isMatch && !this.check("}")) {
+        // Match expression case - parse pattern directly
+        patterns.push(this.parseMatchPattern());
+        
+        // Handle alternative patterns with |
+        while (this.match("|")) {
+          patterns.push(this.parseMatchPattern());
+        }
       } else {
-        throw this.error(this.peek(), "Expected 'case' or 'default'");
+        // No more cases
+        break;
+      }
+      
+      // Check for guard clause (if condition)
+      let guard: AST.Expr | undefined;
+      if (this.match("if")) {
+        guard = this.parseExpression();
+      }
+      
+      // Match uses =>, switch uses :
+      if (isMatch) {
+        this.consume("=>", "Expected '=>' after match pattern");
+      } else {
+        this.consume(":", "Expected ':' after case pattern");
+      }
+      
+      const body = isMatch ? this.parseMatchCaseBody() : this.parseCaseBody();
+      
+      // Check for fallthrough
+      const fallthrough = this.checkFallthrough();
+      
+      cases.push({
+        patterns,
+        guard,
+        body,
+        fallthrough,
+        span: this.createSpan(caseStart, this.current - 1)
+      });
+      
+      // In match expressions, cases can be separated by commas
+      if (isMatch && this.check(",")) {
+        this.advance(); // consume comma
+        // Continue to next case
       }
     }
     
@@ -1617,6 +1669,11 @@ export class Parser {
   private parseMatchPattern(): AST.Expr {
     const start = this.current;
     
+    // Skip virtual semicolons
+    while (this.peek().virtualSemi) {
+      this.advance();
+    }
+    
     // Check for wildcard pattern _
     if (this.match("_")) {
       return {
@@ -1624,6 +1681,41 @@ export class Parser {
         name: "_",
         span: this.createSpan(start, this.current - 1)
       };
+    }
+    
+    // Check for literal patterns (numbers, strings, booleans)
+    if (this.peek().type === TokenType.NumericLiteral) {
+      return this.parseNumericLiteral();
+    }
+    
+    if (this.peek().type === TokenType.StringLiteral) {
+      return this.parseStringLiteral();
+    }
+    
+    if (this.match("true", "false")) {
+      const token = this.previous();
+      return {
+        kind: "BooleanLiteral",
+        value: token?.value === "true",
+        span: this.createSpanFrom(token!)
+      };
+    }
+    
+    if (this.match("null", "undefined", "None")) {
+      return {
+        kind: "NullLiteral",
+        span: this.createSpanFrom(this.previous()!)
+      };
+    }
+    
+    // Check for array/list patterns [head, ...tail]
+    if (this.match("[")) {
+      return this.parseArrayLiteral();
+    }
+    
+    // Check for object patterns {type: "user", name}
+    if (this.match("{")) {
+      return this.parseObjectLiteral();
     }
     
     // Parse constructor pattern like Some(v) or simple identifier
@@ -1671,6 +1763,34 @@ export class Parser {
       kind: "Block",
       statements,
       span: this.createSpanFrom(statements[0] || this.previous())
+    };
+  }
+  
+  private parseMatchCaseBody(): AST.Block {
+    // For match expressions, the body is typically a single expression
+    // It can be a block {...} or just an expression
+    if (this.check("{")) {
+      return this.parseBlock();
+    }
+    
+    // Parse single expression but not comma operator at this level
+    // In match cases, comma separates cases, not expressions
+    const expr = this.parseAssignmentExpression();
+    
+    // Check for comma (next case) but don't consume it
+    // The main loop will handle advancing past the comma
+    if (this.check(",")) {
+      // Don't consume - let the main loop handle it
+    }
+    
+    return {
+      kind: "Block",
+      statements: [{
+        kind: "ExprStmt",
+        expr,
+        span: expr.span
+      }],
+      span: expr.span
     };
   }
   
@@ -2875,18 +2995,25 @@ export class Parser {
       // Parse first element to determine if it's a set/dict comprehension
       const checkpoint = this.current;
       
-      // Try to parse as expression first
-      const firstExpr = this.parseAssignmentExpression();
-      
-      // Check for set comprehension: {expr for var in iterable}
-      if (this.check("for")) {
-        return this.parseSetComprehension(firstExpr, start);
+      // Try to parse as expression first, but catch errors for object literals
+      try {
+        // Skip this check if we see a keyword followed by colon (object literal)
+        if (this.peek().type === TokenType.Keyword && this.peekNext()?.value === ":") {
+          // This is likely an object literal with keyword property
+          // Skip the comprehension check
+        } else {
+          const firstExpr = this.parseAssignmentExpression();
+          
+          // Check for set comprehension: {expr for var in iterable}
+          if (this.check("for")) {
+            return this.parseSetComprehension(firstExpr, start);
+          }
+        }
+      } catch {
+        // Failed to parse as expression, continue as object literal
       }
       
-      // Check for dict comprehension: {key: value for var in iterable}
-      // Already handled by checking for ":" in the expression
-      
-      // Reset for regular object/dict parsing if not a comprehension
+      // Reset for regular object/dict parsing
       this.current = checkpoint;
       
       const properties: AST.ObjectProperty[] = [];
@@ -2944,6 +3071,14 @@ export class Parser {
           key = this.parseStringLiteral();
         } else if (this.peek().type === TokenType.NumericLiteral) {
           key = this.parseNumericLiteral();
+        } else if (this.peek().type === TokenType.Keyword) {
+          // Allow keywords as property keys in object literals
+          const keyToken = this.advance();
+          key = {
+            kind: "Identifier",
+            name: keyToken.value,
+            span: this.createSpanFrom(keyToken)
+          };
         } else {
           key = this.parseIdentifier();
         }
