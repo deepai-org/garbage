@@ -826,6 +826,18 @@ export class Parser {
   }
   
   private parsePrimary(): AST.Expr {
+    // Handle async lambda/function expressions
+    if (this.match("async")) {
+      const start = this.current - 1;
+      // Check for lambda
+      if (this.check("(") || this.peek().type === TokenType.Identifier) {
+        // Parse as async lambda
+        return this.parseAsyncLambda(start);
+      }
+      // Otherwise it's an error
+      throw this.error(this.peek(), "Expected lambda after async");
+    }
+    
     // Handle yield expression
     if (this.match("yield")) {
       return this.parseYieldExpression();
@@ -993,11 +1005,18 @@ export class Parser {
               originalSpelling: this.typeNodeToString(typeNode),
               span: typeNode.span
             };
+            
+            // Handle optional size/capacity arguments
+            const args: AST.Expr[] = [typeExpr];
+            while (this.match(",")) {
+              args.push(this.parseAssignmentExpression());
+            }
+            
             this.consume(")", "Expected ')' after make arguments");
             expr = {
               kind: "Call",
               callee: expr,
-              args: [typeExpr],
+              args,
               span: this.createSpanFrom(expr)
             };
             continue;
@@ -1911,7 +1930,48 @@ export class Parser {
         }
       }
       
-      // Traditional for loop
+      // Check for Go-style for loop (without parentheses)
+      // Look for pattern: identifier := 
+      if (this.peek().type === TokenType.Identifier && this.peekAt(1)?.value === ":=") {
+        // Go-style for loop without parentheses
+        // Parse init statement manually to avoid consuming semicolon
+        const initStart = this.current;
+        const name = this.parseIdentifier();
+        this.consume(":=", "Expected ':=' in for init");
+        const expr = this.parseExpression();
+        const init: AST.ShortDecl = {
+          kind: "ShortDecl",
+          pairs: [{ name, expr }],
+          span: this.createSpan(initStart, this.current - 1)
+        };
+        
+        this.consume(";", "Expected ';' after init");
+        
+        let test: AST.Expr | undefined;
+        if (!this.check(";")) {
+          test = this.parseExpression();
+        }
+        this.consume(";", "Expected ';' after loop condition");
+        
+        let step: AST.Expr | undefined;
+        if (!this.check("{")) {
+          step = this.parseExpression();
+        }
+        
+        const body = this.parseBlock();
+        
+        return {
+          kind: "Loop",
+          mode: "for",
+          init,
+          test,
+          step,
+          body,
+          span: this.createSpan(start, this.current - 1)
+        };
+      }
+      
+      // Traditional for loop with parentheses
       this.consume("(", "Expected '(' after 'for'");
       
       let init: AST.Stmt | AST.Decl | undefined;
@@ -3361,6 +3421,50 @@ export class Parser {
       body,
       span: this.createSpan(start, this.current - 1)
     };
+  }
+  
+  private parseAsyncLambda(start: number): AST.Lambda {
+    // Parse parameters - can be single identifier or parenthesized list
+    let params: AST.Param[] = [];
+    
+    if (this.match("(")) {
+      if (!this.check(")")) {
+        do {
+          params.push(this.parseParameter());
+        } while (this.match(","));
+      }
+      this.consume(")", "Expected ')' after lambda parameters");
+    } else if (this.peek().type === TokenType.Identifier) {
+      // Single parameter without parentheses
+      const name = this.parseIdentifier();
+      params.push({
+        name,
+        type: undefined,
+        defaultValue: undefined,
+        span: name.span
+      });
+    }
+    
+    // Parse return type
+    let returnType: AST.TypeNode | undefined;
+    if (this.match(":")) {
+      returnType = this.parseType();
+    }
+    
+    // Parse arrow
+    this.consume("=>", "Expected '=>' in async lambda");
+    
+    // Parse body
+    const body = this.check("{") ? this.parseBlock() : this.parseExpression();
+    
+    return {
+      kind: "Lambda",
+      params,
+      returnType,
+      body,
+      async: true,
+      span: this.createSpan(start, this.current - 1)
+    } as AST.Lambda;
   }
   
   private checkLambda(): boolean {
