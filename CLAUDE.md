@@ -198,6 +198,36 @@ npm test
 node debug-utils.js test "your fixed pattern"
 ```
 
+## Recent Fixes and Patterns
+
+### Issue #9: Python-style Try-Except
+**Problem**: Python uses `try:` and `except:` with colons instead of braces.
+**Solution**: Modified `parseTry()` to handle both styles:
+- Check for `:` after try/except keywords
+- Support `except Exception as e:` pattern
+- Handle indented blocks or single statements after colons
+
+### Issue #10: Python-style With Statements
+**Problem**: Python uses `with context as var:` syntax.
+**Solution**: Modified `parseUsing()` to handle:
+- `with expr as var:` pattern
+- Indented blocks after colon
+- Both traditional using and Python-style with
+
+### Debugging Complex Nested Code
+When debugging extreme nesting (like test-extreme.js):
+1. Test each language construct separately first
+2. Build up complexity gradually
+3. Check for token consumption issues between different syntax styles
+4. Verify indentation handling for mixed styles
+
+### Current Pass Rate
+- 154/173 tests passing (89% pass rate)
+- Remaining issues primarily in:
+  - Select statements (Go channels)
+  - Complex polyglot nesting scenarios
+  - Some edge cases in mixed syntax contexts
+
 ## Common Patterns in This Codebase
 
 ### Pattern Matching

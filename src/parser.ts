@@ -100,6 +100,14 @@ export class Parser {
              (next?.type === TokenType.Identifier && this.peekAt(2)?.value !== "=");
     }
     
+    // Check for async/unsafe followed by function declarations
+    if (value === "async" || value === "unsafe") {
+      const next = this.peekNext();
+      return next?.value === "fn" || next?.value === "fun" || 
+             next?.value === "function" || next?.value === "def" ||
+             next?.value === "async" || next?.value === "unsafe";
+    }
+    
     return (
       type === TokenType.Keyword && (
         value === "import" || value === "require" ||
@@ -108,7 +116,6 @@ export class Parser {
         value === "const" || value === "final" || value === "immutable" ||
         value === "class" || value === "struct" || value === "interface" ||
         value === "trait" || value === "enum" || value === "type" ||
-        value === "async" || value === "unsafe" ||  // Add these modifiers
         value === "package" || value === "export"
       ) ||
       type === TokenType.Operator && value === "#" && 
@@ -252,6 +259,14 @@ export class Parser {
   }
   
   private parseStatement(): AST.Stmt {
+    // Handle async for
+    if (this.peek().value === "async" && this.peekNext()?.value === "for") {
+      this.advance(); // consume async
+      this.advance(); // consume for
+      // Now parse as a for-await loop
+      return this.parseLoop();
+    }
+    
     // Control flow
     if (this.match("if")) {
       return this.parseIf();
@@ -264,6 +279,11 @@ export class Parser {
     if (this.match("case")) {
       // Bash-style case statement
       return this.parseCaseStatement();
+    }
+    
+    if (this.match("select")) {
+      // Go-style select statement for channels
+      return this.parseSelectStatement();
     }
     
     if (this.match("for", "while", "until", "loop")) {
@@ -431,6 +451,64 @@ export class Parser {
       }
     }
     return false;
+  }
+  
+  private parseSelectStatement(): AST.Switch {
+    const start = this.current - 1;
+    const cases: AST.SwitchCase[] = [];
+    let defaultCase: AST.Block | undefined;
+    
+    this.consume("{", "Expected '{' after select");
+    
+    while (!this.check("}") && !this.isAtEnd()) {
+      // Skip virtual semicolons
+      while (this.peek().virtualSemi) {
+        this.advance();
+      }
+      
+      if (this.check("}") || this.isAtEnd()) {
+        break;
+      }
+      
+      if (this.match("default")) {
+        this.consume(":", "Expected ':' after default");
+        defaultCase = this.parseCaseBody();
+        continue;
+      }
+      
+      if (this.match("case")) {
+        // Parse channel operation (e.g., x := <-ch or ch <- value)
+        // Parse as expression to get the channel operation directly
+        const pattern = this.parseExpression();
+        this.consume(":", "Expected ':' after case");
+        const body = this.parseCaseBody();
+        
+        cases.push({
+          patterns: [pattern], // Channel operation as pattern
+          body,
+          fallthrough: false,
+          span: this.createSpan(start, this.current - 1)
+        });
+      }
+    }
+    
+    this.consume("}", "Expected '}' after select body");
+    
+    // Create a pseudo-discriminant for select (since it doesn't have one)
+    const discriminant: AST.Identifier = {
+      kind: "Identifier",
+      name: "__select__",
+      originalSpelling: "__select__",
+      span: this.createSpan(start, start)
+    };
+    
+    return {
+      kind: "Switch",
+      discriminant,
+      cases,
+      defaultCase,
+      span: this.createSpan(start, this.current - 1)
+    };
   }
   
   private parseCaseStatement(): AST.Switch {
@@ -3869,6 +3947,7 @@ export class Parser {
       case "+": case "-": return 13;
       case "<<": case ">>": case ">>>": return 12;
       case "..": return 11.5; // Range operator
+      case "<-": return 11.3; // Channel send operator
       case "<": case "<=": case ">": case ">=": case "in": case "instanceof": return 11;
       case "<=>": return 11; // Spaceship operator (comparison)
       case "==": case "!=": case "===": case "!==": return 10;
