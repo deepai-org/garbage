@@ -444,11 +444,74 @@ const body = parser.parseCaseBody();  // Test specific method directly
 - **Improvement**: From 82% to 91% pass rate
 - **Remaining Failures**: 16 tests in advanced polyglot scenarios
 
-The remaining failing tests involve complex features that would require:
-1. Significant lexer enhancements for special literals
-2. Major parser refactoring for context-sensitive parsing
-3. New AST node types for language-specific constructs
-4. Potentially breaking changes to existing functionality
+## 🎯 Implementation Plan: Path to 100% Pass Rate
+
+### Overview
+The strategy to fix the remaining 16 failing tests is documented in three architecture files:
+- **[ARCHITECTURE_PROPOSAL.md](./ARCHITECTURE_PROPOSAL.md)** - Comprehensive architectural strategy
+- **[IMPLEMENTATION_EXAMPLE.md](./IMPLEMENTATION_EXAMPLE.md)** - Concrete bash conditionals example
+- **[QUICK_WINS.md](./QUICK_WINS.md)** - Prioritized implementation plan
+
+### Core Strategy: Context-Aware Lexer
+The key insight is that most failures stem from context-insensitive lexing. The solution is to add a mode stack to the lexer that changes tokenization behavior based on parsing context.
+
+### Implementation Phases
+
+#### Phase 1: Lexer Mode Stack (Week 1)
+**Goal:** Implement basic mode system with 3-5 modes
+**Impact:** Fixes 6-8 tests
+
+1. Add mode stack infrastructure to `lexer.ts`:
+   ```typescript
+   private modeStack: LexerMode[] = [LexerMode.Normal];
+   ```
+
+2. Implement core modes:
+   - `MemberAccess` - After `.`, all keywords become identifiers
+   - `BashCondition` - Inside `[ ]`, use bash tokenization rules
+   - `Decorator` - After `@`, special decorator syntax
+   - `StringTemplate` - For f-strings, r-strings, heredocs
+
+3. Add mode transition detection in `scanToken()`
+
+#### Phase 2: String Literals & Comprehensions (Days 4-5)
+**Goal:** Handle special string formats and comprehensions
+**Impact:** Fixes 5-7 tests
+
+1. Implement String Literal Factory:
+   - Detect prefixes: `f"`, `r"`, `b"`, `@"`, `<<EOF`
+   - Use appropriate scanner for each type
+
+2. Add comprehension detection:
+   - Lookahead for `for` keyword after expression in `[`, `{`, `(`
+   - Parse as comprehension vs literal
+
+#### Phase 3: Pipeline & Spread Operators (Day 6)
+**Goal:** Fix remaining operator issues
+**Impact:** Fixes 3-4 tests
+
+1. Special handling for pipe operator (`|>`):
+   - Detect `match` after pipe for implicit discriminant
+   - Handle placeholder syntax (`_.method()`)
+
+2. Fix spread in `new` expressions:
+   - Allow `...args` in constructor calls
+
+### Expected Results
+- **After Phase 1:** 163-165/173 tests passing (94-95%)
+- **After Phase 2:** 168-170/173 tests passing (97-98%)
+- **After Phase 3:** 171-172/173 tests passing (99%)
+
+### Next Steps for Implementation
+1. Start with `lexer.ts` modifications - add mode stack infrastructure
+2. Test each mode independently with focused test cases
+3. Integrate modes one at a time to avoid breaking changes
+4. Run full test suite after each phase
+
+### Key Files to Modify
+- `src/lexer.ts` - Add mode stack and mode-specific tokenization
+- `src/parser.ts` - Minor adjustments for new token types
+- `src/ast.ts` - Possibly add style hints to some nodes (e.g., bash-style while)
 
 ## Common Patterns in This Codebase
 
