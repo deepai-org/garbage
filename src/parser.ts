@@ -399,6 +399,10 @@ export class Parser {
       return this.parseReturn();
     }
     
+    if (this.match("assert")) {
+      return this.parseAssert();
+    }
+    
     if (this.match("echo", "print")) {
       return this.parseEcho();
     }
@@ -1182,7 +1186,7 @@ export class Parser {
       };
     }
     
-    if (this.match("null", "undefined")) {
+    if (this.match("null", "undefined", "nil")) {
       return {
         kind: "NullLiteral",
         span: this.createSpanFrom(this.previous()!)
@@ -1192,11 +1196,12 @@ export class Parser {
     // this and super keywords
     if (this.match("this", "super")) {
       const token = this.previous()!;
-      return {
+      const id: AST.Identifier = {
         kind: "Identifier",
         name: token.value,
         span: this.createSpanFrom(token)
       };
+      return this.parsePostfix(id);
     }
     
     // Identifiers and sigil identifiers
@@ -2093,7 +2098,7 @@ export class Parser {
       };
     }
     
-    if (this.match("null", "undefined", "None")) {
+    if (this.match("null", "undefined", "nil", "None")) {
       return {
         kind: "NullLiteral",
         span: this.createSpanFrom(this.previous()!)
@@ -2714,6 +2719,39 @@ export class Parser {
     return {
       kind: "Return",
       values,
+      span: this.createSpan(start, this.current - 1)
+    };
+  }
+  
+  private parseAssert(): AST.ExprStmt {
+    const start = this.current - 1;
+    
+    // Parse the condition expression
+    const condition = this.parseExpression();
+    
+    // Optional: parse comma and message (Python style: assert x == 1, "message")
+    let message: AST.Expr | undefined;
+    if (this.match(",")) {
+      message = this.parseExpression();
+    }
+    
+    this.consumeSemicolon();
+    
+    // Create an assert as a call expression wrapped in an expression statement
+    const assertCall: AST.Call = {
+      kind: "Call",
+      callee: {
+        kind: "Identifier",
+        name: "assert",
+        span: this.createSpan(start, start)
+      },
+      args: message ? [condition, message] : [condition],
+      span: this.createSpan(start, this.current - 1)
+    };
+    
+    return {
+      kind: "ExprStmt",
+      expr: assertCall,
       span: this.createSpan(start, this.current - 1)
     };
   }
@@ -4188,6 +4226,17 @@ export class Parser {
   
   private parseIdentifier(): AST.Identifier {
     const token = this.peek();
+    
+    // Allow keywords as identifiers in member access context
+    if (token.type === TokenType.Keyword && this.shouldReinterpretAsIdentifier()) {
+      this.advance();
+      return {
+        kind: "Identifier",
+        name: token.value,
+        originalSpelling: token.value,
+        span: this.createSpanFrom(token)
+      };
+    }
     
     if (token.type === TokenType.Identifier || 
         token.type === TokenType.SigilIdentifier) {

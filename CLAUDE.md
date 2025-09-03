@@ -271,10 +271,21 @@ if (this.match("this", "super")) {
 **Solution**: Enhanced `shouldSuppressVirtualSemi` to check if next line starts with continuation operators (`?.`, `|>`, `..`, `::`, `||`, `&&`, etc.).
 **Impact**: Allows multiline chaining patterns common in functional and fluent APIs.
 
+### Issue #17: Assert Statement Support
+**Problem**: Python-style `assert` statements weren't recognized.
+**Solution**: Added `parseAssert()` method that handles `assert condition, "message"` syntax.
+**Impact**: Enables testing assertion patterns from multiple languages.
+
+### Issue #18: This/Super Member Access
+**Problem**: `this` and `super` keywords weren't properly handling member access (e.g., `this.prop`).
+**Root Cause**: They were returning directly from `parsePrimary` without going through `parsePostfix`.
+**Solution**: Changed to call `parsePostfix(id)` after creating the identifier.
+**Impact**: Fixed property access on `this` and `super` keywords.
+
 ### Current Pass Rate
-- 158/173 tests passing (91.3% pass rate)
+- 157/173 tests passing (91% pass rate)
 - Up from 82.3% (142/173) at start
-- Fixed "parses mixed async/concurrent patterns" test
+- Fixed issues but some tests still fail due to complex unsupported features
 
 ### Remaining Complex Features (15 failing tests)
 The remaining failures involve features that require significant parser/lexer extensions:

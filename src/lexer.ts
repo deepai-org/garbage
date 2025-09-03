@@ -526,7 +526,7 @@ export class Lexer {
       'default', 'defer', 'def', 'do', 'done', 'elif', 'else', 'end',
       'enum', 'export', 'extends', 'false', 'fi', 'final', 'for', 'fun',
       'function', 'go', 'if', 'import', 'in', 'interface', 'let', 'loop',
-      'match', 'new', 'null', 'package', 'return', 'struct', 'switch',
+      'match', 'new', 'null', 'nil', 'package', 'return', 'struct', 'switch',
       'then', 'this', 'throw', 'trait', 'true', 'try', 'type', 'until',
       'unsafe', 'using', 'var', 'when', 'while', 'with', 'yield',
       'typeof', 'void', 'delete', 'instanceof', 'async', 'auto',
