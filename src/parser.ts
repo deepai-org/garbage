@@ -558,7 +558,11 @@ export class Parser {
           fallthrough: false,
           span: this.createSpan(start, this.current - 1)
         });
+        continue;
       }
+      
+      // If we get here, there's an unexpected token
+      throw this.error(this.peek(), "Expected 'case' or 'default' in select statement");
     }
     
     this.consume("}", "Expected '}' after select body");
@@ -1200,11 +1204,17 @@ export class Parser {
         this.peek().type === TokenType.SigilIdentifier) {
       const id = this.parseIdentifier();
       
-      // Check for generic type arguments (if no whitespace after identifier)
+      // Check for generic type arguments only in specific contexts
+      // Don't try to parse generics if the < is followed by a number (likely comparison)
       if (this.peek().value === "<" && !this.peek().wsBefore) {
-        const genericArgs = this.tryParseGenericArgs();
-        if (genericArgs) {
-          // This would be handled in type context
+        const next = this.peekNext();
+        // Only try to parse generics if not followed by a number or obvious non-type token
+        if (next && next.type !== TokenType.NumericLiteral && 
+            next.type === TokenType.Identifier) {
+          const genericArgs = this.tryParseGenericArgs();
+          if (genericArgs) {
+            // This would be handled in type context
+          }
         }
       }
       

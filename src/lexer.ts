@@ -579,12 +579,26 @@ export class Lexer {
       return true;
     }
     
-    // Rule 2: current ()[]{}  depth > 0 (simplified - would need proper tracking)
+    // Rule 2: Next line starts with operator that continues expression
+    // Check for operators like ?., |>, .., ::, etc.
+    const continuationOps = ['?.', '|>', '..', '::', '||', '&&', '??', '->'];
+    if (continuationOps.includes(next.value)) {
+      return true;
+    }
+    
+    // Also check single character operators that commonly continue lines
+    const singleCharContinuation = ['.', '?', '|', '&', '+', '-', '*', '/', '%', '^'];
+    if (singleCharContinuation.includes(next.value)) {
+      return true;
+    }
+    
+    // Rule 3: current ()[]{}  depth > 0 (simplified - would need proper tracking)
     // This is a simplification - real implementation would track depth
     
-    // Rule 3: next line is strictly more indented (simplified)
-    if (next.indentCol !== undefined && this.currentIndent !== undefined) {
-      if (next.indentCol > this.currentIndent) {
+    // Rule 4: next line is strictly more indented
+    // Compare next line's indentation with current line's indentation
+    if (next.indentCol !== undefined && current.indentCol !== undefined) {
+      if (next.indentCol > current.indentCol) {
         return true;
       }
     }

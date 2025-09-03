@@ -221,12 +221,195 @@ When debugging extreme nesting (like test-extreme.js):
 3. Check for token consumption issues between different syntax styles
 4. Verify indentation handling for mixed styles
 
+### Issue #11: Infinite Loops in Error Recovery
+**Problem**: Error recovery mechanisms in parser methods can cause infinite loops when tokens aren't consumed properly.
+**Solution**: Incrementally add error recovery features to identify problematic ones:
+- ✅ Trailing comma tolerance (safe)
+- ❌ Enhanced synchronization with more stop tokens (causes loops)
+- ✅ Synthetic token helpers (createMissingExpr, createMissingIdentifier)
+- ✅ `must()` method for optional error recovery
+- ❌ Error recovery in `parsePrimary` returning missing expressions (causes loops)
+- ✅ Error recovery in `parseIdentifier` with proper token advancement
+
+**Key Insight**: Error recovery should only advance tokens when truly necessary, and should avoid creating synthetic tokens in primary expression parsing.
+
+### Issue #12: Class Member Parsing
+**Problem**: Initial fix just skipped class bodies with brace counting, losing important structure.
+**Solution**: Implemented proper `parseClassMember()` to handle:
+- Properties and methods
+- Ruby-style `def...end` methods
+- Block parameters with `&` prefix
+- Spread parameters with `...` prefix
+- Python-style methods with colons
+
+### Issue #13: Missing `this` and `super` Support
+**Problem**: `this` and `super` keywords weren't recognized in expression context.
+**Solution**: Added handling in `parsePrimary()`:
+```typescript
+if (this.match("this", "super")) {
+  const token = this.previous()!;
+  return {
+    kind: "Identifier",
+    name: token.value,
+    span: this.createSpanFrom(token)
+  };
+}
+```
+
+### Issue #14: Generic Type Parsing vs Comparison Operators
+**Problem**: Parser tried to parse `< 10` as generic type arguments in expressions like `i < 10`.
+**Solution**: Added context check before attempting generic parsing - skip if `<` is followed by a numeric literal.
+
+### Issue #15: Virtual Semicolon Insertion Bug
+**Problem**: Lexer wasn't inserting virtual semicolons between statements at different indentation levels.
+**Root Cause**: `shouldSuppressVirtualSemi` was comparing `next.indentCol` with `this.currentIndent` instead of `current.indentCol`.
+**Solution**: Fixed comparison to use `current.indentCol` for proper indentation-based semicolon insertion.
+**Impact**: Fixed select statements with both case and default branches, and async/concurrent pattern tests.
+
+### Issue #16: Multiline Chaining Support
+**Problem**: Virtual semicolons were breaking multiline method/operator chains.
+**Solution**: Enhanced `shouldSuppressVirtualSemi` to check if next line starts with continuation operators (`?.`, `|>`, `..`, `::`, `||`, `&&`, etc.).
+**Impact**: Allows multiline chaining patterns common in functional and fluent APIs.
+
 ### Current Pass Rate
-- 154/173 tests passing (89% pass rate)
-- Remaining issues primarily in:
-  - Select statements (Go channels)
-  - Complex polyglot nesting scenarios
-  - Some edge cases in mixed syntax contexts
+- 158/173 tests passing (91.3% pass rate)
+- Up from 82.3% (142/173) at start
+- Fixed "parses mixed async/concurrent patterns" test
+
+### Remaining Complex Features (15 failing tests)
+The remaining failures involve features that require significant parser/lexer extensions:
+
+1. **Match as Expression** - Currently `match` only works as a statement, not in expression context after pipes
+2. **Special Access Operators** - `!.` (force unwrap), `->` (pointer), `::` (static), `.?` (safe navigation)
+3. **Bash-style Syntax** - `while [ condition ]; do...done`, `if [ test ]; then...fi`
+4. **Extended String Literals** - C# interpolated (`$"`), verbatim (`@"`), heredocs (`<<EOF`)
+5. **Complex Comprehensions** - Nested match expressions inside list comprehensions
+
+These features are used in the polyglot showcase tests that demonstrate extreme language mixing.
+
+## Effective Debugging Strategies
+
+### What Makes Debugging FASTER
+
+#### 1. Create Minimal Test Files Immediately
+Instead of debugging in the full test suite, create small test files (`test-*.js`) that isolate the exact problem:
+```javascript
+// Good: Isolate the exact failing pattern
+test(`select { case x: continue; default: await foo() }`, "Specific case");
+```
+This is 10x faster than running the full test suite repeatedly.
+
+#### 2. Binary Search with Progressive Complexity
+Start with the simplest case and progressively add complexity:
+```javascript
+test(`fn test() { }`, "Step 1: Basic");
+test(`fn test() { for i := 0; i < 10; i++ { } }`, "Step 2: Add for loop");
+test(`fn test() { /* previous + more */ }`, "Step 3: Add next feature");
+```
+This quickly identifies which specific addition breaks the parser.
+
+#### 3. Token Inspection for Parser Issues
+When parsing fails mysteriously, always inspect the tokens first:
+```javascript
+tokens.forEach((t, i) => {
+  if (t.type !== 'Whitespace') {
+    console.log(`[${i}] ${t.type}: "${t.value}" virtualSemi=${t.virtualSemi}`);
+  }
+});
+```
+Virtual semicolons and unexpected token types are often the culprit.
+
+#### 4. Trace Parser Method Calls
+Add temporary logging to trace which parser methods are called:
+```javascript
+const originalMethod = parser.parseSelectStatement.bind(parser);
+parser.parseSelectStatement = function() {
+  console.log('parseSelectStatement called, current:', this.peek().value);
+  return originalMethod();
+};
+```
+
+#### 5. Test Individual Parser Methods
+Test parser methods in isolation when possible:
+```javascript
+const body = parser.parseCaseBody();  // Test specific method directly
+```
+
+### What Makes Debugging SLOWER
+
+#### 1. Running Full Test Suite for Every Change
+- Full suite takes ~1-2 seconds, individual test takes ~50ms
+- Create focused test files instead
+
+#### 2. Not Checking Error Details
+- Don't just check if parsing failed - check WHICH error and WHERE
+- `parser.errors[0].token` often reveals the exact problem location
+
+#### 3. Trying to Fix Multiple Issues at Once
+- Fix one issue, verify it works, then move to the next
+- Multiple simultaneous changes make it hard to identify what helped
+
+#### 4. Not Using Incremental Testing
+- Don't jump straight to complex nested code
+- Build up complexity step by step to find the breaking point
+
+#### 5. Ignoring Token Boundaries
+- Many issues are about where tokens start/end, not the parsing logic
+- Check `wsBefore`, `virtualSemi`, and token positions
+
+### Debugging Workflow Pattern
+
+1. **Reproduce** - Extract failing code from test suite
+2. **Simplify** - Reduce to minimal failing case  
+3. **Inspect** - Check tokens, not just parse result
+4. **Trace** - Add logging at suspicious points
+5. **Fix** - Make minimal change
+6. **Verify** - Test fix with variations
+7. **Regress** - Run full suite only after fix works
+
+### Common Parser Pitfalls
+
+1. **Infinite Loops in Error Recovery**
+   - Solution: Ensure every loop iteration either consumes a token or breaks
+   
+2. **Context-Dependent Parsing**
+   - `<` can be comparison or generic start
+   - `:` can be type annotation, case separator, or Python-style block start
+   - Solution: Look ahead to disambiguate
+
+3. **Virtual Semicolon Handling**
+   - Often need to skip them: `while (this.peek().virtualSemi) this.advance()`
+   - But sometimes they're significant for statement termination
+
+4. **Parser Method Return Values**
+   - Some methods return null on failure, others throw
+   - Always check what a method returns when it can't parse
+
+### Successfully Implemented Features
+- ✅ Generic functions and type parameters
+- ✅ Function type arrows (both `->` and `=>`)
+- ✅ Single-parameter lambdas without parentheses  
+- ✅ Async lambdas with postfix operations (calls, etc.)
+- ✅ Go-style make() with optional size
+- ✅ Go-style for loops without parentheses
+- ✅ Channel send operator (`ch <- value`)
+- ✅ Channel receive operator (`<-ch`)
+- ✅ Select statements for Go channels
+- ✅ Async for await patterns
+- ✅ Python-style try-except with colons
+- ✅ Python-style with statements  
+- ✅ Ruby-style begin/rescue/ensure/end blocks
+- ✅ Ruby-style def...end functions
+- ✅ While loops with assignment in condition
+
+### Known Limitations (Lexer Issues)
+These require lexer changes and are beyond parser scope:
+- Numeric literals with unit suffixes (100ms, 500KB)
+- Multi-line select statements with virtual semicolons
+- Heredoc strings (<<EOF...EOF)
+
+### Remaining Complex Edge Cases
+The 19 failing tests involve highly complex polyglot scenarios that mix multiple language paradigms in ways that create parsing ambiguities or require extensive context awareness.
 
 ## Common Patterns in This Codebase
 
