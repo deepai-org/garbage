@@ -412,15 +412,43 @@ const body = parser.parseCaseBody();  // Test specific method directly
 - ✅ Ruby-style begin/rescue/ensure/end blocks
 - ✅ Ruby-style def...end functions
 - ✅ While loops with assignment in condition
+- ✅ nil keyword support (lexer + parser)
+- ✅ Keywords as identifiers in member access (e.g., obj.type)
+- ✅ Assert statements
+- ✅ this/super with member access
+- ✅ Virtual semicolon suppression for multiline chaining
 
-### Known Limitations (Lexer Issues)
-These require lexer changes and are beyond parser scope:
+### Known Limitations Requiring Major Changes
+
+#### Lexer-Level Features
+- Special string literals (f-strings, r-strings, b-strings, heredocs, verbatim)
 - Numeric literals with unit suffixes (100ms, 500KB)
-- Multi-line select statements with virtual semicolons
-- Heredoc strings (<<EOF...EOF)
+- Decorator syntax (@decorator)
+- Bash-style conditionals (if [ $var = "value" ]; then)
 
-### Remaining Complex Edge Cases
-The 19 failing tests involve highly complex polyglot scenarios that mix multiple language paradigms in ways that create parsing ambiguities or require extensive context awareness.
+#### Parser-Level Complex Features
+- List/dict/set comprehensions ([x for x in items])
+- Generator functions and yield from
+- Match expressions in pipe context (data |> match {...})
+- Spread operator in new expressions (new Cls(...args))
+- Force unwrap operator (!.)
+- Multiple destructuring patterns in foreach
+
+#### Architecture Limitations
+- Match expressions after pipe operator need special discriminant handling
+- Some language mixing creates fundamental parsing ambiguities
+- Context-sensitive lexing would help (e.g., type after dot should always be identifier)
+
+### Test Suite Status
+- **Current Pass Rate**: 157/173 tests (91%)
+- **Improvement**: From 82% to 91% pass rate
+- **Remaining Failures**: 16 tests in advanced polyglot scenarios
+
+The remaining failing tests involve complex features that would require:
+1. Significant lexer enhancements for special literals
+2. Major parser refactoring for context-sensitive parsing
+3. New AST node types for language-specific constructs
+4. Potentially breaking changes to existing functionality
 
 ## Common Patterns in This Codebase
 
