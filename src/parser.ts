@@ -1585,28 +1585,122 @@ export class Parser {
   private parseImport(): AST.Import {
     const start = this.current - 1;
     
-    // Parse the import path - could be string or identifier
+    // Handle TypeScript-style imports: import { ... } from '...' or import * as ... from '...'
+    let alias: AST.Identifier | undefined;
     let path: string;
-    if (this.peek().type === TokenType.StringLiteral) {
+    
+    // Check for destructured imports: import { Token, TokenType } from './lexer'
+    if (this.check("{")) {
+      this.advance();
+      // Skip the destructured imports for now - just consume until }
+      while (!this.check("}") && !this.isAtEnd()) {
+        this.advance();
+      }
+      if (this.check("}")) {
+        this.advance();
+      }
+      
+      // Expect 'from'
+      if (this.match("from")) {
+        // Get the path
+        if (this.peek().type === TokenType.StringLiteral) {
+          const token = this.advance();
+          path = token.value.slice(1, -1);
+        } else {
+          throw this.error(this.peek(), "Expected import path after 'from'");
+        }
+      } else {
+        throw this.error(this.peek(), "Expected 'from' after import specifiers");
+      }
+    }
+    // Check for namespace import: import * as AST from './ast'
+    else if (this.check("*")) {
+      this.advance();
+      if (this.match("as")) {
+        alias = this.parseIdentifier();
+      }
+      
+      // Expect 'from'
+      if (this.match("from")) {
+        // Get the path
+        if (this.peek().type === TokenType.StringLiteral) {
+          const token = this.advance();
+          path = token.value.slice(1, -1);
+        } else {
+          throw this.error(this.peek(), "Expected import path after 'from'");
+        }
+      } else {
+        throw this.error(this.peek(), "Expected 'from' after namespace import");
+      }
+    }
+    // Check for default import with destructured: import React, { Component } from 'react'
+    else if (this.peek().type === TokenType.Identifier) {
+      const maybeDefault = this.peek();
+      const nextToken = this.peekNext();
+      
+      if (nextToken && nextToken.value === ",") {
+        // Default import with destructured
+        alias = this.parseIdentifier();
+        this.consume(",", "Expected ','");
+        
+        // Skip destructured part
+        if (this.check("{")) {
+          this.advance();
+          while (!this.check("}") && !this.isAtEnd()) {
+            this.advance();
+          }
+          if (this.check("}")) {
+            this.advance();
+          }
+        }
+        
+        // Expect 'from'
+        if (this.match("from")) {
+          // Get the path
+          if (this.peek().type === TokenType.StringLiteral) {
+            const token = this.advance();
+            path = token.value.slice(1, -1);
+          } else {
+            throw this.error(this.peek(), "Expected import path after 'from'");
+          }
+        } else {
+          throw this.error(this.peek(), "Expected 'from' after import specifiers");
+        }
+      }
+      // Simple import: import 'module' or import module
+      else if (nextToken && nextToken.value === "from") {
+        // Default import: import Parser from './parser'
+        alias = this.parseIdentifier();
+        this.consume("from", "Expected 'from'");
+        
+        if (this.peek().type === TokenType.StringLiteral) {
+          const token = this.advance();
+          path = token.value.slice(1, -1);
+        } else {
+          throw this.error(this.peek(), "Expected import path after 'from'");
+        }
+      }
+      // Old-style simple import
+      else {
+        path = this.advance().value;
+        if (this.match("as")) {
+          alias = this.parseIdentifier();
+        }
+      }
+    }
+    // String literal import: import './styles.css'
+    else if (this.peek().type === TokenType.StringLiteral) {
       const token = this.advance();
-      // Remove quotes from string literal
       path = token.value.slice(1, -1);
-    } else if (this.peek().type === TokenType.Identifier) {
-      path = this.advance().value;
     } else {
       throw this.error(this.peek(), "Expected import path");
-    }
-    
-    let alias: AST.Identifier | undefined;
-    if (this.match("as")) {
-      alias = this.parseIdentifier();
     }
     
     this.consumeSemicolon();
     
     return {
       kind: "Import",
-      path,
+      path: path!,
       alias,
       span: this.createSpan(start, this.current - 1)
     };
@@ -1911,6 +2005,18 @@ export class Parser {
   private parseParameter(): AST.Param {
     const start = this.current;
     
+    // Handle TypeScript visibility modifiers in constructor params
+    let visibility: "public" | "private" | "protected" | undefined;
+    if (this.match("public", "private", "protected")) {
+      visibility = this.previous()!.value as any;
+    }
+    
+    // Handle readonly modifier
+    let readonly = false;
+    if (this.match("readonly")) {
+      readonly = true;
+    }
+    
     // Handle Ruby-style block parameter (&param)
     let isBlockParam = false;
     if (this.match("&")) {
@@ -1924,6 +2030,12 @@ export class Parser {
     }
     
     const name = this.parseIdentifier();
+    
+    // Handle optional parameter marker (?)
+    let optional = false;
+    if (this.match("?")) {
+      optional = true;
+    }
     
     let type: AST.TypeNode | undefined;
     if (this.match(":")) {
@@ -3107,6 +3219,32 @@ export class Parser {
   private parseType(): AST.TypeNode {
     let type = this.parseSimpleType();
     
+    // Handle array type suffix: Type[]
+    while (this.check("[")) {
+      const checkpoint = this.current;
+      this.advance(); // consume [
+      
+      // Check if it's an empty [] for array type
+      if (this.check("]")) {
+        this.advance(); // consume ]
+        // Create a generic type Array<Type>
+        type = {
+          kind: "GenericType",
+          base: { 
+            kind: "Identifier", 
+            name: "Array", 
+            span: this.createSpan(checkpoint, this.current - 1) 
+          } as AST.Identifier,
+          args: [type],
+          span: this.createSpanFrom(type)
+        };
+      } else {
+        // Not an array type, restore position
+        this.current = checkpoint;
+        break;
+      }
+    }
+    
     // Handle nullable types
     if (this.match("?")) {
       type = {
@@ -3427,15 +3565,78 @@ export class Parser {
           this.current = memberStart;
         }
         
-        // Handle property declarations
+        // Handle constructor
+        if (this.peek().value === "constructor") {
+          const name = this.parseIdentifier();
+          
+          // Constructor with parentheses
+          if (this.check("(")) {
+            const params = this.parseParameterList();
+            
+            // Constructor body
+            const body = this.parseBlock();
+            
+            members.push({
+              kind: "Constructor",
+              params,
+              body,
+              span: this.createSpan(memberStart, this.current - 1)
+            } as any);
+            continue;
+          }
+        }
+        
+        // Handle visibility modifiers for fields/methods
+        let visibility: "public" | "private" | "protected" | undefined;
+        if (this.match("public", "private", "protected")) {
+          visibility = this.previous()!.value as any;
+        }
+        
+        // Handle static modifier
+        let isStatic = false;
+        if (this.match("static")) {
+          isStatic = true;
+        }
+        
+        // Handle readonly modifier
+        let isReadonly = false;
+        if (this.match("readonly")) {
+          isReadonly = true;
+        }
+        
+        // Handle property declarations and methods
         if (this.peek().type === TokenType.Identifier) {
           const name = this.parseIdentifier();
+          
+          // Method with parentheses: methodName(params): returnType { body }
+          if (this.check("(")) {
+            const params = this.parseParameterList();
+            
+            // Optional return type
+            let returnType: AST.TypeNode | undefined;
+            if (this.match(":")) {
+              returnType = this.parseType();
+            }
+            
+            // Method body
+            const body = this.parseBlock();
+            
+            members.push({
+              kind: "Method",
+              name,
+              params,
+              type: returnType,
+              body,
+              span: this.createSpan(memberStart, this.current - 1)
+            } as any);
+            continue;
+          }
           
           // Short declaration: name := value
           if (this.match(":=")) {
             const value = this.parseExpression();
             members.push({
-              kind: "ClassProperty",
+              kind: "Field",
               name,
               value,
               span: this.createSpan(memberStart, this.current - 1)
@@ -3443,20 +3644,29 @@ export class Parser {
             continue;
           }
           
-          // Type annotation: name: Type = value
+          // Type annotation: name: Type = value or name: Type;
           if (this.match(":")) {
             const type = this.parseType();
             let value: AST.Expr | undefined;
             if (this.match("=")) {
               value = this.parseExpression();
             }
-            members.push({
-              kind: "ClassProperty",
-              name,
-              type,
-              value,
-              span: this.createSpan(memberStart, this.current - 1)
-            } as any);
+            
+            // Check if this might be a method signature without implementation
+            if (this.check("(")) {
+              // It's actually a method: name: ReturnType(params) - skip for now
+              while (!this.isAtEnd() && !this.checkSemicolon() && !this.check("}")) {
+                this.advance();
+              }
+            } else {
+              members.push({
+                kind: "Field",
+                name,
+                type,
+                value,
+                span: this.createSpan(memberStart, this.current - 1)
+              } as any);
+            }
             continue;
           }
           
@@ -3464,7 +3674,7 @@ export class Parser {
           if (this.match("=")) {
             const value = this.parseExpression();
             members.push({
-              kind: "ClassProperty",
+              kind: "Field",
               name,
               value,
               span: this.createSpan(memberStart, this.current - 1)
@@ -3472,11 +3682,15 @@ export class Parser {
             continue;
           }
           
-          // If none of the above, we might have a method without parentheses
-          // or an invalid member - skip to next line
-          while (!this.isAtEnd() && !this.checkSemicolon() && !this.check("}")) {
-            this.advance();
-          }
+          // Field without value
+          members.push({
+            kind: "Field",
+            name,
+            span: this.createSpan(memberStart, this.current - 1)
+          } as any);
+          
+          // Consume semicolon if present
+          this.consumeSemicolon();
         } else {
           // Unknown member type - skip this token
           this.advance();
@@ -3571,6 +3785,55 @@ export class Parser {
   private parseExportDecl(): AST.ExportDecl {
     const start = this.current - 1;
     
+    // Handle 'export default'
+    if (this.match("default")) {
+      // For now, just consume the default export
+      // Skip until semicolon or newline
+      while (!this.check(";") && !this.check("\n") && !this.isAtEnd()) {
+        this.advance();
+      }
+      this.consumeSemicolon();
+      
+      return {
+        kind: "ExportDecl",
+        span: this.createSpan(start, this.current - 1)
+      };
+    }
+    
+    // Handle 'export type'
+    if (this.match("type")) {
+      // Check if it's export type { ... } or export type Name = ...
+      if (this.check("{")) {
+        // export type { ... }
+        const specifiers = this.parseExportSpecifiers();
+        
+        let source: string | undefined;
+        if (this.match("from")) {
+          if (this.peek().type === TokenType.StringLiteral) {
+            source = this.advance().value.slice(1, -1);
+          }
+        }
+        
+        this.consumeSemicolon();
+        
+        return {
+          kind: "ExportDecl",
+          specifiers,
+          source,
+          span: this.createSpan(start, this.current - 1)
+        };
+      } else {
+        // export type Name = ... 
+        // Parse as type declaration
+        const declaration = this.parseTypeDecl();
+        return {
+          kind: "ExportDecl",
+          declaration,
+          span: this.createSpan(start, this.current - 1)
+        };
+      }
+    }
+    
     // Check for export declaration (export function foo() {})
     if (this.isDeclStart()) {
       const declaration = this.parseDeclaration();
@@ -3587,7 +3850,9 @@ export class Parser {
       
       let source: string | undefined;
       if (this.match("from")) {
-        source = this.consume(TokenType.StringLiteral, "Expected module source").value;
+        if (this.peek().type === TokenType.StringLiteral) {
+          source = this.advance().value.slice(1, -1);
+        }
       }
       
       this.consumeSemicolon();
@@ -3596,6 +3861,35 @@ export class Parser {
         kind: "ExportDecl",
         specifiers,
         source,
+        span: this.createSpan(start, this.current - 1)
+      };
+    }
+    
+    // Handle simple export: export Parser or export * from
+    if (this.check("*")) {
+      this.advance();
+      if (this.match("from")) {
+        let source: string | undefined;
+        if (this.peek().type === TokenType.StringLiteral) {
+          source = this.advance().value.slice(1, -1);
+        }
+        this.consumeSemicolon();
+        
+        return {
+          kind: "ExportDecl",
+          source,
+          span: this.createSpan(start, this.current - 1)
+        };
+      }
+    }
+    
+    // Try to consume as identifier
+    if (this.peek().type === TokenType.Identifier) {
+      this.advance();
+      this.consumeSemicolon();
+      
+      return {
+        kind: "ExportDecl",
         span: this.createSpan(start, this.current - 1)
       };
     }
