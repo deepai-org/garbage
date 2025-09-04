@@ -1201,6 +1201,12 @@ export class Parser {
     // Check for single-parameter lambda without parentheses
     if (left.kind === "Identifier" && this.check("=>")) {
       this.advance(); // consume =>
+      
+      // Skip virtual semicolons after => in arrow functions
+      while (this.peek().virtualSemi) {
+        this.advance();
+      }
+      
       const body = this.check("{") ? this.parseBlock() : this.parseExpression();
       return {
         kind: "Lambda",
@@ -1242,6 +1248,11 @@ export class Parser {
       }
       
       this.advance();
+      
+      // Skip virtual semicolons after binary operators
+      while (this.peek().virtualSemi) {
+        this.advance();
+      }
       
       // Handle ternary operator
       if (op.value === "?") {
@@ -5062,6 +5073,11 @@ export class Parser {
     // Parse arrow
     this.consume("=>", "Expected '=>' in lambda");
     
+    // Skip virtual semicolons after => in arrow functions
+    while (this.peek().virtualSemi) {
+      this.advance();
+    }
+    
     // Parse body
     const body = this.check("{") ? this.parseBlock() : this.parseExpression();
     
@@ -5388,6 +5404,11 @@ export class Parser {
   private parseArguments(): AST.Expr[] {
     const args: AST.Expr[] = [];
     
+    // Skip virtual semicolons before first argument
+    while (this.peek().virtualSemi) {
+      this.advance();
+    }
+    
     if (!this.check(")")) {
       do {
         // Check for spread operator
@@ -5405,8 +5426,18 @@ export class Parser {
           args.push(this.parseAssignmentExpression());
         }
         
+        // Skip virtual semicolons after argument
+        while (this.peek().virtualSemi) {
+          this.advance();
+        }
+        
         if (!this.match(",")) {
           break;
+        }
+        
+        // Skip virtual semicolons after comma
+        while (this.peek().virtualSemi) {
+          this.advance();
         }
         
         // Tolerate trailing comma
