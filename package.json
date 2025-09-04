@@ -6,7 +6,11 @@
   "scripts": {
     "test": "jest",
     "build": "tsc",
-    "dev": "ts-node src/index.ts"
+    "dev": "ts-node src/index.ts",
+    "transpile": "ts-node src/cli-transpile.ts"
+  },
+  "bin": {
+    "polyscript-transpile": "./dist/cli-transpile.js"
   },
   "keywords": ["polyscript", "language", "compiler"],
   "author": "",

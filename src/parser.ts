@@ -35,6 +35,10 @@ export class Parser {
     );
   }
   
+  getErrors(): ParseError[] {
+    return this.errors;
+  }
+  
   parse(): AST.Program {
     const body: (AST.Decl | AST.Stmt)[] = [];
     let iterations = 0;
@@ -4871,9 +4875,5 @@ export class Parser {
     }
     
     throw this.error(token, message);
-  }
-  
-  getErrors(): ParseError[] {
-    return this.errors;
   }
 }
