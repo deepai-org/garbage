@@ -199,6 +199,53 @@ export class Parser {
       }
     }
     
+    // Check for decorators (@decorator syntax)
+    if (this.check("@")) {
+      const decorators: AST.Expr[] = [];
+      while (this.check("@")) {
+        this.advance(); // consume @
+        
+        // Parse decorator expression (function call or identifier)
+        const name = this.parseIdentifier();
+        
+        // Allow function calls on the decorator: @deprecated("message")
+        const decorator = this.parsePostfix(name);
+        
+        decorators.push(decorator);
+        
+        // Skip virtual semicolons between decorators
+        while (this.peek().virtualSemi) {
+          this.advance();
+        }
+      }
+      
+      // After decorators, we expect a declaration (function or class)
+      if (this.match("async", "unsafe")) {
+        // Handle async/unsafe before function
+        const isAsync = this.previous()?.value === "async";
+        const isUnsafe = this.previous()?.value === "unsafe";
+        
+        if (this.match("def", "fun", "fn", "func", "function")) {
+          const isGenerator = this.previous()?.value === "function" && this.match("*");
+          const func = this.parseFuncDecl(isAsync, isUnsafe, isGenerator);
+          // Note: We're ignoring decorators for now since AST doesn't have a field for them
+          return func;
+        }
+      } else if (this.match("def", "fun", "fn", "func", "function")) {
+        const isGenerator = this.previous()?.value === "function" && this.match("*");
+        const func = this.parseFuncDecl(false, false, isGenerator);
+        // Note: We're ignoring decorators for now since AST doesn't have a field for them
+        return func;
+      } else if (this.match("class")) {
+        const cls = this.parseClassDecl();
+        // Note: We're ignoring decorators for now since AST doesn't have a field for them
+        return cls;
+      }
+      
+      // If we have decorators but no valid declaration follows, it's an error
+      throw this.error(this.peek(), "Expected function or class declaration after decorators");
+    }
+    
     // Check for short declaration first (including destructuring)
     if (this.peek().type === TokenType.Identifier) {
       const checkpoint = this.current;
@@ -1738,10 +1785,15 @@ export class Parser {
         }
       }
     }
-    // String literal import: import './styles.css'
+    // String literal import: import './styles.css' or import "module" as alias
     else if (this.peek().type === TokenType.StringLiteral) {
       const token = this.advance();
       path = token.value.slice(1, -1);
+      
+      // Check for Python-style import alias: import "module" as mod
+      if (this.match("as")) {
+        alias = this.parseIdentifier();
+      }
     } else {
       throw this.error(this.peek(), "Expected import path");
     }
@@ -2054,6 +2106,31 @@ export class Parser {
   
   private parseParameter(): AST.Param {
     const start = this.current;
+    
+    // Skip parameter decorators (e.g., @NotNull, @Range(...))
+    // These aren't part of the spec but we need to handle them gracefully
+    while (this.check("@")) {
+      this.advance(); // consume @
+      
+      // Skip the decorator name
+      if (this.peek().type === TokenType.Identifier) {
+        this.advance();
+        
+        // Skip decorator arguments if present
+        if (this.check("(")) {
+          this.advance(); // consume (
+          let depth = 1;
+          while (depth > 0 && !this.isAtEnd()) {
+            if (this.check("(")) {
+              depth++;
+            } else if (this.check(")")) {
+              depth--;
+            }
+            this.advance();
+          }
+        }
+      }
+    }
     
     // Handle TypeScript visibility modifiers in constructor params
     let visibility: "public" | "private" | "protected" | undefined;
@@ -3646,6 +3723,36 @@ export class Parser {
       try {
         // Parse class member
         const memberStart = this.current;
+        
+        // Skip member decorators (e.g., @Input, @Output, @HostListener)
+        // These aren't part of the spec but we need to handle them gracefully
+        while (this.check("@")) {
+          this.advance(); // consume @
+          
+          // Skip the decorator name
+          if (this.peek().type === TokenType.Identifier) {
+            this.advance();
+            
+            // Skip decorator arguments if present
+            if (this.check("(")) {
+              this.advance(); // consume (
+              let depth = 1;
+              while (depth > 0 && !this.isAtEnd()) {
+                if (this.check("(")) {
+                  depth++;
+                } else if (this.check(")")) {
+                  depth--;
+                }
+                this.advance();
+              }
+            }
+          }
+          
+          // Skip virtual semicolons after decorators
+          while (this.peek().virtualSemi) {
+            this.advance();
+          }
+        }
         
         // Handle Ruby-style def...end methods
         if (this.match("def")) {
