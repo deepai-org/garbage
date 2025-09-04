@@ -3674,6 +3674,32 @@ export class Parser {
       }
     }
     
+    // Object type literal: { prop: type, ... }
+    if (this.check("{")) {
+      this.advance(); // consume {
+      
+      // For now, parse object type literals as opaque types
+      // Skip to the matching closing brace
+      let depth = 1;
+      while (depth > 0 && !this.isAtEnd()) {
+        if (this.check("{")) depth++;
+        else if (this.check("}")) {
+          depth--;
+          if (depth === 0) break;
+        }
+        this.advance();
+      }
+      
+      this.consume("}", "Expected '}' in object type literal");
+      
+      // Return a simple type representing the object literal
+      return {
+        kind: "SimpleType",
+        id: { kind: "Identifier", name: "object", span: this.createSpan(start, start) },
+        span: this.createSpan(start, this.current - 1)
+      };
+    }
+    
     // Function type with parenthesized parameters or parenthesized type
     if (this.check("(")) {
       // Look ahead to see if this is a function type
