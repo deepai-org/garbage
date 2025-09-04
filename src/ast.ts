@@ -273,7 +273,7 @@ export interface IfArm {
 
 export interface Loop {
   kind: "Loop";
-  mode: "for" | "while" | "until" | "foreach" | "infinite";
+  mode: "for" | "while" | "do-while" | "until" | "foreach" | "infinite";
   init?: Stmt | Decl;
   test?: Expr;
   step?: Expr;

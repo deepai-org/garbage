@@ -466,6 +466,11 @@ export class Parser {
       return this.parseSelectStatement();
     }
     
+    if (this.match("do")) {
+      // Check if this is a do-while loop or bash-style do-done
+      return this.parseDoStatement();
+    }
+    
     if (this.match("for", "while", "until", "loop")) {
       return this.parseLoop();
     }
@@ -2734,6 +2739,45 @@ export class Parser {
     // Check for // fallthrough comment
     // This would need to be tracked during lexing
     return false;
+  }
+  
+  private parseDoStatement(): AST.Stmt {
+    const start = this.current - 1;
+    const startToken = this.tokens[start - 1]; // The 'do' token
+    
+    // Parse the block
+    const body = this.parseBlock();
+    
+    // Check what comes after the block
+    if (this.match("while")) {
+      // This is a JavaScript-style do-while loop
+      this.consume("(", "Expected '(' after 'while' in do-while loop");
+      const test = this.parseExpression();
+      this.consume(")", "Expected ')' after condition in do-while loop");
+      
+      // Optional semicolon after do-while
+      this.consumeSemicolon();
+      
+      return {
+        kind: "Loop",
+        mode: "do-while",
+        body,
+        test,
+        span: this.createSpan(start, this.current - 1)
+      };
+    } else if (this.check("done")) {
+      // This would be a bash-style do-done block
+      // For now, treat it as a simple block statement
+      this.consume("done", "Expected 'done' to close do block");
+      return {
+        kind: "Block",
+        statements: body.statements,
+        span: this.createSpan(start, this.current - 1)
+      };
+    } else {
+      // Error: 'do' must be followed by either 'while' or 'done'
+      throw this.error(this.peek(), "Expected 'while' or 'done' after do block");
+    }
   }
   
   private parseLoop(): AST.Loop {

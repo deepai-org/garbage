@@ -72,7 +72,7 @@ BacktickIdentifier = see §2.3.1 ;
 ```
 
 Identifiers are case-sensitive and Unicode-normalized (NFC).
-A keyword (§10) may be used as an identifier only via **backticks** (§2.3.1).
+A keyword (§10) may be used as an identifier only via **backticks** (§2.3.1), except in object property positions where keywords are allowed directly (e.g., `{ async: true, for: 42 }`).
 `$foo` and `foo` denote the same symbol everywhere.
 
 #### 2.3.1 Backtick identifiers (contextual)
@@ -152,6 +152,8 @@ Three independent stacks:
 | Brace   | `{`                                                                                  | `}`                         |
 | Indent  | a **header** ending with `:` followed by a deeper-indented next non-blank line       | out-dent to previous level  |
 | Keyword | `do`, `case`, `begin`, `if`(Ruby/Bash), `for`(Ruby), `while`(Ruby), `function`(Bash) | `done`, `esac`, `end`, `fi` |
+
+**Note on `do` disambiguation:** The keyword `do` followed by `{` or an indented block and then `while` forms a JavaScript-style do-while loop (§8.1). Otherwise, `do` expects `done` as its closer (Bash-style).
 
 **Header (Indent stack):** `if`/`elif`/`else`/`for`/`while`/`def`/`fun`/`function`/`class`/`try`/`except`/`finally`/`match`/`switch`.
 A block ends when its own closer appears first. Crossing stacks is a compile-time error.
@@ -268,7 +270,8 @@ If       ::= "if" Expr Block { ElseIf } [ Else ] ;
 ElseIf   ::= ("elif" | "elseif") Expr Block ;
 Else     ::= "else" Block ;
 
-Loop     ::= For | While | Until | Foreach | Infinite ;
+Loop     ::= For | While | DoWhile | Until | Foreach | Infinite ;
+DoWhile  ::= "do" Block "while" "(" Expr ")" [ ";" ] ;
 Switch   ::= ("switch" | "match" | "case") Expr Block ;
 
 Break    ::= "break" [ Identifier ] ;
