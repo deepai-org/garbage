@@ -586,6 +586,10 @@ export class Lexer {
     if (value === '.' && this.peek() !== '.' && this.peek() !== '*') {
       // After single dot (not .. or .*), push MemberAccess mode
       this.pushMode(LexerMode.MemberAccess);
+    } else if (value === '?' && this.peek() === '.') {
+      // After ?. optional chaining, also push MemberAccess mode
+      // Note: We'll handle the full ?. operator below, but set the mode now
+      this.pushMode(LexerMode.MemberAccess);
     } else if (value === '[' && this.inMode(LexerMode.Normal)) {
       // Check if this might be a bash conditional
       // Look for patterns like [ $var, [ "test", [ -f, [ !

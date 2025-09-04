@@ -3392,7 +3392,7 @@ export class Parser {
       }
     }
     
-    // Function type with parenthesized parameters
+    // Function type with parenthesized parameters or parenthesized type
     if (this.check("(")) {
       // Look ahead to see if this is a function type
       const checkpoint = this.current;
@@ -3437,14 +3437,32 @@ export class Parser {
           ret,
           span: this.createSpan(start, this.current - 1)
         };
+      } else {
+        // Not a function type - it's a parenthesized type expression
+        this.advance(); // consume '('
+        const type = this.parseType();
+        this.consume(")", "Expected ')' after parenthesized type");
+        return type;
       }
     }
     
     // Simple or generic type
     const id = this.parseIdentifier();
     
+    // Handle qualified type names (e.g., AST.Program, React.Component)
+    let qualifiedId = id;
+    while (this.match(".")) {
+      const member = this.parseIdentifier();
+      // Create a new identifier with the full qualified name
+      qualifiedId = {
+        kind: "Identifier",
+        name: `${qualifiedId.name}.${member.name}`,
+        span: this.createSpanFrom(qualifiedId)
+      };
+    }
+    
     // Handle "impl Trait" pattern (Rust-style)
-    if (id.name === "impl" && this.peek().type === TokenType.Identifier) {
+    if (qualifiedId.name === "impl" && this.peek().type === TokenType.Identifier) {
       const traitType = this.parseSimpleType();
       return {
         kind: "ImplType",
@@ -3454,7 +3472,7 @@ export class Parser {
     }
     
     // Special handling for chan<T> syntax
-    if (id.name === "chan") {
+    if (qualifiedId.name === "chan") {
       if (this.check("<")) {
         this.advance(); // consume '<'
         const elementType = this.parseType();
@@ -3498,7 +3516,7 @@ export class Parser {
       
       return {
         kind: "GenericType",
-        base: id,
+        base: qualifiedId,
         args,
         span: this.createSpan(start, this.current - 1)
       };
@@ -3506,8 +3524,8 @@ export class Parser {
     
     return {
       kind: "SimpleType",
-      id,
-      span: id.span
+      id: qualifiedId,
+      span: qualifiedId.span
     };
   }
   
@@ -4487,6 +4505,11 @@ export class Parser {
         });
       } while (this.match(","));
       
+      // Skip virtual semicolons before closing brace
+      while (this.peek().virtualSemi) {
+        this.advance();
+      }
+      
       this.consume("}", "Expected '}' after object properties");
       
       return {
@@ -4494,6 +4517,11 @@ export class Parser {
         properties,
         span: this.createSpan(start, this.current - 1)
       };
+    }
+    
+    // Skip virtual semicolons before closing brace (for empty object)
+    while (this.peek().virtualSemi) {
+      this.advance();
     }
     
     this.consume("}", "Expected '}' after object properties");
