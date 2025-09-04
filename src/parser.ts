@@ -3447,7 +3447,24 @@ export class Parser {
     }
     
     // Simple or generic type
-    const id = this.parseIdentifier();
+    // Allow keywords as type names (void, undefined, number, boolean, string, etc.)
+    let id: AST.Identifier;
+    const token = this.peek();
+    if (token.type === TokenType.Keyword && 
+        (token.value === "void" || token.value === "undefined" || 
+         token.value === "number" || token.value === "boolean" || 
+         token.value === "string" || token.value === "object" ||
+         token.value === "any" || token.value === "never" ||
+         token.value === "unknown" || token.value === "null")) {
+      this.advance();
+      id = {
+        kind: "Identifier",
+        name: token.value,
+        span: this.createSpanFrom(token)
+      };
+    } else {
+      id = this.parseIdentifier();
+    }
     
     // Handle qualified type names (e.g., AST.Program, React.Component)
     let qualifiedId = id;
@@ -3698,7 +3715,38 @@ export class Parser {
             }
             
             // Method body
-            const body = this.parseBlock();
+            let body: AST.Block;
+            try {
+              body = this.parseBlock();
+            } catch (error) {
+              // If parsing the method body fails, create an empty block
+              // and try to skip to the closing brace
+              if (error instanceof ParseError) {
+                this.errors.push(error);
+                
+                // Skip to the matching closing brace
+                let depth = 1; // We're inside the method body
+                while (depth > 0 && !this.isAtEnd()) {
+                  if (this.peek().value === "{") depth++;
+                  else if (this.peek().value === "}") {
+                    depth--;
+                    if (depth === 0) {
+                      this.advance(); // consume the closing }
+                      break;
+                    }
+                  }
+                  this.advance();
+                }
+                
+                body = {
+                  kind: "Block",
+                  statements: [],
+                  span: this.createSpan(memberStart, this.current - 1)
+                };
+              } else {
+                throw error;
+              }
+            }
             
             members.push({
               kind: "Method",
