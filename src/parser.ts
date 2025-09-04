@@ -1612,10 +1612,11 @@ export class Parser {
         continue;
       }
       
-      // Regular member access (including pointer dereference)
-      if (this.match(".", ".*")) {
+      // Regular member access (including pointer dereference and force unwrap)
+      if (this.match(".", ".*", "!.")) {
         const op = this.previous()?.value;
         const deref = op === ".*";
+        const forceUnwrap = op === "!.";
         
         // Special case for .*. pattern (pointer member access)
         if (deref && this.match(".")) {
@@ -1635,14 +1636,33 @@ export class Parser {
             span: this.createSpanFrom(expr)
           };
         } else if (!deref) {
+          // Regular member access or force unwrap
           const property = this.parseIdentifier();
-          expr = {
-            kind: "Member",
-            object: expr,
-            property,
-            optional: false,
-            span: this.createSpanFrom(expr)
-          };
+          
+          // If it was force unwrap, wrap the object in a non-null assertion
+          if (forceUnwrap) {
+            expr = {
+              kind: "Member",
+              object: {
+                kind: "Unary",
+                op: "!",
+                argument: expr,
+                prefix: false,
+                span: expr.span
+              },
+              property,
+              optional: false,
+              span: this.createSpanFrom(expr)
+            };
+          } else {
+            expr = {
+              kind: "Member",
+              object: expr,
+              property,
+              optional: false,
+              span: this.createSpanFrom(expr)
+            };
+          }
         }
         continue;
       } else if (this.check(".") && this.peekNext()?.value === "*") {
@@ -1689,6 +1709,23 @@ export class Parser {
           span: this.createSpanFrom(expr)
         };
         continue;
+      }
+      
+      // Non-null assertion operator (TypeScript)
+      if (this.check("!")) {
+        const next = this.peekNext();
+        if (!next || !this.isUnaryOp(next)) {
+          // Only treat ! as postfix if not followed by another unary operator
+          this.advance(); // consume !
+          expr = {
+            kind: "Unary",
+            op: "!",
+            argument: expr,
+            prefix: false,
+            span: this.createSpanFrom(expr)
+          };
+          continue;
+        }
       }
       
       break;
@@ -2175,7 +2212,25 @@ export class Parser {
       isSpread = true;
     }
     
-    const name = this.parseIdentifier();
+    // Parse parameter name - allow keywords as parameter names
+    let name: AST.Identifier;
+    const token = this.peek();
+    
+    // In parameter context, allow any keyword or identifier as parameter name
+    if (token.type === TokenType.Identifier || 
+        token.type === TokenType.Keyword ||
+        token.type === TokenType.SigilIdentifier) {
+      this.advance();
+      name = {
+        kind: "Identifier",
+        name: token.value,
+        originalSpelling: token.value,
+        span: this.createSpanFrom(token)
+      };
+    } else {
+      // Fall back to regular identifier parsing for error reporting
+      name = this.parseIdentifier();
+    }
     
     // Handle optional parameter marker (?)
     let optional = false;
@@ -3419,6 +3474,33 @@ export class Parser {
   
   // Type parsing
   private parseType(): AST.TypeNode {
+    // Check for type predicates: paramName is Type
+    if (this.peek().type === TokenType.Identifier) {
+      const checkpoint = this.current;
+      const paramName = this.advance();
+      
+      if (this.peek().value === "is") {
+        this.advance(); // consume 'is'
+        const predicateType = this.parseSimpleType();
+        
+        // Create a type predicate node
+        // For now, we'll represent it as a special kind of type
+        return {
+          kind: "PredicateType",
+          param: { 
+            kind: "Identifier", 
+            name: paramName.value, 
+            span: this.createSpan(checkpoint, checkpoint) 
+          },
+          type: predicateType,
+          span: this.createSpan(checkpoint, this.current - 1)
+        } as any; // Cast to any since PredicateType may not be in AST yet
+      } else {
+        // Not a type predicate, backtrack
+        this.current = checkpoint;
+      }
+    }
+    
     let type = this.parseSimpleType();
     
     // Handle array type suffix: Type[]
