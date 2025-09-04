@@ -577,6 +577,21 @@ export class Parser {
     return this.parseExprStmt();
   }
   
+  private parseBlockOrStatement(): AST.Block {
+    // Helper to parse either a block or single statement
+    if (this.check("{")) {
+      return this.parseBlock();
+    } else {
+      // Single statement without braces
+      const stmt = this.parseStatement();
+      return {
+        kind: "Block",
+        statements: stmt ? [stmt] : [],
+        span: this.createSpanFrom(stmt || this.previous())
+      };
+    }
+  }
+
   private parseBlock(): AST.Block {
     const start = this.current;
     const openToken = this.peek();
@@ -2220,8 +2235,9 @@ export class Parser {
       // Indent-based block
       const body = this.parseIndentBlock();
       arms.push({ test, body, span: this.createSpan(start, this.current - 1) });
-    } else if (this.match(";")) {
+    } else if (this.check(";") && this.peekNext()?.value === "then") {
       // Bash-style: if condition; then ... fi
+      this.advance(); // consume ;
       this.consume("then", "Expected 'then' after if condition in bash-style");
       const body = this.parseIfThenBlock();
       arms.push({ test, body, span: this.createSpan(start, this.current - 1) });
@@ -2232,8 +2248,8 @@ export class Parser {
       arms.push({ test, body, span: this.createSpan(start, this.current - 1) });
       isBashStyle = true;
     } else {
-      // Regular block
-      const body = this.parseBlock();
+      // Regular block or single statement
+      const body = this.parseBlockOrStatement();
       arms.push({ test, body, span: this.createSpan(start, this.current - 1) });
     }
     
@@ -2250,7 +2266,8 @@ export class Parser {
         }
         elifBody = this.parseIfThenBlock();
       } else {
-        elifBody = this.parseBlock();
+        // Block or single statement
+        elifBody = this.parseBlockOrStatement();
       }
       
       arms.push({ 
@@ -2279,7 +2296,8 @@ export class Parser {
       } else if (isBashStyle) {
         elseBody = this.parseIfThenBlock();
       } else {
-        elseBody = this.parseBlock();
+        // Block or single statement
+        elseBody = this.parseBlockOrStatement();
       }
     }
     
@@ -2657,7 +2675,7 @@ export class Parser {
               span: this.createSpanFrom(id)
             };
             const iterable = this.parseExpression();
-            const body = this.parseBlock();
+            const body = this.parseBlockOrStatement();
             return {
               kind: "Loop",
               mode: "foreach",
@@ -2699,7 +2717,7 @@ export class Parser {
           step = this.parseExpression();
         }
         
-        const body = this.parseBlock();
+        const body = this.parseBlockOrStatement();
         
         return {
           kind: "Loop",
@@ -2728,7 +2746,7 @@ export class Parser {
             const iterType = this.previous()?.value; // "of" or "in"
             const iterable = this.parseExpression();
             this.consume(")", "Expected ')' after for-of/for-in");
-            const body = this.parseBlock();
+            const body = this.parseBlockOrStatement();
             
             return {
               kind: "Loop",
@@ -2754,7 +2772,7 @@ export class Parser {
           const iterType = this.previous()?.value; // "of" or "in"
           const iterable = this.parseExpression();
           this.consume(")", "Expected ')' after for-of/for-in");
-          const body = this.parseBlock();
+          const body = this.parseBlockOrStatement();
           
           return {
             kind: "Loop",
@@ -2798,7 +2816,7 @@ export class Parser {
       }
       
       this.consume(")", "Expected ')' after for clauses");
-      const body = this.parseBlock();
+      const body = this.parseBlockOrStatement();
       
       return {
         kind: "Loop",
@@ -2831,7 +2849,7 @@ export class Parser {
       if (this.match("do")) {
         body = this.parseKeywordBlock("do");
       } else {
-        body = this.parseBlock();
+        body = this.parseBlockOrStatement();
       }
       
       return {
@@ -2863,7 +2881,7 @@ export class Parser {
       if (this.match("do")) {
         body = this.parseKeywordBlock("do");
       } else {
-        body = this.parseBlock();
+        body = this.parseBlockOrStatement();
       }
       return {
         kind: "Loop",
@@ -2888,7 +2906,7 @@ export class Parser {
     if (this.match("do")) {
       body = this.parseKeywordBlock("do");
     } else {
-      body = this.parseBlock();
+      body = this.parseBlockOrStatement();
     }
     
     return {
