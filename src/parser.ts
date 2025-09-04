@@ -4092,6 +4092,11 @@ export class Parser {
                   this.advance();
                 }
                 
+                // Skip any trailing semicolons or virtual semicolons after the method
+                while (this.check(";") || this.peek().virtualSemi) {
+                  this.advance();
+                }
+                
                 body = {
                   kind: "Block",
                   statements: [],
@@ -4181,8 +4186,29 @@ export class Parser {
         if (error instanceof ParseError) {
           this.errors.push(error);
           // Skip to next potential member
-          while (!this.isAtEnd() && !this.check("}") && !this.checkSemicolon()) {
-            this.advance();
+          // Look for visibility modifiers, method/field declarations, or closing brace
+          while (!this.isAtEnd() && !this.check("}")) {
+            const token = this.peek();
+            
+            // Check if we've reached what looks like the next member
+            if (token.value === "public" || token.value === "private" || 
+                token.value === "protected" || token.value === "static" ||
+                token.value === "readonly" || token.value === "async" ||
+                token.value === "constructor") {
+              // Found a potential next member
+              break;
+            }
+            
+            // Also break if we see an identifier after a newline/semicolon
+            // (could be a method/field without visibility modifier)
+            if (this.checkSemicolon() || token.virtualSemi) {
+              this.advance(); // consume the semicolon
+              if (this.peek().type === TokenType.Identifier && !this.isAtEnd()) {
+                break; // Next token could be a member
+              }
+            } else {
+              this.advance();
+            }
           }
         } else {
           throw error;
