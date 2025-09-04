@@ -2182,7 +2182,18 @@ export class Parser {
     // else clause
     let elseBody: AST.Block | undefined;
     if (this.match("else")) {
-      if (this.match(":")) {
+      // Check for 'else if' (two separate keywords)
+      if (this.match("if")) {
+        // Handle 'else if' as another if statement
+        // parseIf expects 'if' to have been already matched
+        const elseIf = this.parseIf();
+        // Wrap the else-if in a block
+        elseBody = {
+          kind: "Block",
+          statements: [elseIf],
+          span: elseIf.span
+        };
+      } else if (this.match(":")) {
         elseBody = this.parseIndentBlock();
       } else if (isBashStyle) {
         elseBody = this.parseIfThenBlock();
