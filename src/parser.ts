@@ -528,6 +528,10 @@ export class Parser {
       return this.parseGo();
     }
     
+    if (this.match("defer")) {
+      return this.parseDefer();
+    }
+    
     if (this.match("pass")) {
       return this.parsePass();
     }
@@ -2299,16 +2303,48 @@ export class Parser {
     const cases: AST.SwitchCase[] = [];
     let defaultCase: AST.Block | undefined;
     
-    this.consume("{", "Expected '{' after switch expression");
+    // Support both { } and : styles
+    const isPythonStyle = this.check(":");
+    let baseIndent = 0;
+    if (isPythonStyle) {
+      this.consume(":", "Expected ':' after match expression");
+      // Get the indentation level for Python-style match
+      baseIndent = this.tokens[this.current - 1]?.indentCol ?? 0;
+      
+      // Skip to next line if there's a virtual semicolon
+      while (this.peek().virtualSemi) {
+        this.advance();
+      }
+    } else {
+      this.consume("{", "Expected '{' after switch expression");
+    }
     
-    while (!this.check("}") && !this.isAtEnd()) {
+    // Loop condition depends on style
+    while (!this.isAtEnd()) {
+      // For Python style, check if we've dedented back
+      if (isPythonStyle) {
+        const currentIndent = this.peek().indentCol;
+        if (currentIndent !== undefined && currentIndent <= baseIndent) {
+          // We've dedented, exit the match block
+          break;
+        }
+      } else {
+        // For brace style, check for closing brace
+        if (this.check("}")) {
+          break;
+        }
+      }
+      
       // Skip virtual semicolons
       while (this.peek().virtualSemi) {
         this.advance();
       }
       
       // Check again after skipping virtual semicolons
-      if (this.check("}") || this.isAtEnd()) {
+      if (!isPythonStyle && this.check("}")) {
+        break;
+      }
+      if (this.isAtEnd()) {
         break;
       }
       
@@ -2380,8 +2416,8 @@ export class Parser {
         guard = this.parseExpression();
       }
       
-      // Match uses =>, switch uses :
-      if (isMatch) {
+      // Match can use either => or : depending on style
+      if (isMatch && !isPythonStyle) {
         this.consume("=>", "Expected '=>' after match pattern");
       } else {
         this.consume(":", "Expected ':' after case pattern");
@@ -2407,7 +2443,10 @@ export class Parser {
       }
     }
     
-    this.consume("}", "Expected '}' after switch body");
+    // Only expect closing brace for non-Python style
+    if (!isPythonStyle) {
+      this.consume("}", "Expected '}' after switch body");
+    }
     
     return {
       kind: "Switch",
@@ -3079,7 +3118,14 @@ export class Parser {
   
   private parseDefer(): AST.Defer {
     const start = this.current - 1;
-    const body = this.check("{") ? this.parseBlock() : this.parseExpression();
+    let body: AST.Block | AST.Expr;
+    
+    if (this.check("{")) {
+      body = this.parseBlock();
+    } else {
+      body = this.parseExpression();
+      this.consumeSemicolon();
+    }
     
     return {
       kind: "Defer",
