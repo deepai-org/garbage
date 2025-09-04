@@ -1426,9 +1426,26 @@ export class Parser {
     }
     
     // Identifiers and sigil identifiers
+    // Also allow certain keywords as identifiers in expression context
     if (this.peek().type === TokenType.Identifier || 
-        this.peek().type === TokenType.SigilIdentifier) {
-      const id = this.parseIdentifier();
+        this.peek().type === TokenType.SigilIdentifier ||
+        (this.peek().type === TokenType.Keyword && 
+         (this.peek().value === "type" || this.peek().value === "interface" || 
+          this.peek().value === "enum" || this.peek().value === "namespace"))) {
+      const token = this.peek();
+      let id: AST.Identifier;
+      
+      if (token.type === TokenType.Keyword) {
+        // Keywords used as identifiers
+        this.advance();
+        id = {
+          kind: "Identifier",
+          name: token.value,
+          span: this.createSpanFrom(token)
+        };
+      } else {
+        id = this.parseIdentifier();
+      }
       
       // Check for generic type arguments only in specific contexts
       // Don't try to parse generics if the < is followed by a number (likely comparison)
@@ -2150,10 +2167,25 @@ export class Parser {
     this.consume("(", "Expected '(' before parameters");
     const params: AST.Param[] = [];
     
+    // Skip virtual semicolons before first parameter
+    while (this.peek().virtualSemi) {
+      this.advance();
+    }
+    
     if (!this.check(")")) {
       do {
         params.push(this.parseParameter());
+        
+        // Skip virtual semicolons after parameter
+        while (this.peek().virtualSemi) {
+          this.advance();
+        }
       } while (this.match(","));
+    }
+    
+    // Skip virtual semicolons before closing paren
+    while (this.peek().virtualSemi) {
+      this.advance();
     }
     
     this.consume(")", "Expected ')' after parameters");
@@ -2162,6 +2194,22 @@ export class Parser {
   
   private parseParameter(): AST.Param {
     const start = this.current;
+    
+    // Check for TypeScript constructor parameter property shorthand
+    // (public/private/protected/readonly modifiers)
+    let paramVisibility: "public" | "private" | "protected" | undefined;
+    let paramIsReadonly = false;
+    
+    if (this.peek().value === "public" || 
+        this.peek().value === "private" || 
+        this.peek().value === "protected") {
+      paramVisibility = this.advance().value as any;
+    }
+    
+    if (this.peek().value === "readonly") {
+      paramIsReadonly = true;
+      this.advance();
+    }
     
     // Skip parameter decorators (e.g., @NotNull, @Range(...))
     // These aren't part of the spec but we need to handle them gracefully
