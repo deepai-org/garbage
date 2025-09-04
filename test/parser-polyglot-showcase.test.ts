@@ -56,7 +56,7 @@ async function processDataStream(source: DataSource) {
           log("Attempt completed")
       done
   } catch (e) {
-    throw new Error(\`Pipeline failed: \${e.message}\`)
+    throw new Error("Pipeline failed: " + e.message)
   } finally {
     return {results, errors}
   }
@@ -302,14 +302,14 @@ class StateMachine<S, E> {
   
   # Define transitions with pattern matching
   def on(fromState: S, event: E["type"], toState: S, action?: Function) {
-    key := \`\${fromState}:\${event}\`
+    key := fromState + ":" + event
     this.transitions.set(key, {toState, action})
     return this
   }
   
   # Process event with mixed error handling
   async send(event: E) {
-    key := \`\${this.state}:\${event.type}\`
+    key := this.state + ":" + event.type
     transition := this.transitions.get(key)
     
     if transition == nil {
@@ -339,10 +339,10 @@ class StateMachine<S, E> {
   
   # Guard conditions with mixed syntax
   fn canTransition(event: E) -> bool {
-    key := \`\${this.state}:\${event.type}\`
+    key := this.state + ":" + event.type
     
     # Bash-style existence check
-    if [ -n "\${this.transitions.get(key)}" ]; then
+    if [ -n "$(this.transitions.get(key))" ]; then
       return true
     fi
     

@@ -20,6 +20,14 @@ export enum TokenType {
   EOF = "EOF"
 }
 
+export enum LexerMode {
+  Normal = "Normal",
+  MemberAccess = "MemberAccess",  // After '.', keywords become identifiers
+  BashCondition = "BashCondition", // Inside [ ], use bash tokenization
+  Decorator = "Decorator",         // After '@', special decorator syntax
+  StringTemplate = "StringTemplate" // For f-strings, r-strings, heredocs
+}
+
 export interface Token {
   type: TokenType;
   value: string;
@@ -43,6 +51,8 @@ export class Lexer {
   private lastNonWSToken: Token | null = null;
   private currentIndent = 0;
   private lineStart = true;
+  private modeStack: LexerMode[] = [LexerMode.Normal];
+  private bashBracketDepth = 0;
   
   constructor(source: string) {
     this.source = source;
@@ -150,13 +160,20 @@ export class Lexer {
     }
     
     // String literals with prefixes
-    if (char === 'r' || char === 'b' || char === 'f' || char === 'c') {
+    if (/[rbfuRBFU]/.test(char)) {
       const next = this.peek();
       if (next === '"' || next === "'") {
         this.position--; // Back up to include prefix
         this.scanPrefixedString();
         return;
       }
+    }
+    
+    // C# verbatim strings (@"") or C# interpolated strings ($"")
+    if ((char === '@' || char === '$') && this.peek() === '"') {
+      this.position--; // Back up 
+      this.scanPrefixedString();
+      return;
     }
     
     // String literals
@@ -209,9 +226,9 @@ export class Lexer {
     const startLine = this.line;
     const startColumn = this.column;
     
-    // Collect prefixes
+    // Collect prefixes - support f, r, b, u, br, rb combinations, plus @ and $
     let prefixes = '';
-    while (/[rbfc]/.test(this.peek())) {
+    while (/[rbfuRBFU@$]/.test(this.peek())) {
       prefixes += this.advance();
     }
     
@@ -415,7 +432,20 @@ export class Lexer {
       value += this.advance();
     }
     
-    const type = this.isKeyword(value) ? TokenType.Keyword : TokenType.Identifier;
+    // In MemberAccess mode, all keywords become identifiers
+    let type: TokenType;
+    if (this.inMode(LexerMode.MemberAccess)) {
+      type = TokenType.Identifier;
+      // Pop the mode after consuming the identifier
+      this.popMode();
+    } else if (this.inMode(LexerMode.Decorator)) {
+      type = TokenType.Identifier;
+      // Pop decorator mode after identifier
+      this.popMode();
+    } else {
+      type = this.isKeyword(value) ? TokenType.Keyword : TokenType.Identifier;
+    }
+    
     this.addTokenEx(type, value, start, this.position, startLine, startColumn);
   }
   
@@ -469,6 +499,34 @@ export class Lexer {
     const startLine = this.line;
     const startColumn = this.column - 1;
     let value = this.source[start];
+    
+    // Handle mode transitions
+    if (value === '.' && this.peek() !== '.' && this.peek() !== '*') {
+      // After single dot (not .. or .*), push MemberAccess mode
+      this.pushMode(LexerMode.MemberAccess);
+    } else if (value === '[' && this.inMode(LexerMode.Normal)) {
+      // Check if this might be a bash conditional
+      // Look for patterns like [ $var, [ "test", [ -f, [ !
+      const nextNonWs = this.peekNextNonWhitespace();
+      if (nextNonWs === '$' || nextNonWs === '"' || nextNonWs === '`' || 
+          nextNonWs === '-' || nextNonWs === '!') {
+        this.pushMode(LexerMode.BashCondition);
+        this.bashBracketDepth = 1;
+      }
+    } else if (value === ']' && this.inMode(LexerMode.BashCondition)) {
+      this.bashBracketDepth--;
+      if (this.bashBracketDepth === 0) {
+        this.popMode();
+      }
+    } else if (value === '@' && this.inMode(LexerMode.Normal)) {
+      // Check if this is a decorator (@identifier) or verbatim string (@")
+      const next = this.peek();
+      if (/[a-zA-Z_]/.test(next)) {
+        // After @, if followed by identifier, push Decorator mode
+        this.pushMode(LexerMode.Decorator);
+      }
+      // Otherwise it might be a C# verbatim string, handled elsewhere
+    }
     
     // Try to match longest operator
     const operators = [
@@ -695,6 +753,37 @@ export class Lexer {
   
   private isAtEnd(): boolean {
     return this.position >= this.source.length;
+  }
+  
+  private currentMode(): LexerMode {
+    return this.modeStack[this.modeStack.length - 1];
+  }
+  
+  private pushMode(mode: LexerMode): void {
+    this.modeStack.push(mode);
+  }
+  
+  private popMode(): LexerMode | undefined {
+    if (this.modeStack.length > 1) {
+      return this.modeStack.pop();
+    }
+    return undefined;
+  }
+  
+  private inMode(mode: LexerMode): boolean {
+    return this.currentMode() === mode;
+  }
+  
+  private peekNextNonWhitespace(): string {
+    let offset = 0;
+    while (this.position + offset < this.source.length) {
+      const char = this.source[this.position + offset];
+      if (!/\s/.test(char)) {
+        return char;
+      }
+      offset++;
+    }
+    return '\0';
   }
   
   private addToken(type: TokenType, value: string, start: number, end: number): void {

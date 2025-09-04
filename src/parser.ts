@@ -37,18 +37,61 @@ export class Parser {
   
   parse(): AST.Program {
     const body: (AST.Decl | AST.Stmt)[] = [];
+    let iterations = 0;
+    const maxIterations = Math.max(1000, this.tokens.length * 2); // Safety limit with minimum
+    
+    // Debug logging
+    if (typeof process !== 'undefined' && process.env.DEBUG_HANG) {
+      console.log(`[PARSE] Starting with ${this.tokens.length} tokens`);
+    }
     
     while (!this.isAtEnd()) {
+      iterations++;
+      if (iterations > maxIterations) {
+        console.error(`Parser exceeded maximum iterations (${maxIterations}) - possible infinite loop`);
+        console.error(`Current position: ${this.current}/${this.tokens.length}`);
+        console.error(`Current token: ${this.peek().value} (${this.peek().type})`);
+        console.error(`Parsed ${body.length} statements so far`);
+        // Return what we've parsed so far instead of continuing
+        return {
+          kind: "Program",
+          body,
+          span: this.createSpan(0, Math.min(this.current, this.tokens.length - 1))
+        };
+      }
+      
+      const beforePos = this.current;
+      
       try {
         const item = this.parseTopLevel();
-        if (item) body.push(item);
+        if (item) {
+          body.push(item);
+        } else if (!this.isAtEnd()) {
+          // parseTopLevel returned null but we're not at end
+          // This shouldn't happen at the top level
+          if (this.current === beforePos) {
+            console.error(`Warning: parseTopLevel returned null at position ${this.current}, token: ${this.peek().value}`);
+            this.advance();
+          }
+        }
       } catch (error) {
         if (error instanceof ParseError) {
           this.errors.push(error);
+          // Debug: log the error
+          if (typeof process !== 'undefined' && process.env.DEBUG_PARSER) {
+            console.log('Parse error:', error.message, 'at token:', error.token);
+          }
           this.synchronize();
         } else {
           throw error;
         }
+      }
+      
+      // Ensure we're making progress
+      if (this.current === beforePos && !this.isAtEnd()) {
+        console.error(`Parser stuck at position ${this.current}, token: ${this.peek().value}`);
+        console.error(`Forcing advance from ${this.peek().value}`);
+        this.advance();
       }
     }
     
@@ -123,16 +166,31 @@ export class Parser {
     this.consumeDirectives();
     
     // Skip virtual semicolons at top level
+    let vsCount = 0;
     while (this.peek().virtualSemi) {
       this.advance();
+      vsCount++;
+      if (vsCount > 100) {
+        // Too many virtual semicolons, something is wrong
+        console.error(`Error: Skipped ${vsCount} virtual semicolons without progress`);
+        return null;
+      }
     }
     
     if (this.isAtEnd()) return null;
     
     // If we're in a block and encounter a closing brace, return null
     // This handles cases where a virtual semicolon appears before }
-    if (this.braceDepth > 0 && this.check("}")) {
-      return null;
+    // But if braceDepth is 0, this is an error - consume it to avoid infinite loop
+    if (this.check("}")) {
+      if (this.braceDepth > 0) {
+        return null;
+      } else {
+        // Unexpected closing brace - consume it and report error
+        console.error(`Unexpected '}' at position ${this.current}`);
+        this.advance();
+        return null;
+      }
     }
     
     // Check for short declaration first (including destructuring)
@@ -470,7 +528,16 @@ export class Parser {
       this.braceDepth++;
       const statements: (AST.Decl | AST.Stmt)[] = [];
       
+      let loopCount = 0;
       while (!this.check("}") && !this.isAtEnd()) {
+        loopCount++;
+        if (loopCount > 1000) {
+          console.error(`parseBlock exceeded 1000 iterations at position ${this.current}`);
+          console.error(`Current token: ${this.peek().value} (${this.peek().type})`);
+          break;
+        }
+        
+        const beforePos = this.current;
         try {
           const stmt = this.parseTopLevel();
           if (stmt) statements.push(stmt);
@@ -481,6 +548,11 @@ export class Parser {
           } else {
             throw error;
           }
+        }
+        // Prevent infinite loop
+        if (this.current === beforePos && !this.check("}")) {
+          console.error(`parseBlock not advancing at position ${this.current}, forcing advance`);
+          this.advance();
         }
       }
       
@@ -749,6 +821,7 @@ export class Parser {
     
     while (!this.check("fi") && !this.check("elif") && !this.check("elseif") && 
            !this.check("else") && !this.isAtEnd()) {
+      const beforePos = this.current;
       try {
         const stmt = this.parseTopLevel();
         if (stmt) statements.push(stmt);
@@ -759,6 +832,10 @@ export class Parser {
         } else {
           throw error;
         }
+      }
+      // Prevent infinite loop
+      if (this.current === beforePos) {
+        this.advance();
       }
     }
     
@@ -847,6 +924,7 @@ export class Parser {
         continue;
       }
       
+      const beforePos = this.current;
       try {
         const stmt = this.parseTopLevel();
         if (stmt) statements.push(stmt);
@@ -857,6 +935,10 @@ export class Parser {
         } else {
           throw error;
         }
+      }
+      // Prevent infinite loop
+      if (this.current === beforePos) {
+        this.advance();
       }
     }
     
@@ -899,6 +981,7 @@ export class Parser {
           continue;
         }
         
+        const beforePos = this.current;
         try {
           const stmt = this.parseTopLevel();
           if (stmt) rescueStatements.push(stmt);
@@ -909,6 +992,11 @@ export class Parser {
           } else {
             throw error;
           }
+        }
+        // Prevent infinite loop
+        if (this.current === beforePos && !this.check("rescue") && !this.check("ensure") && !this.check("end")) {
+          console.error(`parseBeginBlock rescue body stuck at position ${this.current}, forcing advance`);
+          this.advance();
         }
       }
       
@@ -1086,7 +1174,18 @@ export class Parser {
       
       const isRightAssoc = this.isRightAssociative(op);
       const nextMinPrec = isRightAssoc ? precedence : precedence + 1;
-      const right = this.parseExpression(nextMinPrec);
+      
+      // Special case: pipe operator followed by match expression
+      let right: AST.Expr;
+      if (op.value === "|>" && this.check("match")) {
+        // Parse match with implicit discriminant (left side of pipe)
+        this.advance(); // consume 'match'
+        const switchStmt = this.parseSwitch();
+        // For now, treat it as an expression (would need AST changes for proper support)
+        right = switchStmt as any;
+      } else {
+        right = this.parseExpression(nextMinPrec);
+      }
       
       if (this.isAssignmentOp(op)) {
         left = {
@@ -2418,7 +2517,19 @@ export class Parser {
     }
     
     if (keyword === "while") {
-      const test = this.parseExpression();
+      // Check if this is a bash-style test expression with [ ... ]
+      let test: AST.Expr;
+      if (this.check("[")) {
+        // Bash test expression
+        test = this.parseBashTestExpression();
+      } else {
+        test = this.parseExpression();
+      }
+      
+      // Skip optional semicolon before do (bash style: while [ test ]; do)
+      if (this.check(";") && this.peekNext()?.value === "do") {
+        this.advance(); // consume semicolon
+      }
       
       // Check for keyword block (do...done)
       let body: AST.Block;
@@ -2438,8 +2549,27 @@ export class Parser {
     }
     
     if (keyword === "until") {
-      const test = this.parseExpression();
-      const body = this.parseBlock();
+      // Check if this is a bash-style test expression with [ ... ]
+      let test: AST.Expr;
+      if (this.check("[")) {
+        // Bash test expression
+        test = this.parseBashTestExpression();
+      } else {
+        test = this.parseExpression();
+      }
+      
+      // Skip optional semicolon before do (bash style: until [ test ]; do)
+      if (this.check(";") && this.peekNext()?.value === "do") {
+        this.advance(); // consume semicolon
+      }
+      
+      // Check for keyword block (do...done)
+      let body: AST.Block;
+      if (this.match("do")) {
+        body = this.parseKeywordBlock("do");
+      } else {
+        body = this.parseBlock();
+      }
       return {
         kind: "Loop",
         mode: "until",
@@ -2501,19 +2631,21 @@ export class Parser {
     const catches: AST.CatchClause[] = [];
     
     while (this.match("catch", "except", "rescue")) {
+      const clauseType = this.previous()?.value; // Remember which keyword we matched
       let param: AST.Identifier | undefined;
       let type: AST.TypeNode | undefined;
       
-      // Check for Python-style except with colon
-      if (this.match(":")) {
+      // Check for Python-style except/rescue with colon
+      if (clauseType === "except" && this.check(":")) {
         // Python-style except: or except Exception:
-        if (this.peek().type === TokenType.Identifier && !this.check("pass")) {
+        // First check if there's an exception type before the colon
+        if (this.peek().type === TokenType.Identifier && !this.check(":")) {
           type = this.parseType();
           if (this.match("as")) {
             param = this.parseIdentifier();
           }
-          this.consume(":", "Expected ':' after except clause");
         }
+        this.consume(":", "Expected ':' after except clause");
         
         // Parse except body
         let catchBody: AST.Block;
@@ -2532,6 +2664,52 @@ export class Parser {
           param,
           type,
           body: catchBody,
+          span: this.createSpan(this.current - 1, this.current)
+        });
+      } else if (clauseType === "rescue") {
+        // Ruby-style rescue Type => var or just rescue
+        if (this.peek().type === TokenType.Identifier && !this.check("=>")) {
+          type = this.parseType();
+        }
+        
+        if (this.match("=>")) {
+          param = this.parseIdentifier();
+        }
+        
+        // Parse rescue body (statements until next rescue/ensure/end)
+        const rescueStatements: (AST.Decl | AST.Stmt)[] = [];
+        while (!this.check("rescue") && !this.check("ensure") && !this.check("end") && 
+               !this.check("finally") && !this.check("except") && !this.isAtEnd()) {
+          if (this.peek().virtualSemi) {
+            this.advance();
+            continue;
+          }
+          const beforePos = this.current;
+          try {
+            const stmt = this.parseTopLevel();
+            if (stmt) rescueStatements.push(stmt);
+          } catch (error) {
+            if (error instanceof ParseError) {
+              this.errors.push(error);
+              this.synchronize();
+            } else {
+              throw error;
+            }
+          }
+          // Prevent infinite loop - if we didn't advance, force advance
+          if (this.current === beforePos) {
+            this.advance();
+          }
+        }
+        
+        catches.push({
+          param,
+          type,
+          body: {
+            kind: "Block",
+            statements: rescueStatements,
+            span: this.createSpan(this.current - 1, this.current)
+          },
           span: this.createSpan(this.current - 1, this.current)
         });
       } else if (this.match("(")) {
@@ -4344,17 +4522,31 @@ export class Parser {
     const args: AST.Expr[] = [];
     
     if (!this.check(")")) {
-      // Parse expression but stop at comma at this level
-      args.push(this.parseAssignmentExpression());
-      
-      while (this.match(",")) {
-        // Tolerate trailing comma
-        if (this.check(")")) {
-          break; // Trailing comma
+      do {
+        // Check for spread operator
+        if (this.match("...")) {
+          const spreadStart = this.current - 1;
+          const argument = this.parseAssignmentExpression();
+          args.push({
+            kind: "Spread",
+            argument,
+            optional: false,
+            span: this.createSpan(spreadStart, this.current - 1)
+          });
+        } else {
+          // Parse expression but stop at comma at this level
+          args.push(this.parseAssignmentExpression());
         }
         
-        args.push(this.parseAssignmentExpression());
-      }
+        if (!this.match(",")) {
+          break;
+        }
+        
+        // Tolerate trailing comma
+        if (this.check(")")) {
+          break;
+        }
+      } while (true);
     }
     
     return args;
@@ -4511,6 +4703,15 @@ export class Parser {
     while (!this.isAtEnd()) {
       if (this.previous()?.type === TokenType.Operator && 
           this.previous()?.value === ";") {
+        return;
+      }
+      
+      // Stop at block/statement endings
+      const token = this.peek();
+      if (token.value === "fi" || token.value === "esac" || token.value === "done" || 
+          token.value === "end" || token.value === "}" || token.value === "elif" || 
+          token.value === "else" || token.value === "elseif" || token.value === "rescue" || 
+          token.value === "ensure" || token.value === "except" || token.value === "finally") {
         return;
       }
       
