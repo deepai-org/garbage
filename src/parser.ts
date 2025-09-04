@@ -3029,7 +3029,7 @@ export class Parser {
     };
   }
   
-  private parseExprStmt(): AST.ExprStmt {
+  private parseExprStmt(): AST.ExprStmt | AST.If {
     const expr = this.parseExpression();
     
     // Check for reassignment operator :=:
@@ -3050,6 +3050,42 @@ export class Parser {
         },
         span: this.createSpanFrom(expr)
       };
+    }
+    
+    // Check for postfix if/unless (Ruby-style)
+    if (this.check("if") || this.check("unless")) {
+      const modifier = this.peek().value;
+      this.advance();
+      const condition = this.parseExpression();
+      
+      // Create an If statement that executes expr if condition is true (or false for unless)
+      const ifStmt: AST.If = {
+        kind: "If",
+        arms: [{
+          test: modifier === "unless" ? {
+            kind: "Unary",
+            op: "!",
+            argument: condition,
+            prefix: true,
+            span: condition.span
+          } : condition,
+          body: {
+            kind: "Block",
+            statements: [{
+              kind: "ExprStmt",
+              expr,
+              span: expr.span
+            }],
+            span: expr.span
+          },
+          span: this.createSpanFrom(expr)
+        }],
+        span: this.createSpanFrom(expr)
+      };
+      
+      this.consumeSemicolon();
+      
+      return ifStmt;
     }
     
     this.consumeSemicolon();
