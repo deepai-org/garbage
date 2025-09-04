@@ -3944,6 +3944,11 @@ export class Parser {
           firstExpr = this.parseAssignmentExpression();
         }
         
+        // Skip virtual semicolons before checking for comprehension
+        while (this.peek().virtualSemi) {
+          this.advance();
+        }
+        
         // Check for list comprehension (expression followed by 'for')
         if (this.check("for")) {
           // This is a list comprehension
