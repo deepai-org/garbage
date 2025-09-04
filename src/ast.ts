@@ -80,7 +80,8 @@ export type Expr =
   | SetLiteral
   | ObjectLiteral
   | Spread
-  | Yield;
+  | Yield
+  | TypeAssertion;
 
 export interface NumericLiteral {
   kind: "NumericLiteral";
@@ -362,6 +363,13 @@ export interface Yield {
   kind: "Yield";
   value?: Expr;
   delegate?: boolean; // for yield*
+  span: Span;
+}
+
+export interface TypeAssertion {
+  kind: "TypeAssertion";
+  expr: Expr;
+  type: TypeNode;
   span: Span;
 }
 

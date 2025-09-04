@@ -1152,6 +1152,20 @@ export class Parser {
     
     while (true) {
       const op = this.peek();
+      
+      // Check for 'as' type assertion (TypeScript)
+      if (op.value === "as") {
+        this.advance(); // consume 'as'
+        const type = this.parseType();
+        left = {
+          kind: "TypeAssertion",
+          expr: left,
+          type,
+          span: this.createSpanFrom(left)
+        };
+        continue;
+      }
+      
       if (!this.isBinaryOp(op) && !this.isAssignmentOp(op)) {
         break;
       }
@@ -1246,6 +1260,42 @@ export class Parser {
         prefix: true,
         span: this.createSpan(this.current - 1, this.current)
       };
+    }
+    
+    // Handle angle-bracket type assertion <Type>expr
+    if (this.peek().value === "<") {
+      const next = this.peekNext();
+      // Check if this looks like a type assertion
+      if (next && next.type === TokenType.Identifier) {
+        const checkpoint = this.current;
+        this.advance(); // consume '<'
+        
+        // Try to parse the type
+        const typeStart = this.current;
+        if (this.match("Identifier")) {
+          const typeName = this.tokens[this.current - 1].value;
+          
+          // Look for closing '>'
+          if (this.match(">")) {
+            // Parse the expression after the type assertion
+            const expr = this.parsePrimary();
+            const type: AST.SimpleType = {
+              kind: "SimpleType",
+              id: { kind: "Identifier", name: typeName, span: this.createSpan(typeStart, typeStart) },
+              span: this.createSpan(typeStart, this.current - 1)
+            };
+            return {
+              kind: "TypeAssertion",
+              expr,
+              type,
+              span: this.createSpan(checkpoint, this.current - 1)
+            };
+          }
+        }
+        
+        // Not a type assertion, restore position
+        this.current = checkpoint;
+      }
     }
     
     // Handle prefix operators
@@ -3287,6 +3337,17 @@ export class Parser {
   private parseSimpleType(): AST.TypeNode {
     const start = this.current;
     
+    // String literal type
+    if (this.peek().type === TokenType.StringLiteral) {
+      const literal = this.advance();
+      // Treat string literals in type position as a simple type with the literal value as the name
+      return {
+        kind: "SimpleType",
+        id: { kind: "Identifier", name: literal.value, span: this.createSpan(start, start) },
+        span: this.createSpan(start, this.current - 1)
+      };
+    }
+    
     // Channel type: <-chan T or chan<- T
     if (this.match("<-")) {
       this.consume("chan", "Expected 'chan' after '<-'");
@@ -4689,6 +4750,33 @@ export class Parser {
   private checkParenthesizedLambda(): boolean {
     // We already consumed the opening paren
     // Check for lambda parameter pattern
+    
+    // First check: if we see identifier : type, it's likely a lambda parameter
+    if (this.peek().type === TokenType.Identifier) {
+      const next = this.peekNext();
+      if (next && next.value === ":") {
+        // This looks like a typed parameter
+        // Scan ahead to find the closing paren and check for =>
+        let depth = 1;
+        let pos = this.current + 2; // Skip identifier and :
+        
+        while (depth > 0 && pos < this.tokens.length) {
+          const tok = this.tokens[pos];
+          if (tok.value === "(") depth++;
+          else if (tok.value === ")") {
+            depth--;
+            if (depth === 0) {
+              // Check if followed by =>
+              const nextTok = this.tokens[pos + 1];
+              return nextTok && nextTok.value === "=>";
+            }
+          }
+          pos++;
+        }
+      }
+    }
+    
+    // Fallback: scan to closing paren and check for =>
     let depth = 1;
     
     while (depth > 0 && !this.isAtEnd()) {
@@ -4703,7 +4791,7 @@ export class Parser {
       }
     }
     
-    // After closing paren, check for => or : then =>
+    // After closing paren, check for => or : (return type) then =>
     return this.check("=>") || (this.check(":") && this.peekNext()?.value === "=>");
   }
   
@@ -4836,12 +4924,23 @@ export class Parser {
   private parseBacktickIdentifier(): AST.Identifier {
     const token = this.advance();
     
+    // For template literals that contain interpolations (${...}),
+    // treat the entire literal as a string literal instead of an identifier
+    if (token.value.includes('${')) {
+      // This is actually a template literal with interpolations, not a backtick identifier
+      // Return it as-is to be handled as a string literal
+      this.current--; // Put the token back
+      return this.parseTemplateLiteral() as any; // Treat as expression
+    }
+    
     // Extract content from backticks
     const content = token.value.slice(1, -1);
     
     // Validate it matches identifier pattern
     if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(content)) {
-      throw this.error(token, "Invalid backtick identifier");
+      // If not a valid identifier, treat it as a string literal
+      this.current--; // Put the token back
+      return this.parseTemplateLiteral() as any;
     }
     
     return {

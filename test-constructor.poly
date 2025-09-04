@@ -1,0 +1,12 @@
+// Test constructor parsing
+
+export class ParseError extends Error {
+  constructor(
+    message: string,
+    public token: Token,
+    public quickFix?: string
+  ) {
+    super(message);
+    this.name = 'ParseError';
+  }
+}

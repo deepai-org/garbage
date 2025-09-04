@@ -1,0 +1,22 @@
+// Test TypeScript import/export patterns
+
+// Named imports
+import { Token, TokenType } from './lexer'
+
+// Namespace imports  
+import * as AST from './ast'
+
+// Default import
+import Parser from './parser'
+
+// Type-only imports
+import type { ParseError } from './errors'
+
+// Mixed
+import React, { Component, useState } from 'react'
+
+// Exports
+export class Parser {}
+export { Parser }
+export default Parser
+export type { ParseError }

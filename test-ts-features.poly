@@ -1,0 +1,36 @@
+// Test TypeScript features that PolyScript should support
+
+// Import statements
+import { Token, TokenType } from './lexer';
+import * as AST from './ast';
+
+// Class with type annotations
+class Parser {
+  private tokens: Token[] = [];
+  private current: number = 0;
+  private errors: ParseError[] = [];
+  
+  constructor(tokens: Token[]) {
+    this.tokens = tokens;
+  }
+  
+  // Generic function
+  parseNode<T>(type: string): T {
+    return null as T;
+  }
+  
+  // Type assertions
+  visitNode(node: any) {
+    const expr = node as AST.Expr;
+    return expr;
+  }
+  
+  // Union types
+  parseValue(): string | number | boolean {
+    return 42;
+  }
+}
+
+// Export
+export { Parser };
+export default Parser;

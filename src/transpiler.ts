@@ -174,6 +174,9 @@ export class Transpiler {
       case 'Spread':
         this.emit(this.visitSpread(node as AST.Spread));
         break;
+      case 'TypeAssertion':
+        this.emit(this.visitTypeAssertion(node as AST.TypeAssertion));
+        break;
 
       default:
         // For unhandled nodes, emit a comment
@@ -629,6 +632,8 @@ export class Transpiler {
         return this.visitYield(node as AST.Yield);
       case 'Spread':
         return this.visitSpread(node as AST.Spread);
+      case 'TypeAssertion':
+        return this.visitTypeAssertion(node as AST.TypeAssertion);
       default:
         return `/* TODO: ${node.kind} */`;
     }
@@ -842,6 +847,10 @@ export class Transpiler {
 
   private visitSpread(node: AST.Spread): string {
     return '...' + this.visitExpression(node.argument);
+  }
+
+  private visitTypeAssertion(node: AST.TypeAssertion): string {
+    return `${this.visitExpression(node.expr)} as ${this.visitType(node.type)}`;
   }
 
   // Helper methods

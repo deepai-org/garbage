@@ -1,0 +1,5 @@
+// Test type assertions and casts
+
+const value = someValue as string;
+const number = <number>someValue;
+const complex = (value as any) as string;
