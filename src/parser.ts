@@ -1308,17 +1308,30 @@ export class Parser {
   
   private parsePrimary(): AST.Expr {
     // Handle async lambda/function expressions
-    if (this.match("async")) {
-      const start = this.current - 1;
-      // Check for lambda or async block
-      if (this.check("(") || this.peek().type === TokenType.Identifier || this.check("{")) {
-        // Parse as async lambda or async block
-        const lambda = this.parseAsyncLambda(start);
-        // Allow postfix operations on the lambda (like calls)
-        return this.parsePostfix(lambda);
+    if (this.peek().value === "async") {
+      // Look ahead to see if this is really an async function/lambda
+      const next = this.peekNext();
+      const isAsyncFunction = next && (
+        next.value === "(" ||  // async () => 
+        next.value === "{" ||  // async { ... }
+        (next.type === TokenType.Identifier && this.peekAt(2)?.value === "=>") || // async x =>
+        next.value === "function" // async function
+      );
+      
+      if (isAsyncFunction) {
+        this.advance(); // consume 'async'
+        const start = this.current - 1;
+        // Check for lambda or async block
+        if (this.check("(") || this.peek().type === TokenType.Identifier || this.check("{")) {
+          // Parse as async lambda or async block
+          const lambda = this.parseAsyncLambda(start);
+          // Allow postfix operations on the lambda (like calls)
+          return this.parsePostfix(lambda);
+        }
+        // Otherwise it's an error
+        throw this.error(this.peek(), "Expected lambda or block after async");
       }
-      // Otherwise it's an error
-      throw this.error(this.peek(), "Expected lambda or block after async");
+      // Otherwise, treat 'async' as a regular identifier
     }
     
     // Handle yield expression
@@ -1442,7 +1455,10 @@ export class Parser {
         this.peek().type === TokenType.SigilIdentifier ||
         (this.peek().type === TokenType.Keyword && 
          (this.peek().value === "type" || this.peek().value === "interface" || 
-          this.peek().value === "enum" || this.peek().value === "namespace"))) {
+          this.peek().value === "enum" || this.peek().value === "namespace" ||
+          this.peek().value === "async" || this.peek().value === "await" ||
+          this.peek().value === "unsafe" || this.peek().value === "readonly" ||
+          this.peek().value === "abstract" || this.peek().value === "static"))) {
       const token = this.peek();
       let id: AST.Identifier;
       
