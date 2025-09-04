@@ -3893,7 +3893,20 @@ export class Parser {
         };
         elements.push(firstExpr);
       } else {
-        firstExpr = this.parseAssignmentExpression();
+        // Check for match expression in comprehension context
+        if (this.check("match")) {
+          const checkpoint = this.current;
+          try {
+            const matchExpr = this.parseSwitch();
+            firstExpr = matchExpr as any;
+          } catch (e) {
+            // If match parsing fails, restore position and parse as assignment
+            this.current = checkpoint;
+            firstExpr = this.parseAssignmentExpression();
+          }
+        } else {
+          firstExpr = this.parseAssignmentExpression();
+        }
         
         // Check for list comprehension (expression followed by 'for')
         if (this.check("for")) {

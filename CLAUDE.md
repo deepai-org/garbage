@@ -3,636 +3,94 @@
 ## Project Overview
 PolyScript is a universal parser that handles multiple programming language syntaxes in a single file.
 
-## Key Architecture Points
+## Current Status
+- **165/175 tests passing (94.3% pass rate)**
+- Up from 82.3% at start
+- 10 tests failing in advanced polyglot scenarios
+
+## Quick Debugging Commands
+```bash
+npm test                # Run all tests
+npm run build          # Build TypeScript
+node test-*.js         # Run specific debug test
+```
+
+## Creating Debug Tests
+When a test fails, immediately create a minimal test file:
+```javascript
+const { Lexer } = require('./dist/lexer');
+const { Parser } = require('./dist/parser');
+
+const code = `[failing code here]`;
+const lexer = new Lexer(code);
+const tokens = lexer.tokenize();
+const parser = new Parser(tokens);
+const ast = parser.parse();
+console.log('AST nodes:', ast.body.length);
+```
+
+## Key Parser Issues & Solutions
+
+### Virtual Semicolons
+- Skip them in pattern matching: `while (this.peek().virtualSemi) this.advance()`
+- They're auto-inserted by lexer, handle carefully
+
+### Infinite Loops
+- Always ensure loops either consume a token or break
+- Add safeguards: `if (this.current === beforePos) this.advance()`
+
+### Context-Dependent Tokens
+- `<` can be comparison or generic start - check next token
+- `:` can be type annotation, case separator, or Python block start
+- `.` triggers MemberAccess mode where keywords become identifiers
 
 ### Parser Structure
-- The parser uses recursive descent parsing with a `parseTopLevel()` -> `parseStatement()` or `parseDeclaration()` flow
-- Virtual semicolons are automatically inserted by the lexer and must be handled carefully in parsing logic
-- The parser supports multiple language constructs (switch/match, case/esac, various loop styles, etc.)
-
-## Common Issues and Solutions
-
-### 1. Virtual Semicolons in Pattern Matching
-**Problem**: Virtual semicolons can interfere with pattern matching constructs, especially in match expressions.
-**Solution**: Always skip virtual semicolons at the beginning of parsing loops and methods that parse patterns.
-
-### 2. Expression Parsing in Match Cases
-**Problem**: The comma operator in expressions conflicts with comma-separated match cases.
-**Solution**: In match case bodies, parse at a lower precedence level (not full expressions) to avoid consuming the comma that separates cases.
-
-### 3. Empty AST with Complex Code
-**Debugging Steps**:
-1. Check if tokens are being generated correctly with a simple lexer test
-2. Test with progressively simpler code to isolate the issue
-3. Check for infinite loops by adding iteration counters
-4. Verify that `parseTopLevel()` is returning statements/declarations properly
-
-### 4. Parser State Management
-- After consuming tokens in a switch/match, ensure the parser position is correct
-- When backtracking (e.g., lookahead that fails), restore the parser position
-- Be careful with methods that might consume more tokens than expected
-
-### 5. Function Declaration Keywords
-**Problem**: Functions can be declared with various keywords (`fn`, `fun`, `function`, `def`) that aren't recognized.
-**Solution**: Ensure all function keywords are included in `isDeclStart()` method so they're treated as declarations.
-
-### 6. Function Type Arrows
-**Problem**: Function types can use either `=>` or `->` arrows depending on the language.
-**Solution**: Check for both arrow types when parsing function types in `parseSimpleType()`.
-
-### 7. Lambda Expression Variants
-**Problem**: Lambda expressions have multiple syntaxes:
-- Single parameter without parentheses: `x => expr`
-- Async lambdas: `async () => expr`
-- Immediately invoked: `(() => expr)()`
-**Solution**: 
-- Handle single-param lambdas in `parseExpression()` after parsing identifier
-- Add `async` lambda support in `parsePrimary()`
-- Create dedicated `parseAsyncLambda()` method
-
-### 8. Go-style Syntax in Polyglot Code
-**Problem**: Go syntax differs from C-style in several ways:
-- `make(chan T, size)` for channel creation
-- `for i := 0; i < 10; i++` without parentheses
-- `go async () => {}` for concurrent async functions
-**Solution**:
-- Special-case `make()` function calls to parse type as first argument
-- Check for Go-style for loops by detecting `identifier :=` pattern
-- Allow `async` after `go` keyword in expression context
-
-## Testing Strategy
-- Always test with both simple and complex cases
-- Test edge cases like:
-  - Empty match/switch bodies
-  - Single case vs multiple cases
-  - Wildcard patterns (`_`)
-  - Cases with and without trailing commas
-  - Nested constructs (match inside match, case inside match, etc.)
-
-## Running Tests
-```bash
-npm test                    # Run all tests
-npm run build              # Build TypeScript
-npm run lint               # Run linter (if configured)
-npm run typecheck          # Run type checking (if configured)
-```
-
-## Debugging Tips
-1. Create minimal reproduction test files (e.g., `test-debug.js`)
-2. Use console.log debugging in parser methods to track token consumption
-3. Check token positions before and after parsing methods
-4. When tests fail with "Expected >= N, Received: 0", it usually means the parser is silently failing or returning null
-
-## Debugging Workflow with Tools
-
-### Quick Debug Tools Available
-The project includes powerful debugging utilities in `debug-utils.js` and `test-patterns.js`:
-
-#### 1. Quick Testing (`debug-utils.js`)
-```bash
-# Test a code snippet instantly
-node debug-utils.js test "fn test<T>() { return T }"
-
-# Find exact failure point in code
-node debug-utils.js find-error "complex code here"
-
-# Test a file
-node debug-utils.js file mytest.js
-```
-
-#### 2. Pattern Testing (`test-patterns.js`)
-```bash
-# Test all lambda patterns
-node test-patterns.js lambda
-
-# Test for loop variations
-node test-patterns.js for
-
-# Test all patterns
-node test-patterns.js all
-```
-
-### Debugging Process for Failing Tests
-
-#### Step 1: Isolate the Problem
-When a test fails with "Expected >= N, Received: 0":
-1. Extract the test code from the failing test
-2. Use `quickTest()` to reproduce the issue
-3. Progressively simplify until you find the minimal failing case
-
-Example:
-```javascript
-const { quickTest, findFailurePoint } = require('./debug-utils');
-
-// Start with the full failing code
-const code = `complex nested code...`;
-quickTest(code); // See if it fails
-
-// Use findFailurePoint to locate exact issue
-findFailurePoint(code); // Shows which token causes failure
-```
-
-#### Step 2: Test Variations
-Use `testVariations()` to test multiple patterns at once:
-```javascript
-const { testVariations } = require('./debug-utils');
-
-testVariations('async patterns', {
-  'Async block': 'async { await foo() }',
-  'Async lambda': 'async () => { }',
-  'Go async': 'go async () => { }'
-});
-```
-
-#### Step 3: Identify Parser Path
-1. Check if it's a declaration or statement issue
-2. Test in expression position vs statement position
-3. Verify token types are correct
-
-Example debugging session:
-```bash
-# Test standalone fails
-node debug-utils.js test "async { }" 
-# Error: Expected function declaration
-
-# Test in expression works
-node debug-utils.js test "let x = async { }"
-# Success!
-
-# Conclusion: Issue is in statement/declaration parsing
-```
-
-#### Step 4: Fix and Verify
-1. Locate the relevant parsing method
-2. Add support for the pattern
-3. Test with variations to ensure no regressions
-4. Run pattern test suite to verify
-
-### Common Debugging Patterns
-
-#### "Expected identifier" Errors
-- Usually means a keyword isn't recognized in that context
-- Check `isDeclStart()` for declarations
-- Check `parsePrimary()` for expressions
-
-#### "Expected ')' after X" Errors
-- Often means a method is consuming too many tokens
-- Check if methods like `parseShortDecl()` are consuming semicolons
-- Verify parenthesis matching in complex expressions
-
-#### Silent Failures (Empty AST)
-- Parser is catching and suppressing errors
-- Check `parse()` method's error array: `parser.errors`
-- Use `findFailurePoint()` to locate exact position
-
-### Testing After Changes
-After making parser changes:
-```bash
-# Quick regression check
-node test-patterns.js all
-
-# Run full test suite
-npm test
-
-# Test specific patterns that were fixed
-node debug-utils.js test "your fixed pattern"
-```
-
-## Recent Fixes and Patterns
-
-### Issue #9: Python-style Try-Except
-**Problem**: Python uses `try:` and `except:` with colons instead of braces.
-**Solution**: Modified `parseTry()` to handle both styles:
-- Check for `:` after try/except keywords
-- Support `except Exception as e:` pattern
-- Handle indented blocks or single statements after colons
-
-### Issue #10: Python-style With Statements
-**Problem**: Python uses `with context as var:` syntax.
-**Solution**: Modified `parseUsing()` to handle:
-- `with expr as var:` pattern
-- Indented blocks after colon
-- Both traditional using and Python-style with
-
-### Debugging Complex Nested Code
-When debugging extreme nesting (like test-extreme.js):
-1. Test each language construct separately first
-2. Build up complexity gradually
-3. Check for token consumption issues between different syntax styles
-4. Verify indentation handling for mixed styles
-
-### Issue #11: Infinite Loops in Error Recovery
-**Problem**: Error recovery mechanisms in parser methods can cause infinite loops when tokens aren't consumed properly.
-**Solution**: Incrementally add error recovery features to identify problematic ones:
-- ✅ Trailing comma tolerance (safe)
-- ❌ Enhanced synchronization with more stop tokens (causes loops)
-- ✅ Synthetic token helpers (createMissingExpr, createMissingIdentifier)
-- ✅ `must()` method for optional error recovery
-- ❌ Error recovery in `parsePrimary` returning missing expressions (causes loops)
-- ✅ Error recovery in `parseIdentifier` with proper token advancement
-
-**Key Insight**: Error recovery should only advance tokens when truly necessary, and should avoid creating synthetic tokens in primary expression parsing.
-
-### Issue #12: Class Member Parsing
-**Problem**: Initial fix just skipped class bodies with brace counting, losing important structure.
-**Solution**: Implemented proper `parseClassMember()` to handle:
-- Properties and methods
-- Ruby-style `def...end` methods
-- Block parameters with `&` prefix
-- Spread parameters with `...` prefix
-- Python-style methods with colons
-
-### Issue #13: Missing `this` and `super` Support
-**Problem**: `this` and `super` keywords weren't recognized in expression context.
-**Solution**: Added handling in `parsePrimary()`:
-```typescript
-if (this.match("this", "super")) {
-  const token = this.previous()!;
-  return {
-    kind: "Identifier",
-    name: token.value,
-    span: this.createSpanFrom(token)
-  };
-}
-```
-
-### Issue #14: Generic Type Parsing vs Comparison Operators
-**Problem**: Parser tried to parse `< 10` as generic type arguments in expressions like `i < 10`.
-**Solution**: Added context check before attempting generic parsing - skip if `<` is followed by a numeric literal.
-
-### Issue #15: Virtual Semicolon Insertion Bug
-**Problem**: Lexer wasn't inserting virtual semicolons between statements at different indentation levels.
-**Root Cause**: `shouldSuppressVirtualSemi` was comparing `next.indentCol` with `this.currentIndent` instead of `current.indentCol`.
-**Solution**: Fixed comparison to use `current.indentCol` for proper indentation-based semicolon insertion.
-**Impact**: Fixed select statements with both case and default branches, and async/concurrent pattern tests.
-
-### Issue #16: Multiline Chaining Support
-**Problem**: Virtual semicolons were breaking multiline method/operator chains.
-**Solution**: Enhanced `shouldSuppressVirtualSemi` to check if next line starts with continuation operators (`?.`, `|>`, `..`, `::`, `||`, `&&`, etc.).
-**Impact**: Allows multiline chaining patterns common in functional and fluent APIs.
-
-### Issue #17: Assert Statement Support
-**Problem**: Python-style `assert` statements weren't recognized.
-**Solution**: Added `parseAssert()` method that handles `assert condition, "message"` syntax.
-**Impact**: Enables testing assertion patterns from multiple languages.
-
-### Issue #18: This/Super Member Access
-**Problem**: `this` and `super` keywords weren't properly handling member access (e.g., `this.prop`).
-**Root Cause**: They were returning directly from `parsePrimary` without going through `parsePostfix`.
-**Solution**: Changed to call `parsePostfix(id)` after creating the identifier.
-**Impact**: Fixed property access on `this` and `super` keywords.
-
-### Current Pass Rate
-- 165/175 tests passing (94.3% pass rate)
-- Up from 82.3% (142/173) at start
-- Major improvements:
-  - Fixed parser infinite loops in parseBeginBlock rescue clause parsing
-  - Added safeguards to prevent infinite loops in all parsing loops
-  - Fixed escaped template literal handling in tests
-  - Added lexer mode stack for context-aware tokenization
-  - Implemented bash conditional parsing
-- Remaining 10 tests fail due to complex unsupported features in advanced polyglot scenarios
-
-## Phase 1 Implementation Complete (Context-Aware Lexer)
-
-### Completed Features
-✅ **Lexer Mode Stack Infrastructure**
-- Added `LexerMode` enum with 5 modes: Normal, MemberAccess, BashCondition, Decorator, StringTemplate
-- Implemented mode stack with push/pop operations
-- Mode transitions based on context (after `.`, `[`, `@`, etc.)
-
-✅ **MemberAccess Mode**
-- Keywords after `.` become identifiers (fixes `obj.type`, `data.class`)
-- Automatically pops after consuming identifier
-- Works with chained access (`foo.if.else.while`)
-
-✅ **BashCondition Mode** 
-- Activates on `[` when followed by bash-like patterns
-- Tracks bracket depth for nested conditions
-- Handles `[ $var ]`, `[ -f file ]`, `[ "test" = "test" ]`
-
-✅ **Decorator Mode**
-- Keywords after `@` become identifiers
-- Distinguishes from C# verbatim strings
-- Handles `@decorator`, `@async`, `@if`
-
-✅ **Enhanced String Literals**
-- Extended prefix support: f, r, b, u, F, R, B, U
-- C# interpolated strings: `$"..."`
-- C# verbatim strings: `@"..."`
-- Foundation for heredocs (not yet complete)
-
-✅ **Parser Improvements**
-- Spread operator in new expressions: `new Class(...args)`
-- Already had comprehension support
-
-## Phase 2 Implementation (Parser Enhancements)
-
-### Completed Improvements
-✅ **Match Expression After Pipe**
-- Added special handling for `|> match` pattern in expression parser
-- Detects pipe operator followed by match keyword
-- Treats match as expression with implicit discriminant (left side of pipe)
-
-✅ **Bash-style Control Structures**
-- Fixed `while [ condition ]; do...done` parsing
-- Fixed `until [ condition ]; do...done` parsing
-- Added `parseBashTestExpression()` to handle `[ ]` test operators
-- Skip semicolons before `do` keyword in bash loops
-- Test expressions are parsed as special call expressions
-
-## Phase 3 Implementation (Deep Parser Fixes)
-
-### Attempted Improvements
-✅ **Match Expression After Pipe**
-- Added special handling for `|> match` pattern in expression parser
-- Detects pipe operator followed by match keyword
-- Treats match as expression with implicit discriminant (left side of pipe)
-
-❌ **Features Not Fully Implemented**
-The following features require deeper architectural changes:
-
-1. **Heredoc Strings** - Need multi-line lookahead in lexer
-2. **Bash Control Structures** (`while [ ]; do...done`) - Need full syntax support
-3. **Force Unwrap Operator** (`!.`) - Already tokenized but needs parser support
-4. **Special Access Operators** - `::`, `?.` already tokenized but need context handling
-
-### Analysis of Remaining Failures
-The 16 failing tests are in the advanced polyglot showcase tests which combine extreme language mixing. These tests require:
-- Context-sensitive parsing that adapts based on surrounding syntax
-- Support for language-specific constructs that conflict with others
-- Complex operator precedence handling across language boundaries
-
-### Remaining Complex Features (16 failing tests)
-The remaining failures involve features that require significant parser/lexer extensions:
-
-1. **Match as Expression** - Currently `match` only works as a statement, not in expression context after pipes
-2. **Special Access Operators** - `!.` (force unwrap), `->` (pointer), `::` (static), `.?` (safe navigation)
-3. **Bash-style Syntax** - `while [ condition ]; do...done`, `if [ test ]; then...fi`
-4. **Extended String Literals** - C# interpolated (`$"`), verbatim (`@"`), heredocs (`<<EOF`)
-5. **Complex Comprehensions** - Nested match expressions inside list comprehensions
-
-These features are used in the polyglot showcase tests that demonstrate extreme language mixing.
-
-## Effective Debugging Strategies
-
-### What Makes Debugging FASTER
-
-#### 1. Create Minimal Test Files Immediately
-Instead of debugging in the full test suite, create small test files (`test-*.js`) that isolate the exact problem:
-```javascript
-// Good: Isolate the exact failing pattern
-test(`select { case x: continue; default: await foo() }`, "Specific case");
-```
-This is 10x faster than running the full test suite repeatedly.
-
-#### 2. Binary Search with Progressive Complexity
-Start with the simplest case and progressively add complexity:
-```javascript
-test(`fn test() { }`, "Step 1: Basic");
-test(`fn test() { for i := 0; i < 10; i++ { } }`, "Step 2: Add for loop");
-test(`fn test() { /* previous + more */ }`, "Step 3: Add next feature");
-```
-This quickly identifies which specific addition breaks the parser.
-
-#### 3. Token Inspection for Parser Issues
-When parsing fails mysteriously, always inspect the tokens first:
-```javascript
-tokens.forEach((t, i) => {
-  if (t.type !== 'Whitespace') {
-    console.log(`[${i}] ${t.type}: "${t.value}" virtualSemi=${t.virtualSemi}`);
-  }
-});
-```
-Virtual semicolons and unexpected token types are often the culprit.
-
-#### 4. Trace Parser Method Calls
-Add temporary logging to trace which parser methods are called:
-```javascript
-const originalMethod = parser.parseSelectStatement.bind(parser);
-parser.parseSelectStatement = function() {
-  console.log('parseSelectStatement called, current:', this.peek().value);
-  return originalMethod();
-};
-```
-
-#### 5. Test Individual Parser Methods
-Test parser methods in isolation when possible:
-```javascript
-const body = parser.parseCaseBody();  // Test specific method directly
-```
-
-### What Makes Debugging SLOWER
-
-#### 1. Running Full Test Suite for Every Change
-- Full suite takes ~1-2 seconds, individual test takes ~50ms
-- Create focused test files instead
-
-#### 2. Not Checking Error Details
-- Don't just check if parsing failed - check WHICH error and WHERE
-- `parser.errors[0].token` often reveals the exact problem location
-
-#### 3. Trying to Fix Multiple Issues at Once
-- Fix one issue, verify it works, then move to the next
-- Multiple simultaneous changes make it hard to identify what helped
-
-#### 4. Not Using Incremental Testing
-- Don't jump straight to complex nested code
-- Build up complexity step by step to find the breaking point
-
-#### 5. Ignoring Token Boundaries
-- Many issues are about where tokens start/end, not the parsing logic
-- Check `wsBefore`, `virtualSemi`, and token positions
-
-### Debugging Workflow Pattern
-
-1. **Reproduce** - Extract failing code from test suite
-2. **Simplify** - Reduce to minimal failing case  
-3. **Inspect** - Check tokens, not just parse result
-4. **Trace** - Add logging at suspicious points
+- Main flow: `parse()` → `parseTopLevel()` → `parseStatement()` or `parseDeclaration()`
+- Function bodies use `parseBlock()`, not `parseTopLevel()`
+- `braceDepth` tracks nesting for proper `}` handling
+
+## Lexer Mode Stack
+The lexer has 5 modes that change tokenization behavior:
+
+1. **Normal** - Default mode
+2. **MemberAccess** - After `.`, keywords → identifiers
+3. **BashCondition** - Inside `[ ]` for bash tests
+4. **Decorator** - After `@`, keywords → identifiers  
+5. **StringTemplate** - For special string literals
+
+## Recently Fixed Issues
+
+### parseBeginBlock Infinite Loop
+- Rescue clause body parsing wasn't checking for position advancement
+- Fixed by adding: `if (this.current === beforePos) this.advance()`
+
+### Template Literal Escaping
+- Test files had escaped backticks causing parser hangs
+- Solution: Use proper string concatenation instead
+
+### Bash Conditionals
+- Added `parseBashTestExpression()` for `[ ]` patterns
+- Skip semicolon before `do` in bash loops
+
+## Remaining Failures (10 tests)
+
+### Actually Working Features
+Despite test failures, these actually parse correctly:
+- Basic comprehensions (list/dict/set/generator)
+- Generator functions (`function*`, `yield`, `yield*`)
+- Most string literals (f-strings, raw strings, triple quotes, etc.)
+
+### True Failures Causing Test Errors
+1. **Heredoc strings** (`<<EOF...EOF`) - Tokenized as operators, not strings
+2. **Match inside comprehensions** - Complex nested pattern not handled
+3. **Force unwrap operator** (`!.`) - Tokenized but not parsed correctly
+4. **Chained special operators** (`->`, `::`, `..`, `.?`) - Missing parser support
+5. **Mixed language constructs** - Extreme nesting of different paradigms
+
+## Debug Workflow
+1. **Isolate** - Extract failing code from test
+2. **Simplify** - Reduce to minimal case
+3. **Inspect** - Check tokens with: `tokens.forEach(t => console.log(t))`
+4. **Trace** - Add logging to suspicious parser methods
 5. **Fix** - Make minimal change
-6. **Verify** - Test fix with variations
-7. **Regress** - Run full suite only after fix works
-
-### Common Parser Pitfalls
-
-1. **Infinite Loops in Error Recovery**
-   - Solution: Ensure every loop iteration either consumes a token or breaks
-   
-2. **Context-Dependent Parsing**
-   - `<` can be comparison or generic start
-   - `:` can be type annotation, case separator, or Python-style block start
-   - Solution: Look ahead to disambiguate
-
-3. **Virtual Semicolon Handling**
-   - Often need to skip them: `while (this.peek().virtualSemi) this.advance()`
-   - But sometimes they're significant for statement termination
-
-4. **Parser Method Return Values**
-   - Some methods return null on failure, others throw
-   - Always check what a method returns when it can't parse
-
-### Successfully Implemented Features
-- ✅ Generic functions and type parameters
-- ✅ Function type arrows (both `->` and `=>`)
-- ✅ Single-parameter lambdas without parentheses  
-- ✅ Async lambdas with postfix operations (calls, etc.)
-- ✅ Go-style make() with optional size
-- ✅ Go-style for loops without parentheses
-- ✅ Channel send operator (`ch <- value`)
-- ✅ Channel receive operator (`<-ch`)
-- ✅ Select statements for Go channels
-- ✅ Async for await patterns
-- ✅ Python-style try-except with colons
-- ✅ Python-style with statements  
-- ✅ Ruby-style begin/rescue/ensure/end blocks
-- ✅ Ruby-style def...end functions
-- ✅ While loops with assignment in condition
-- ✅ nil keyword support (lexer + parser)
-- ✅ Keywords as identifiers in member access (e.g., obj.type)
-- ✅ Assert statements
-- ✅ this/super with member access
-- ✅ Virtual semicolon suppression for multiline chaining
-
-### Known Limitations Requiring Major Changes
-
-#### Lexer-Level Features
-- Special string literals (f-strings, r-strings, b-strings, heredocs, verbatim)
-- Numeric literals with unit suffixes (100ms, 500KB)
-- Decorator syntax (@decorator)
-- Bash-style conditionals (if [ $var = "value" ]; then)
-
-#### Parser-Level Complex Features
-- List/dict/set comprehensions ([x for x in items])
-- Generator functions and yield from
-- Match expressions in pipe context (data |> match {...})
-- Spread operator in new expressions (new Cls(...args))
-- Force unwrap operator (!.)
-- Multiple destructuring patterns in foreach
-
-#### Architecture Limitations
-- Match expressions after pipe operator need special discriminant handling
-- Some language mixing creates fundamental parsing ambiguities
-- Context-sensitive lexing would help (e.g., type after dot should always be identifier)
-
-### Final Results Summary
-
-**Starting Point**: 142/173 tests passing (82.3%)
-**After Phase 1 (Lexer Modes)**: 157/173 tests passing (91%)
-**After Phase 2-3 (Parser Enhancements)**: 157/173 tests passing (91%)
-
-**Total Improvement**: +15 tests fixed (8.7% improvement)
-
-### Why No Further Improvement After Parser Fixes
-
-The bash-style control structures and other parser fixes we implemented are working correctly in isolation (verified with focused tests), but the 16 failing tests are in the most extreme polyglot scenarios that combine:
-- Deeply nested mixed-language constructs (10+ levels deep)
-- Language features that fundamentally conflict (e.g., Python indentation inside bash case statements)
-- Features requiring AST structure changes (match as true expression, not statement)
-- Complex string literals like heredocs that need multi-line lexer lookahead
-
-### Key Achievements
-1. Implemented context-aware lexer with mode stack
-2. Fixed keyword-as-identifier issues after dot operator
-3. Added support for decorator syntax
-4. Enhanced string literal handling for multiple languages
-5. Fixed spread operator in new expressions
-6. Improved match expression handling after pipe operator
-
-### Test Suite Status
-- **Current Pass Rate**: 157/173 tests (91%)
-- **Improvement**: From 82% to 91% pass rate
-- **Remaining Failures**: 16 tests in advanced polyglot scenarios
-
-## 🎯 Implementation Plan: Path to 100% Pass Rate
-
-### Overview
-The strategy to fix the remaining 16 failing tests is documented in three architecture files:
-- **[ARCHITECTURE_PROPOSAL.md](./ARCHITECTURE_PROPOSAL.md)** - Comprehensive architectural strategy
-- **[IMPLEMENTATION_EXAMPLE.md](./IMPLEMENTATION_EXAMPLE.md)** - Concrete bash conditionals example
-- **[QUICK_WINS.md](./QUICK_WINS.md)** - Prioritized implementation plan
-
-### Core Strategy: Context-Aware Lexer
-The key insight is that most failures stem from context-insensitive lexing. The solution is to add a mode stack to the lexer that changes tokenization behavior based on parsing context.
-
-### Implementation Phases
-
-#### Phase 1: Lexer Mode Stack (Week 1)
-**Goal:** Implement basic mode system with 3-5 modes
-**Impact:** Fixes 6-8 tests
-
-1. Add mode stack infrastructure to `lexer.ts`:
-   ```typescript
-   private modeStack: LexerMode[] = [LexerMode.Normal];
-   ```
-
-2. Implement core modes:
-   - `MemberAccess` - After `.`, all keywords become identifiers
-   - `BashCondition` - Inside `[ ]`, use bash tokenization rules
-   - `Decorator` - After `@`, special decorator syntax
-   - `StringTemplate` - For f-strings, r-strings, heredocs
-
-3. Add mode transition detection in `scanToken()`
-
-#### Phase 2: String Literals & Comprehensions (Days 4-5)
-**Goal:** Handle special string formats and comprehensions
-**Impact:** Fixes 5-7 tests
-
-1. Implement String Literal Factory:
-   - Detect prefixes: `f"`, `r"`, `b"`, `@"`, `<<EOF`
-   - Use appropriate scanner for each type
-
-2. Add comprehension detection:
-   - Lookahead for `for` keyword after expression in `[`, `{`, `(`
-   - Parse as comprehension vs literal
-
-#### Phase 3: Pipeline & Spread Operators (Day 6)
-**Goal:** Fix remaining operator issues
-**Impact:** Fixes 3-4 tests
-
-1. Special handling for pipe operator (`|>`):
-   - Detect `match` after pipe for implicit discriminant
-   - Handle placeholder syntax (`_.method()`)
-
-2. Fix spread in `new` expressions:
-   - Allow `...args` in constructor calls
-
-### Expected Results
-- **After Phase 1:** 163-165/173 tests passing (94-95%)
-- **After Phase 2:** 168-170/173 tests passing (97-98%)
-- **After Phase 3:** 171-172/173 tests passing (99%)
-
-### Next Steps for Implementation
-1. Start with `lexer.ts` modifications - add mode stack infrastructure
-2. Test each mode independently with focused test cases
-3. Integrate modes one at a time to avoid breaking changes
-4. Run full test suite after each phase
-
-### Key Files to Modify
-- `src/lexer.ts` - Add mode stack and mode-specific tokenization
-- `src/parser.ts` - Minor adjustments for new token types
-- `src/ast.ts` - Possibly add style hints to some nodes (e.g., bash-style while)
-
-## Common Patterns in This Codebase
-
-### Pattern Matching
-- Guard patterns: `Some(x) if x > 0 =>`
-- Wildcard patterns: `_ =>`  
-- Multiple pattern alternatives: `None | null | undefined =>`
-- Destructuring patterns: `[head, ...tail] =>`, `{type: "user", name} =>`
-
-### Function Types
-- Chained/curried functions: `A -> B -> C` (right-associative)
-- Function types with either arrow: `(A, B) -> C` or `(A, B) => C`
-- Generic functions: `fn curry<A, B, C>(f: (A, B) -> C)`
-- Async lambdas: `async () => { ... }`
-
-### Go-style Patterns
-- Channel creation: `make(chan T, 100)`
-- Go routines with async: `go async () => { ... }`
-- For loops without parens: `for i := 0; i < 10; i++ { ... }`
-- Channel operations: `<-ch` (receive), `ch <- value` (send)
-
-### Mixed Paradigm Patterns
-- Combining Go and JavaScript: `go async () => { await something() }`
-- Type parameters with multiple syntaxes: `Vec<T>`, `Result<Vec<T>, Error>`
+6. **Verify** - Test variations before running full suite

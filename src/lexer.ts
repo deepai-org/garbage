@@ -207,6 +207,17 @@ export class Lexer {
       return;
     }
     
+    // Heredoc check (before operators)
+    if (char === '<' && this.peek() === '<') {
+      const nextChar = this.peekNext();
+      // Only treat as heredoc if followed by uppercase letter (common convention)
+      if (nextChar && /[A-Z]/.test(nextChar)) {
+        this.advance(); // consume second '<'
+        this.scanHeredoc();
+        return;
+      }
+    }
+    
     // Regex or division
     if (char === '/') {
       if (this.shouldBeRegex()) {
@@ -219,6 +230,77 @@ export class Lexer {
     
     // Operators and punctuators
     this.scanOperator();
+  }
+  
+  private scanHeredoc(): void {
+    const start = this.position - 2; // Account for '<<' already consumed
+    const startLine = this.line;
+    const startColumn = this.column - 2;
+    
+    // Read the delimiter (max 20 chars for safety)
+    let delimiter = '';
+    let delimiterCount = 0;
+    while (!this.isAtEnd() && /[A-Z_0-9]/i.test(this.peek()) && delimiterCount < 20) {
+      delimiter += this.advance();
+      delimiterCount++;
+    }
+    
+    if (delimiter === '') {
+      // No delimiter found, treat as operator
+      this.position = start + 2; // Position after <<
+      this.scanOperator();
+      return;
+    }
+    
+    // Skip to next line
+    while (!this.isAtEnd() && this.peek() !== '\n') {
+      this.advance();
+    }
+    if (this.peek() === '\n') {
+      this.advance();
+      this.line++;
+      this.column = 0;
+    }
+    
+    // Collect heredoc content until we find delimiter on its own line
+    let content = '';
+    let currentLine = '';
+    let linesRead = 0;
+    const maxLines = 1000; // Safety limit
+    
+    while (!this.isAtEnd() && linesRead < maxLines) {
+      const char = this.peek();
+      
+      if (char === '\n') {
+        // Check if current line is the delimiter
+        if (currentLine.trim() === delimiter) {
+          // Found end delimiter
+          break;
+        }
+        // Add line to content
+        content += currentLine + '\n';
+        currentLine = '';
+        linesRead++;
+        this.advance();
+        this.line++;
+        this.column = 0;
+      } else {
+        currentLine += char;
+        this.advance();
+      }
+    }
+    
+    // Check final line
+    if (currentLine.trim() === delimiter) {
+      // Consume the delimiter line
+      while (!this.isAtEnd() && this.peek() !== '\n') {
+        this.advance();
+      }
+    }
+    
+    // Create the heredoc token
+    const heredocValue = `<<${delimiter}\n${content}${delimiter}`;
+    this.addTokenEx(TokenType.StringLiteral, heredocValue, start, this.position, startLine, startColumn);
   }
   
   private scanPrefixedString(): void {
