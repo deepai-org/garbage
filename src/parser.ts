@@ -1458,7 +1458,8 @@ export class Parser {
           this.peek().value === "enum" || this.peek().value === "namespace" ||
           this.peek().value === "async" || this.peek().value === "await" ||
           this.peek().value === "unsafe" || this.peek().value === "readonly" ||
-          this.peek().value === "abstract" || this.peek().value === "static"))) {
+          this.peek().value === "abstract" || this.peek().value === "static" ||
+          this.peek().value === "lambda" || this.peek().value === "func"))) {
       const token = this.peek();
       let id: AST.Identifier;
       
@@ -2222,22 +2223,6 @@ export class Parser {
   private parseParameter(): AST.Param {
     const start = this.current;
     
-    // Check for TypeScript constructor parameter property shorthand
-    // (public/private/protected/readonly modifiers)
-    let paramVisibility: "public" | "private" | "protected" | undefined;
-    let paramIsReadonly = false;
-    
-    if (this.peek().value === "public" || 
-        this.peek().value === "private" || 
-        this.peek().value === "protected") {
-      paramVisibility = this.advance().value as any;
-    }
-    
-    if (this.peek().value === "readonly") {
-      paramIsReadonly = true;
-      this.advance();
-    }
-    
     // Skip parameter decorators (e.g., @NotNull, @Range(...))
     // These aren't part of the spec but we need to handle them gracefully
     while (this.check("@")) {
@@ -2269,7 +2254,7 @@ export class Parser {
       visibility = this.previous()!.value as any;
     }
     
-    // Handle readonly modifier
+    // Handle readonly modifier  
     let readonly = false;
     if (this.match("readonly")) {
       readonly = true;
@@ -2327,6 +2312,10 @@ export class Parser {
       name,
       type,
       defaultValue,
+      visibility,
+      readonly,
+      spread: isSpread,
+      blockParam: isBlockParam,
       span: this.createSpan(start, this.current - 1)
     };
   }

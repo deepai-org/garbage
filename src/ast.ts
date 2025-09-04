@@ -457,6 +457,10 @@ export interface Param {
   name: Identifier;
   type?: TypeNode;
   defaultValue?: Expr;
+  visibility?: "public" | "private" | "protected";
+  readonly?: boolean;
+  spread?: boolean;
+  blockParam?: boolean;
   span: Span;
 }
 

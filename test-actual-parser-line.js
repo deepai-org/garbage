@@ -1,23 +1,24 @@
 const { Lexer } = require('./dist/lexer');
 const { Parser } = require('./dist/parser');
+const fs = require('fs');
 
-// Test exact method signature from parser.ts
-const code = `
+// Get the actual problematic lines from parser.ts
+const code = fs.readFileSync('./src/parser.ts', 'utf8');
+const lines = code.split('\n');
+
+// Extract around line 2038 where parseFuncDecl is
+const testCode = `
 class Parser {
-  private parseFuncDecl(async = false, unsafe = false, generator = false): AST.FuncDecl {
-    const start = this.current - 1;
-    const name = this.parseIdentifier();
-    return { kind: "FuncDecl", name };
-  }
-  
-  private parseOther(): void {
-    console.log("test");
-  }
+  ${lines.slice(2036, 2070).join('\n  ')}
 }
 `;
 
-console.log('Testing exact parseFuncDecl signature:');
-const lexer = new Lexer(code);
+console.log('Testing actual parser.ts code around parseFuncDecl:');
+console.log('Code being tested:');
+console.log(testCode.split('\n').slice(2, 7).join('\n'));
+console.log('...\n');
+
+const lexer = new Lexer(testCode);
 const tokens = lexer.tokenize();
 const parser = new Parser(tokens);
 const ast = parser.parse();
@@ -25,7 +26,7 @@ const ast = parser.parse();
 const classNode = ast.body[0];
 if (classNode?.kind === 'ClassDecl') {
   console.log(`Class has ${classNode.members?.length || 0} members:`);
-  classNode.members?.forEach((m, i) => {
+  classNode.members?.slice(0, 10).forEach((m, i) => {
     const name = m.name?.name || m.kind || 'Unknown';
     console.log(`  ${i}: ${name}`);
   });
@@ -33,7 +34,7 @@ if (classNode?.kind === 'ClassDecl') {
 
 console.log(`\nParse errors: ${parser.errors.length}`);
 if (parser.errors.length > 0) {
-  console.log('Errors:');
+  console.log('First 5 errors:');
   parser.errors.slice(0, 5).forEach(e => {
     console.log(`  ${e.message} at token '${e.token.value}'`);
   });
