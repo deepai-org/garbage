@@ -179,15 +179,17 @@ export class Parser {
     
     if (this.isAtEnd()) return null;
     
-    // If we're in a block and encounter a closing brace, return null
-    // This handles cases where a virtual semicolon appears before }
-    // But if braceDepth is 0, this is an error - consume it to avoid infinite loop
+    // Handle closing braces
+    // Note: braceDepth only tracks {} blocks (if/for/while/function bodies)
+    // It does NOT track braces for classes, interfaces, object literals, etc.
     if (this.check("}")) {
       if (this.braceDepth > 0) {
+        // We're inside a statement block, let parseBlock() handle it
         return null;
       } else {
-        // Unexpected closing brace - consume it and report error
-        console.error(`Unexpected '}' at position ${this.current}`);
+        // This } belongs to a class/interface/object literal/etc
+        // or is genuinely unmatched. Either way, consume it and continue.
+        // The calling context will handle validation.
         this.advance();
         return null;
       }
