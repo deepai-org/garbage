@@ -148,6 +148,11 @@ export class Parser {
   }
   
   private must(expected: string, options?: { recoverWithSynthetic?: boolean }): boolean {
+    // Skip virtual semicolons before checking for expected token
+    while (this.peek().virtualSemi) {
+      this.advance();
+    }
+    
     if (this.check(expected)) {
       this.advance();
       return true;
@@ -271,6 +276,17 @@ export class Parser {
     return this.parseStatement();
   }
   
+  private isStatementKeyword(keyword: string): boolean {
+    // These keywords can start a statement and should not be treated as identifiers
+    return keyword === "if" || keyword === "while" || keyword === "for" ||
+           keyword === "do" || keyword === "switch" || keyword === "try" ||
+           keyword === "throw" || keyword === "return" || keyword === "break" ||
+           keyword === "continue" || keyword === "case" || keyword === "default" ||
+           keyword === "new" || keyword === "yield" || keyword === "await" ||
+           keyword === "match" || keyword === "using" || keyword === "defer" ||
+           keyword === "go" || keyword === "echo";
+  }
+  
   private isDeclStart(): boolean {
     const type = this.peek().type;
     const value = this.peek().value;
@@ -296,6 +312,14 @@ export class Parser {
              next?.value === "async" || next?.value === "unsafe";
     }
     
+    // Special check for 'type' - only a declaration if followed by identifier (type alias)
+    if (value === "type") {
+      const next = this.peekNext();
+      // It's a type declaration if the next token is an identifier
+      // This allows 'type' to be used as a regular identifier in expressions
+      return next?.type === TokenType.Identifier;
+    }
+    
     return (
       type === TokenType.Keyword && (
         value === "import" || value === "require" ||
@@ -303,7 +327,7 @@ export class Parser {
         value === "fn" || value === "fun" || value === "function" || value === "def" || value === "func" ||
         value === "const" || value === "final" || value === "immutable" ||
         value === "class" || value === "struct" || value === "interface" ||
-        value === "trait" || value === "enum" || value === "type" ||
+        value === "trait" || value === "enum" ||
         value === "package" || value === "export"
       ) ||
       type === TokenType.Operator && value === "#" && 
@@ -1465,16 +1489,10 @@ export class Parser {
     }
     
     // Identifiers and sigil identifiers
-    // Also allow certain keywords as identifiers in expression context
+    // Also allow keywords as identifiers in expression context when they can't start a statement
     if (this.peek().type === TokenType.Identifier || 
         this.peek().type === TokenType.SigilIdentifier ||
-        (this.peek().type === TokenType.Keyword && 
-         (this.peek().value === "type" || this.peek().value === "interface" || 
-          this.peek().value === "enum" || this.peek().value === "namespace" ||
-          this.peek().value === "async" || this.peek().value === "await" ||
-          this.peek().value === "unsafe" || this.peek().value === "readonly" ||
-          this.peek().value === "abstract" || this.peek().value === "static" ||
-          this.peek().value === "lambda" || this.peek().value === "func"))) {
+        (this.peek().type === TokenType.Keyword && !this.isStatementKeyword(this.peek().value))) {
       const token = this.peek();
       let id: AST.Identifier;
       
@@ -1519,7 +1537,18 @@ export class Parser {
       }
       
       const start = this.current - 1;
+      
+      // Skip virtual semicolons after opening parenthesis
+      while (this.peek().virtualSemi) {
+        this.advance();
+      }
+      
       const expr = this.parseExpression();
+      
+      // Skip virtual semicolons before closing parenthesis
+      while (this.peek().virtualSemi) {
+        this.advance();
+      }
       
       // Check for generator comprehension: (expr for var in iterable)
       if (this.check("for")) {
@@ -4275,33 +4304,48 @@ export class Parser {
       } catch (error) {
         if (error instanceof ParseError) {
           this.errors.push(error);
-          // Skip to next potential member
+          // More aggressive error recovery - skip to next potential member
           // Look for visibility modifiers, method/field declarations, or closing brace
+          let braceDepth = 0;
           while (!this.isAtEnd() && !this.check("}")) {
             const token = this.peek();
             
-            // Check if we've reached what looks like the next member
-            if (token.value === "public" || token.value === "private" || 
-                token.value === "protected" || token.value === "static" ||
-                token.value === "readonly" || token.value === "async" ||
-                token.value === "constructor" || token.value === "override" ||
-                token.value === "abstract" || token.value === "get" ||
-                token.value === "set") {
-              // Found a potential next member
-              break;
+            // Track brace depth to skip nested blocks
+            if (token.value === "{") {
+              braceDepth++;
+              this.advance();
+              continue;
+            } else if (token.value === "}" && braceDepth > 0) {
+              braceDepth--;
+              this.advance();
+              continue;
             }
             
-            // Also check if we see "private methodName()" pattern
-            if (token.value === "private" || token.value === "public" || 
-                token.value === "protected") {
-              // Look ahead one token
-              const savedPos = this.current;
-              this.advance();
-              const next = this.peek();
-              this.current = savedPos; // Restore position
+            // Only look for next member at brace depth 0
+            if (braceDepth === 0) {
+              // Check if we've reached what looks like the next member
+              if (token.value === "public" || token.value === "private" || 
+                  token.value === "protected" || token.value === "static" ||
+                  token.value === "readonly" || token.value === "async" ||
+                  token.value === "constructor" || token.value === "override" ||
+                  token.value === "abstract" || token.value === "get" ||
+                  token.value === "set" || token.value === "declare") {
+                // Found a potential next member
+                break;
+              }
               
-              if (next?.type === TokenType.Identifier) {
-                break; // This is likely a member declaration
+              // Also check if we see "private methodName()" pattern
+              if (token.value === "private" || token.value === "public" || 
+                  token.value === "protected") {
+                // Look ahead one token
+                const savedPos = this.current;
+                this.advance();
+                const next = this.peek();
+                this.current = savedPos; // Restore position
+                
+                if (next?.type === TokenType.Identifier) {
+                  break; // This is likely a member declaration
+                }
               }
             }
             

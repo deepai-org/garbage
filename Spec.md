@@ -348,6 +348,8 @@ then this throw trait true try type until unsafe using var when while
 
 **Soft keywords:** `regex`, `div`, `fallthrough`. They are ordinary identifiers except where explicitly consumed (§2.5, §8.1).
 
+**Context-sensitive keywords:** `type` is treated as a declaration keyword only when it appears at the start of a statement followed by an identifier. In all other contexts (e.g., after `let`, `const`, `var`, as a variable name in expressions), `type` is treated as a regular identifier.
+
 ---
 
 ## 11. Module system
