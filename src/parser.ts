@@ -25,6 +25,9 @@ export class Parser {
   // Error recovery state
   private syntheticTokenCounter = 0;
   
+  // Context tracking
+  private insideSwitch = false;
+  
   // Directives
   private nextStmtGenericMode: "on" | "off" | "auto" = "auto";
   
@@ -272,6 +275,11 @@ export class Parser {
     const type = this.peek().type;
     const value = this.peek().value;
     
+    // Check for decorators (@decorator)
+    if (value === "@") {
+      return true;
+    }
+    
     // Special check for using - it's only a declaration if it's an import
     if (value === "using") {
       const next = this.peekNext();
@@ -456,7 +464,9 @@ export class Parser {
       return this.parseSwitch();
     }
     
-    if (this.match("case")) {
+    // Don't parse 'case' as a statement when inside a switch
+    if (this.peek().value === "case" && !this.insideSwitch) {
+      this.advance();
       // Bash-style case statement
       return this.parseCaseStatement();
     }
@@ -2080,6 +2090,10 @@ export class Parser {
     if (this.match("->")) {
       // Arrow notation always indicates return type
       returnType = this.parseType();
+      // After parsing return type, check for Python-style colon
+      if (!this.check(":") && !this.check("{") && !this.check("=>")) {
+        // If no block starter follows, this might be an error
+      }
     } else if (this.check(":")) {
       // Colon could be either type annotation or Python-style block
       // Check if next token after colon indicates an indent block
@@ -2109,8 +2123,9 @@ export class Parser {
     let body: AST.Block;
     if (this.match("=>")) {
       body = this.parseExpressionBody();
-    } else if (this.previous()?.value === ":") {
-      // We just consumed a colon for a Python-style block
+    } else if (this.match(":") || this.previous()?.value === ":") {
+      // Python-style block with colon (handles both direct : and -> Type: cases)
+      // Note: previous check handles case where : was already consumed in type checking
       const currentIndent = this.current > 0 ? (this.tokens[this.current - 1]?.indentCol ?? 0) : 0;
       const peekIndent = this.peek().indentCol;
       if (this.peek().virtualSemi || 
@@ -2445,6 +2460,10 @@ export class Parser {
     const cases: AST.SwitchCase[] = [];
     let defaultCase: AST.Block | undefined;
     
+    // Set flag to indicate we're inside a switch
+    const wasInsideSwitch = this.insideSwitch;
+    this.insideSwitch = true;
+    
     // Support both { } and : styles
     const isPythonStyle = this.check(":");
     let baseIndent = 0;
@@ -2589,6 +2608,9 @@ export class Parser {
     if (!isPythonStyle) {
       this.consume("}", "Expected '}' after switch body");
     }
+    
+    // Restore switch context flag
+    this.insideSwitch = wasInsideSwitch;
     
     return {
       kind: "Switch",
@@ -3611,7 +3633,7 @@ export class Parser {
     
     let type = this.parseSimpleType();
     
-    // Handle array type suffix: Type[]
+    // Handle array type suffix: Type[] or indexed access Type["property"]
     while (this.check("[")) {
       const checkpoint = this.current;
       this.advance(); // consume [
@@ -3630,8 +3652,19 @@ export class Parser {
           args: [type],
           span: this.createSpanFrom(type)
         };
+      } else if (this.peek().type === TokenType.StringLiteral) {
+        // Indexed access type: Type["property"]
+        const indexToken = this.advance();
+        this.consume("]", "Expected ']' after indexed access property");
+        
+        type = {
+          kind: "IndexedAccessType",
+          object: type,
+          index: indexToken.value,
+          span: this.createSpanFrom(type)
+        } as any; // Cast to any since IndexedAccessType may not be in AST yet
       } else {
-        // Not an array type, restore position
+        // Not an array type or indexed access, restore position
         this.current = checkpoint;
         break;
       }
@@ -4109,7 +4142,20 @@ export class Parser {
             // Optional return type
             let returnType: AST.TypeNode | undefined;
             if (this.match(":")) {
-              returnType = this.parseType();
+              try {
+                returnType = this.parseType();
+              } catch (error) {
+                // If parsing the return type fails, skip to the opening brace
+                if (error instanceof ParseError) {
+                  this.errors.push(error);
+                  // Skip to the opening brace of the method body
+                  while (!this.isAtEnd() && !this.check("{") && !this.check("}")) {
+                    this.advance();
+                  }
+                } else {
+                  throw error;
+                }
+              }
             }
             
             // Method body
@@ -4238,9 +4284,25 @@ export class Parser {
             if (token.value === "public" || token.value === "private" || 
                 token.value === "protected" || token.value === "static" ||
                 token.value === "readonly" || token.value === "async" ||
-                token.value === "constructor") {
+                token.value === "constructor" || token.value === "override" ||
+                token.value === "abstract" || token.value === "get" ||
+                token.value === "set") {
               // Found a potential next member
               break;
+            }
+            
+            // Also check if we see "private methodName()" pattern
+            if (token.value === "private" || token.value === "public" || 
+                token.value === "protected") {
+              // Look ahead one token
+              const savedPos = this.current;
+              this.advance();
+              const next = this.peek();
+              this.current = savedPos; // Restore position
+              
+              if (next?.type === TokenType.Identifier) {
+                break; // This is likely a member declaration
+              }
             }
             
             // Also break if we see an identifier after a newline/semicolon

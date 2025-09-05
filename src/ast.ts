@@ -13,7 +13,8 @@ export type TypeNode =
   | GenericType
   | FuncType
   | ChanType
-  | ImplType;
+  | ImplType
+  | IndexedAccessType;
 
 export interface SimpleType {
   kind: "SimpleType";
@@ -57,6 +58,13 @@ export interface ChanType {
 export interface ImplType {
   kind: "ImplType";
   trait: TypeNode;
+  span: Span;
+}
+
+export interface IndexedAccessType {
+  kind: "IndexedAccessType";
+  object: TypeNode;
+  index: string;
   span: Span;
 }
 

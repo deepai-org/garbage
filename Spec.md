@@ -167,7 +167,7 @@ Program        ::= { Declaration | Statement } ;
 Declaration    ::= Import | VarDecl | ConstDecl | ShortDecl | FuncDecl | TypeDecl ;
 Statement      ::= ExprStmt | If | Loop | Switch | Try | Using | Defer | Break | Continue | Return | Echo ;
 Expr           ::= Literal | Ident | Lambda | Call | Index | Member | Unary | Binary | Assign ;
-Type           ::= Simple | Nullable | Generic | Union | FuncType ;
+Type           ::= Simple | Nullable | Generic | Union | FuncType | IndexedAccess ;
 ```
 
 All surface forms from donor languages are deterministically rewritten to this core.
@@ -201,6 +201,7 @@ class  interface  struct  trait  enum
 NullableType := Type "?"
 GenericType  := Ident "<" Type { "," Type } ">" | Ident "[" Type { "," Type } "]"
 UnionType    := Type "|" Type { "|" Type }
+IndexedAccessType := Type "[" StringLiteral "]"  // TypeScript-style indexed access e.g., Type["property"]
 
 chan<T>     // channel type used by §12.4
 ```
@@ -687,7 +688,8 @@ type TypeNode =
   | {kind:"NullableType", inner:TypeNode}
   | {kind:"UnionType", types:TypeNode[]}
   | {kind:"GenericType", base:Id, args:TypeNode[]}
-  | {kind:"FuncType", params:TypeNode[], ret:TypeNode};
+  | {kind:"FuncType", params:TypeNode[], ret:TypeNode}
+  | {kind:"IndexedAccessType", object:TypeNode, index:string};
 
 type Expr =
   | {kind:"LitNum", raw:string, suffix?:string, span:Span}
