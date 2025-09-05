@@ -340,9 +340,19 @@ export class Lexer {
           break;
         }
       } else {
-        if (this.peek() === quote && this.source[this.position - 1] !== '\\') {
-          value += this.advance();
-          break;
+        if (this.peek() === quote) {
+          // Count consecutive backslashes before the quote
+          let backslashCount = 0;
+          let checkPos = this.position - 1;
+          while (checkPos >= 0 && this.source[checkPos] === '\\') {
+            backslashCount++;
+            checkPos--;
+          }
+          // If even number of backslashes (including 0), the quote is not escaped
+          if (backslashCount % 2 === 0) {
+            value += this.advance();
+            break;
+          }
         }
       }
       
@@ -384,9 +394,19 @@ export class Lexer {
           break;
         }
       } else {
-        if (this.peek() === quote && this.source[this.position - 1] !== '\\') {
-          value += this.advance();
-          break;
+        if (this.peek() === quote) {
+          // Count consecutive backslashes before the quote
+          let backslashCount = 0;
+          let checkPos = this.position - 1;
+          while (checkPos >= 0 && this.source[checkPos] === '\\') {
+            backslashCount++;
+            checkPos--;
+          }
+          // If even number of backslashes (including 0), the quote is not escaped
+          if (backslashCount % 2 === 0) {
+            value += this.advance();
+            break;
+          }
         }
       }
       
