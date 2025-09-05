@@ -4161,8 +4161,15 @@ export class Parser {
         }
         
         // Handle property declarations and methods
-        if (this.peek().type === TokenType.Identifier) {
-          const name = this.parseIdentifier();
+        // Allow keywords as method names (e.g., 'match' can be a method name)
+        if (this.peek().type === TokenType.Identifier || this.peek().type === TokenType.Keyword) {
+          // Parse method/field name - allow keywords as identifiers in this context
+          const nameToken = this.advance();
+          const name: AST.Identifier = {
+            kind: "Identifier",
+            name: nameToken.value,
+            span: this.createSpanFrom(nameToken)
+          };
           
           // Method with parentheses: methodName(params): returnType { body }
           if (this.check("(")) {
