@@ -89,7 +89,9 @@ export type Expr =
   | ObjectLiteral
   | Spread
   | Yield
-  | TypeAssertion;
+  | TypeAssertion
+  | JSXElement
+  | JSXFragment;
 
 export interface NumericLiteral {
   kind: "NumericLiteral";
@@ -378,6 +380,114 @@ export interface TypeAssertion {
   kind: "TypeAssertion";
   expr: Expr;
   type: TypeNode;
+  span: Span;
+}
+
+// JSX Expression nodes
+export interface JSXElement {
+  kind: "JSXElement";
+  openingElement: JSXOpeningElement;
+  closingElement: JSXClosingElement | null;
+  children: JSXChild[];
+  span: Span;
+}
+
+export interface JSXFragment {
+  kind: "JSXFragment";
+  children: JSXChild[];
+  span: Span;
+}
+
+export interface JSXOpeningElement {
+  kind: "JSXOpeningElement";
+  name: JSXElementName;
+  attributes: JSXAttribute[];
+  selfClosing: boolean;
+  span: Span;
+}
+
+export interface JSXClosingElement {
+  kind: "JSXClosingElement";
+  name: JSXElementName;
+  span: Span;
+}
+
+export type JSXElementName = 
+  | JSXIdentifier
+  | JSXMemberExpression
+  | JSXNamespacedName;
+
+export interface JSXIdentifier {
+  kind: "JSXIdentifier";
+  name: string;
+  span: Span;
+}
+
+export interface JSXMemberExpression {
+  kind: "JSXMemberExpression";
+  object: JSXElementName;
+  property: JSXIdentifier;
+  span: Span;
+}
+
+export interface JSXNamespacedName {
+  kind: "JSXNamespacedName";
+  namespace: JSXIdentifier;
+  name: JSXIdentifier;
+  span: Span;
+}
+
+export type JSXAttribute =
+  | JSXNormalAttribute
+  | JSXSpreadAttribute;
+
+export interface JSXNormalAttribute {
+  kind: "JSXAttribute";
+  name: JSXIdentifier | JSXNamespacedName;
+  value: JSXAttributeValue | null;
+  span: Span;
+}
+
+export interface JSXSpreadAttribute {
+  kind: "JSXSpreadAttribute";
+  argument: Expr;
+  span: Span;
+}
+
+export type JSXAttributeValue =
+  | StringLiteral
+  | JSXExpressionContainer
+  | JSXElement
+  | JSXFragment;
+
+export type JSXChild =
+  | JSXText
+  | JSXExpressionContainer
+  | JSXSpreadChild
+  | JSXElement
+  | JSXFragment;
+
+export interface JSXText {
+  kind: "JSXText";
+  value: string;
+  raw: string;
+  span: Span;
+}
+
+export interface JSXExpressionContainer {
+  kind: "JSXExpressionContainer";
+  expression: Expr | JSXEmptyExpression;
+  span: Span;
+}
+
+export interface JSXEmptyExpression {
+  kind: "JSXEmptyExpression";
+  span: Span;
+}
+
+export interface JSXSpreadChild {
+  kind: "JSXSpreadChild";
+  expression: Expr;
   span: Span;
 }
 

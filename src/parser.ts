@@ -1391,11 +1391,29 @@ export class Parser {
       };
     }
     
-    // Handle angle-bracket type assertion <Type>expr
+    // Handle JSX elements and fragments
     if (this.peek().value === "<") {
       const next = this.peekNext();
-      // Check if this looks like a type assertion
+      
+      // Check for JSX fragment <>
+      if (next && next.value === ">") {
+        return this.parseJSXFragment();
+      }
+      
+      // Check for JSX closing tag </
+      if (next && next.value === "/") {
+        // This shouldn't happen in primary expression position
+        throw this.error(this.peek(), "Unexpected JSX closing tag");
+      }
+      
+      // Check if this looks like JSX element
       if (next && next.type === TokenType.Identifier) {
+        // Distinguish between JSX and type assertion/generics
+        if (this.isJSXElement()) {
+          return this.parseJSXElement();
+        }
+        
+        // Try type assertion <Type>expr
         const checkpoint = this.current;
         this.advance(); // consume '<'
         
@@ -5936,5 +5954,520 @@ export class Parser {
     }
     
     throw this.error(token, message);
+  }
+
+  // ============ JSX Parsing Methods ============
+
+  private isJSXElement(): boolean {
+    // Look ahead to determine if this is JSX or not
+    const saved = this.current;
+    
+    try {
+      // Skip <
+      if (!this.match("<")) return false;
+      
+      // Check element name
+      const name = this.peek();
+      if (name.type !== TokenType.Identifier) {
+        this.current = saved;
+        return false;
+      }
+      
+      // Check if it's an HTML tag or a component (capital letter)
+      const isComponent = /^[A-Z]/.test(name.value);
+      const isHTMLTag = this.isHTMLTag(name.value);
+      
+      if (!isComponent && !isHTMLTag) {
+        // Could be a generic like Array<T>
+        this.current = saved;
+        return false;
+      }
+      
+      this.advance(); // consume identifier
+      
+      // Look for JSX patterns: attributes, >, />, or .
+      while (!this.isAtEnd()) {
+        const token = this.peek();
+        
+        if (token.value === ">" || token.value === "/") {
+          this.current = saved;
+          return true; // Definitely JSX
+        }
+        
+        if (token.value === ".") {
+          // Member expression like <Form.Input>
+          this.advance();
+          if (this.peek().type !== TokenType.Identifier) {
+            this.current = saved;
+            return false;
+          }
+          this.advance();
+          continue;
+        }
+        
+        if (token.type === TokenType.Identifier || token.type === TokenType.Keyword || token.value === "{") {
+          // Likely an attribute (can be identifier, keyword, or spread)
+          this.current = saved;
+          return true;
+        }
+        
+        if (token.value === "<") {
+          // Generic like Component<Props>
+          this.current = saved;
+          return false;
+        }
+        
+        break;
+      }
+      
+      this.current = saved;
+      return false;
+    } catch {
+      this.current = saved;
+      return false;
+    }
+  }
+
+  private isHTMLTag(name: string): boolean {
+    // Common HTML tags
+    const htmlTags = new Set([
+      'a', 'abbr', 'address', 'area', 'article', 'aside', 'audio',
+      'b', 'base', 'bdi', 'bdo', 'blockquote', 'body', 'br', 'button',
+      'canvas', 'caption', 'cite', 'code', 'col', 'colgroup',
+      'data', 'datalist', 'dd', 'del', 'details', 'dfn', 'dialog', 'div', 'dl', 'dt',
+      'em', 'embed',
+      'fieldset', 'figcaption', 'figure', 'footer', 'form',
+      'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'head', 'header', 'hgroup', 'hr', 'html',
+      'i', 'iframe', 'img', 'input', 'ins',
+      'kbd', 'label', 'legend', 'li', 'link',
+      'main', 'map', 'mark', 'menu', 'meta', 'meter',
+      'nav', 'noscript',
+      'object', 'ol', 'optgroup', 'option', 'output',
+      'p', 'param', 'picture', 'pre', 'progress',
+      'q', 'rp', 'rt', 'ruby',
+      's', 'samp', 'script', 'section', 'select', 'slot', 'small', 'source', 'span', 
+      'strong', 'style', 'sub', 'summary', 'sup', 'svg',
+      'table', 'tbody', 'td', 'template', 'textarea', 'tfoot', 'th', 'thead', 'time', 
+      'title', 'tr', 'track',
+      'u', 'ul',
+      'var', 'video',
+      'wbr'
+    ]);
+    
+    return htmlTags.has(name.toLowerCase());
+  }
+
+  private parseJSXElement(): AST.JSXElement {
+    const start = this.current;
+    const openingElement = this.parseJSXOpeningElement();
+    
+    if (openingElement.selfClosing) {
+      return {
+        kind: "JSXElement",
+        openingElement,
+        closingElement: null,
+        children: [],
+        span: this.createSpan(start, this.current - 1)
+      };
+    }
+    
+    const children = this.parseJSXChildren();
+    const closingElement = this.parseJSXClosingElement();
+    
+    // Verify matching tags
+    const openName = this.getJSXElementNameString(openingElement.name);
+    const closeName = this.getJSXElementNameString(closingElement.name);
+    
+    if (openName !== closeName) {
+      throw this.error(this.previous()!, 
+        `JSX closing tag </${closeName}> doesn't match opening tag <${openName}>`);
+    }
+    
+    return {
+      kind: "JSXElement",
+      openingElement,
+      closingElement,
+      children,
+      span: this.createSpan(start, this.current - 1)
+    };
+  }
+
+  private parseJSXFragment(): AST.JSXFragment {
+    const start = this.current;
+    
+    // Consume <>
+    this.consume("<", "Expected '<'");
+    this.consume(">", "Expected '>'");
+    
+    const children = this.parseJSXChildren();
+    
+    // Consume </>
+    this.consume("<", "Expected '</'");
+    this.consume("/", "Expected '/'");
+    this.consume(">", "Expected '>'");
+    
+    return {
+      kind: "JSXFragment",
+      children,
+      span: this.createSpan(start, this.current - 1)
+    };
+  }
+
+  private parseJSXOpeningElement(): AST.JSXOpeningElement {
+    const start = this.current;
+    
+    this.consume("<", "Expected '<'");
+    const name = this.parseJSXElementName();
+    const attributes = this.parseJSXAttributes();
+    
+    const selfClosing = this.match("/");
+    this.consume(">", "Expected '>'");
+    
+    return {
+      kind: "JSXOpeningElement",
+      name,
+      attributes,
+      selfClosing,
+      span: this.createSpan(start, this.current - 1)
+    };
+  }
+
+  private parseJSXClosingElement(): AST.JSXClosingElement {
+    const start = this.current;
+    
+    this.consume("<", "Expected '<'");
+    this.consume("/", "Expected '/'");
+    const name = this.parseJSXElementName();
+    this.consume(">", "Expected '>'");
+    
+    return {
+      kind: "JSXClosingElement",
+      name,
+      span: this.createSpan(start, this.current - 1)
+    };
+  }
+
+  private parseJSXElementName(): AST.JSXElementName {
+    const start = this.current;
+    
+    if (!this.peek() || this.peek().type !== TokenType.Identifier) {
+      throw this.error(this.peek(), "Expected JSX element name");
+    }
+    
+    let name: AST.JSXElementName = {
+      kind: "JSXIdentifier",
+      name: this.advance().value,
+      span: this.createSpan(start, this.current - 1)
+    };
+    
+    // Handle member expressions like <Form.Input>
+    while (this.match(".")) {
+      const propStart = this.current;
+      if (this.peek().type !== TokenType.Identifier) {
+        throw this.error(this.peek(), "Expected identifier after '.'");
+      }
+      
+      const property: AST.JSXIdentifier = {
+        kind: "JSXIdentifier",
+        name: this.advance().value,
+        span: this.createSpan(propStart, this.current - 1)
+      };
+      
+      name = {
+        kind: "JSXMemberExpression",
+        object: name,
+        property,
+        span: this.createSpan(start, this.current - 1)
+      };
+    }
+    
+    return name;
+  }
+
+  private parseJSXAttributes(): AST.JSXAttribute[] {
+    const attributes: AST.JSXAttribute[] = [];
+    
+    while (!this.isAtEnd() && !this.check(">") && !this.check("/")) {
+      // Skip virtual semicolons
+      while (this.peek().virtualSemi) {
+        this.advance();
+      }
+      
+      if (this.check("{")) {
+        // Spread attribute
+        attributes.push(this.parseJSXSpreadAttribute());
+      } else if (this.peek().type === TokenType.Identifier || this.peek().type === TokenType.Keyword) {
+        // Normal attribute (can be identifier or keyword)
+        attributes.push(this.parseJSXAttribute());
+      } else {
+        break;
+      }
+    }
+    
+    return attributes;
+  }
+
+  private parseJSXAttribute(): AST.JSXNormalAttribute {
+    const start = this.current;
+    const name = this.parseJSXAttributeName();
+    
+    let value: AST.JSXAttributeValue | null = null;
+    
+    if (this.match("=")) {
+      if (this.check("{")) {
+        // Expression value
+        value = this.parseJSXExpressionContainer();
+      } else if (this.peek().type === TokenType.StringLiteral) {
+        // String value
+        value = this.parseStringLiteral();
+      } else if (this.check("<")) {
+        // JSX element as value
+        value = this.parseJSXElement();
+      }
+    }
+    
+    return {
+      kind: "JSXAttribute",
+      name,
+      value,
+      span: this.createSpan(start, this.current - 1)
+    };
+  }
+
+  private parseJSXAttributeName(): AST.JSXIdentifier | AST.JSXNamespacedName {
+    const start = this.current;
+    
+    // JSX attribute names can be identifiers or keywords
+    const token = this.peek();
+    if (token.type !== TokenType.Identifier && token.type !== TokenType.Keyword) {
+      throw this.error(this.peek(), "Expected attribute name");
+    }
+    
+    const namespace: AST.JSXIdentifier = {
+      kind: "JSXIdentifier",
+      name: this.advance().value,
+      span: this.createSpan(start, this.current - 1)
+    };
+    
+    // Check for namespaced attribute like xmlns:xlink
+    if (this.match(":")) {
+      const nameStart = this.current;
+      if (this.peek().type !== TokenType.Identifier && this.peek().type !== TokenType.Keyword) {
+        throw this.error(this.peek(), "Expected identifier after ':'");
+      }
+      
+      const name: AST.JSXIdentifier = {
+        kind: "JSXIdentifier",
+        name: this.advance().value,
+        span: this.createSpan(nameStart, this.current - 1)
+      };
+      
+      return {
+        kind: "JSXNamespacedName",
+        namespace,
+        name,
+        span: this.createSpan(start, this.current - 1)
+      };
+    }
+    
+    // Check for hyphenated attributes like data-testid
+    if (this.match("-")) {
+      // Concatenate hyphenated name
+      let fullName = namespace.name + "-";
+      while (this.peek().type === TokenType.Identifier) {
+        fullName += this.advance().value;
+        if (!this.match("-")) break;
+        fullName += "-";
+      }
+      
+      return {
+        kind: "JSXIdentifier",
+        name: fullName,
+        span: this.createSpan(start, this.current - 1)
+      };
+    }
+    
+    return namespace;
+  }
+
+  private parseJSXSpreadAttribute(): AST.JSXSpreadAttribute {
+    const start = this.current;
+    
+    this.consume("{", "Expected '{'");
+    this.consume("...", "Expected '...'");
+    const argument = this.parseExpression();
+    this.consume("}", "Expected '}'");
+    
+    return {
+      kind: "JSXSpreadAttribute",
+      argument,
+      span: this.createSpan(start, this.current - 1)
+    };
+  }
+
+  private parseJSXChildren(): AST.JSXChild[] {
+    const children: AST.JSXChild[] = [];
+    
+    while (!this.isAtEnd()) {
+      // Check for closing tag
+      if (this.check("<") && this.peekNext()?.value === "/") {
+        break;
+      }
+      
+      // Skip virtual semicolons
+      while (this.peek().virtualSemi) {
+        this.advance();
+      }
+      
+      if (this.check("{")) {
+        // Expression or spread child
+        const start = this.current;
+        this.advance(); // consume {
+        
+        if (this.check("...")) {
+          // Spread child
+          this.advance(); // consume ...
+          const expression = this.parseExpression();
+          this.consume("}", "Expected '}'");
+          
+          children.push({
+            kind: "JSXSpreadChild",
+            expression,
+            span: this.createSpan(start, this.current - 1)
+          });
+        } else if (this.check("}")) {
+          // Empty expression {}
+          this.advance(); // consume }
+          children.push({
+            kind: "JSXExpressionContainer",
+            expression: {
+              kind: "JSXEmptyExpression",
+              span: this.createSpan(start + 1, this.current - 1)
+            },
+            span: this.createSpan(start, this.current - 1)
+          });
+        } else {
+          // Regular expression
+          const expression = this.parseExpression();
+          this.consume("}", "Expected '}'");
+          
+          children.push({
+            kind: "JSXExpressionContainer",
+            expression,
+            span: this.createSpan(start, this.current - 1)
+          });
+        }
+      } else if (this.check("<")) {
+        // Nested element or fragment
+        if (this.peekNext()?.value === ">") {
+          children.push(this.parseJSXFragment());
+        } else {
+          children.push(this.parseJSXElement());
+        }
+      } else {
+        // Text content
+        const text = this.parseJSXText();
+        if (text) {
+          children.push(text);
+        }
+      }
+    }
+    
+    return children;
+  }
+
+  private parseJSXText(): AST.JSXText | null {
+    const start = this.current;
+    let text = "";
+    let raw = "";
+    
+    while (!this.isAtEnd()) {
+      const token = this.peek();
+      
+      // Stop at JSX boundaries
+      if (token.value === "<" || token.value === "{") {
+        break;
+      }
+      
+      // Skip virtual semicolons but preserve the whitespace
+      if (token.virtualSemi) {
+        this.advance();
+        continue;
+      }
+      
+      // Accumulate text
+      if (token.type === TokenType.Identifier || 
+          token.type === TokenType.Keyword ||
+          token.type === TokenType.NumericLiteral) {
+        text += token.value;
+        raw += token.value;
+        this.advance();
+      } else if (token.value === ">" || token.value === "}") {
+        // These shouldn't appear in text
+        break;
+      } else {
+        // Other tokens become part of text
+        text += token.value;
+        raw += token.value;
+        this.advance();
+      }
+      
+      // Add space after token if there was whitespace
+      if (!this.isAtEnd() && this.peek().wsBefore) {
+        text += " ";
+        raw += " ";
+      }
+    }
+    
+    // Return null for empty text
+    if (text.trim() === "") {
+      return null;
+    }
+    
+    return {
+      kind: "JSXText",
+      value: text,
+      raw,
+      span: this.createSpan(start, this.current - 1)
+    };
+  }
+
+  private parseJSXExpressionContainer(): AST.JSXExpressionContainer {
+    const start = this.current;
+    
+    this.consume("{", "Expected '{'");
+    
+    if (this.check("}")) {
+      // Empty expression
+      this.advance();
+      return {
+        kind: "JSXExpressionContainer",
+        expression: {
+          kind: "JSXEmptyExpression",
+          span: this.createSpan(start + 1, this.current - 1)
+        },
+        span: this.createSpan(start, this.current - 1)
+      };
+    }
+    
+    const expression = this.parseExpression();
+    this.consume("}", "Expected '}'");
+    
+    return {
+      kind: "JSXExpressionContainer",
+      expression,
+      span: this.createSpan(start, this.current - 1)
+    };
+  }
+
+  private getJSXElementNameString(name: AST.JSXElementName): string {
+    switch (name.kind) {
+      case "JSXIdentifier":
+        return name.name;
+      case "JSXMemberExpression":
+        return this.getJSXElementNameString(name.object) + "." + name.property.name;
+      case "JSXNamespacedName":
+        return name.namespace.name + ":" + name.name.name;
+    }
   }
 }

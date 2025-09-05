@@ -13,6 +13,12 @@ export enum TokenType {
   // Operators and Punctuators
   Operator = "Operator",
   
+  // JSX Tokens
+  JSXTagStart = "JSXTagStart",      // < when starting JSX
+  JSXTagEnd = "JSXTagEnd",          // > when ending JSX tag
+  JSXSelfClose = "JSXSelfClose",    // />
+  JSXText = "JSXText",              // Text content in JSX
+  
   // Structure
   Comment = "Comment",
   Whitespace = "Whitespace",
@@ -25,7 +31,10 @@ export enum LexerMode {
   MemberAccess = "MemberAccess",  // After '.', keywords become identifiers
   BashCondition = "BashCondition", // Inside [ ], use bash tokenization
   Decorator = "Decorator",         // After '@', special decorator syntax
-  StringTemplate = "StringTemplate" // For f-strings, r-strings, heredocs
+  StringTemplate = "StringTemplate", // For f-strings, r-strings, heredocs
+  JSXTag = "JSXTag",              // Inside JSX < > for parsing attributes
+  JSXContent = "JSXContent",       // Between JSX opening and closing tags
+  JSXExpression = "JSXExpression"  // Inside {} within JSX
 }
 
 export interface Token {
@@ -666,6 +675,13 @@ export class Lexer {
   private shouldBeRegex(): boolean {
     if (!this.lastNonWSToken) return true;
     
+    // Special case: After < followed by identifier and >, we're likely in JSX content
+    // where </div> should be tokenized as <, /, div, > not as < followed by regex /div>
+    if (this.lastNonWSToken.value === '<') {
+      // Don't treat / as regex start after < (could be JSX closing tag)
+      return false;
+    }
+    
     const canEndExpression = [
       TokenType.Identifier, TokenType.SigilIdentifier,
       TokenType.NumericLiteral, TokenType.StringLiteral,
@@ -676,7 +692,7 @@ export class Lexer {
       return false;
     }
     
-    const endTokens = [']', ')', '}', '++', '--'];
+    const endTokens = [']', ')', '}', '++', '--', '>'];
     if (endTokens.includes(this.lastNonWSToken.value)) {
       return false;
     }

@@ -166,7 +166,7 @@ A block ends when its own closer appears first. Crossing stacks is a compile-tim
 Program        ::= { Declaration | Statement } ;
 Declaration    ::= Import | VarDecl | ConstDecl | ShortDecl | FuncDecl | TypeDecl ;
 Statement      ::= ExprStmt | If | Loop | Switch | Try | Using | Defer | Break | Continue | Return | Echo ;
-Expr           ::= Literal | Ident | Lambda | Call | Index | Member | Unary | Binary | Assign ;
+Expr           ::= Literal | Ident | Lambda | Call | Index | Member | Unary | Binary | Assign | JSXElement ;
 Type           ::= Simple | Nullable | Generic | Union | FuncType | IndexedAccess ;
 ```
 
@@ -335,7 +335,133 @@ Fixed precedence (highest to lowest):
 
 ---
 
-## 10. Keywords
+## 10. JSX/TSX Syntax
+
+### 10.1 JSX Elements
+
+JSX elements are first-class expressions in PolyScript, enabling React, Preact, Solid, and similar frameworks.
+
+```
+JSXElement     ::= JSXSelfClosing | JSXContainer ;
+JSXSelfClosing ::= "<" JSXElementName JSXAttributes? "/>" ;
+JSXContainer   ::= JSXOpeningElement JSXChildren? JSXClosingElement ;
+
+JSXOpeningElement ::= "<" JSXElementName JSXAttributes? ">" ;
+JSXClosingElement ::= "</" JSXElementName ">" ;
+
+JSXElementName ::= Identifier                           // Component
+                 | Identifier ("." Identifier)+         // Namespaced
+                 | LowerCaseIdentifier                  // HTML element
+                 ;
+
+JSXChildren    ::= (JSXText | JSXElement | JSXExpression | JSXFragment)+ ;
+JSXText        ::= any text except "{", "<", ">", "&" (with entity escapes) ;
+JSXExpression  ::= "{" Expr "}" | "{" "..." Expr "}" ;  // Spread children
+JSXFragment    ::= "<>" JSXChildren? "</>" ;
+```
+
+### 10.2 JSX Attributes
+
+```
+JSXAttributes     ::= (JSXAttribute | JSXSpreadAttribute)* ;
+JSXAttribute      ::= JSXAttributeName [ "=" JSXAttributeValue ] ;
+JSXSpreadAttribute::= "{" "..." Expr "}" ;
+
+JSXAttributeName  ::= Identifier | Identifier (":" | "-") Identifier ;
+JSXAttributeValue ::= StringLiteral 
+                    | "{" Expr "}"
+                    | JSXElement
+                    | JSXFragment ;
+```
+
+### 10.3 JSX Type Annotations (TSX)
+
+In `.tsx` contexts or when types are enabled:
+
+```
+JSXGenericElement ::= "<" JSXElementName TypeArguments JSXAttributes? ">" ;
+TypeAssertion     ::= Expr "as" Type ;                 // In JSX expressions
+JSXTypeAttribute  ::= Identifier ":" Type "=" JSXAttributeValue ;
+```
+
+### 10.4 JSX Lexical Rules
+
+1. **Context switching**: After `<` followed by an identifier or `>` (fragment), the lexer enters JSX mode.
+2. **JSX mode exits** on: matching `>` or `/>` at element depth 0.
+3. **Nested elements**: Track depth for proper closing.
+4. **Expression holes**: `{` in JSX mode starts an expression context until matching `}`.
+5. **Text content**: Between tags, text is preserved with whitespace normalization:
+   - Leading/trailing whitespace on lines with only whitespace is removed
+   - Newlines become single spaces unless preserved by `{' '}`
+   - HTML entities (`&lt;`, `&gt;`, `&amp;`, `&quot;`, `&#...;`) are recognized
+
+### 10.5 JSX Comments
+
+```
+JSXComment ::= "{/*" (any except "*/")* "*/}" ;
+```
+
+### 10.6 JSX Disambiguation
+
+1. **Generic vs JSX**: When `<` could start either:
+   - If followed by capital letter or lowercase HTML tag name → JSX
+   - If followed by `>` (empty) → JSX Fragment
+   - If followed by `/` → JSX closing tag
+   - Otherwise apply generic rules (§5)
+
+2. **Type assertion vs JSX**: 
+   - `<Type>expr` is a type assertion in non-JSX contexts
+   - Use `expr as Type` in JSX contexts to avoid ambiguity
+
+### 10.7 JSX Semantics
+
+JSX expressions compile to function calls:
+
+```javascript
+// JSX source
+<Button size="large" onClick={handleClick}>
+  Click me
+</Button>
+
+// Compiles to (React.createElement style)
+React.createElement(Button, 
+  { size: "large", onClick: handleClick },
+  "Click me"
+)
+
+// Or with pragma (e.g., /** @jsx h */)
+h(Button, { size: "large", onClick: handleClick }, "Click me")
+```
+
+Fragments compile to:
+```javascript
+<>content</> → React.Fragment or Fragment
+```
+
+### 10.8 JSX Spread Semantics
+
+```javascript
+// Props spread
+<Component {...props} extra="value" />
+→ createElement(Component, { ...props, extra: "value" })
+
+// Children spread  
+<Component>{...items}</Component>
+→ createElement(Component, null, ...items)
+```
+
+### 10.9 JSX Special Attributes
+
+Certain attributes have special handling:
+- `className` (React) and `class` (others) both accepted
+- `htmlFor` (React) and `for` (others) both accepted
+- `key` and `ref` are reserved for framework use
+- Event handlers follow framework conventions (`onClick`, `on:click`, etc.)
+- Style can be object (`style={{color: 'red'}}`) or string (`style="color: red"`)
+
+---
+
+## 11. Keywords
 
 These are reserved as keywords unless written in backticks per §2.3.1.
 
@@ -352,7 +478,7 @@ then this throw trait true try type until unsafe using var when while
 
 ---
 
-## 11. Module system
+## 12. Module system
 
 ```
 ImportStmt ::= ("import" | "require" | "using" | "#include") Path [ "as" Identifier ] ;
@@ -365,27 +491,27 @@ ImportStmt ::= ("import" | "require" | "using" | "#include") Path [ "as" Identif
 
 ---
 
-## 12. Execution semantics
+## 13. Execution semantics
 
-### 12.1 Memory
+### 13.1 Memory
 
 Single shared heap with tracing GC. Object header includes a type tag and v-table pointer.
 Deterministic destruction occurs via `finally` paths from `using` / `defer` / RAII.
 
-### 12.2 Truthiness
+### 13.2 Truthiness
 
 A value is false only if it is **exactly** one of:
 `false`, `0`, `0.0`, `0n` (bigint zero), `null` (alias `undefined`), empty `string`, empty `bytes`, empty array, empty map, `NaN`.
 All other values are true.
 
-### 12.3 Arithmetic and overflow
+### 13.3 Arithmetic and overflow
 
 * Mixed numeric operands widen to a common supertype; integers may widen to `f64`.
 * Signed overflow yields a `bigint` result.
 * Unsigned overflow wraps modulo 2ⁿ.
 * `+` concatenates if either operand is `string`.
 
-### 12.4 Concurrency
+### 13.4 Concurrency
 
 `go expr` starts a **green task** in the same address space. If `expr` is a function call or lambda, its result is ignored; a `Future<any>` handle is returned.
 `chan<T>` is a built-in generic channel type. `make(chan<T>, capacity=0)` creates a channel. Channels are FIFO. Send blocks when the buffer is full (or unbuffered).
@@ -393,7 +519,7 @@ Send: `ch <- v`. Receive: `<- ch`. Communication over a channel establishes happ
 
 Awaiting a future uses `await` with JavaScript semantics.
 
-### 12.5 Error model
+### 13.5 Error model
 
 Any statement may raise `Error`.
 `try { … } catch (e) { … }`, `except`, and `rescue` are synonyms.
@@ -401,14 +527,14 @@ Uncaught errors unwind to the task boundary, terminate the task, and the parent 
 
 ---
 
-## 13. Directives and attributes
+## 14. Directives and attributes
 
-* Directive comments begin with `// @` or `# @`, are recognized during parse, and are then dropped. Reserved: `@generics`, `@nogenerics`, `@lint-disable` (others may be added). Directives apply to the **next statement only** unless stated.
+* Directive comments begin with `// @` or `# @`, are recognized during parse, and are then dropped. Reserved: `@generics`, `@nogenerics`, `@jsx`, `@jsxFrag`, `@jsxImportSource`, `@lint-disable` (others may be added). Directives apply to the **next statement only** unless stated.
 * Attributes `[#[name]]` or `@annotation` may adorn declarations; preserved in the AST; ignored by core semantics.
 
 ---
 
-## 14. Tooling guarantees
+## 15. Tooling guarantees
 
 1. **Formatter** does not change chosen string delimiters and inserts semicolons only where MASI would.
 2. **LSP rename** operates on the NFC-normalized identifier. `$foo`, `foo`, and backtick forms are the same symbol.
@@ -416,19 +542,19 @@ Uncaught errors unwind to the task boundary, terminate the task, and the parent 
 
 ---
 
-## 15. Compliance definition
+## 16. Compliance definition
 
 A compiler is PolyScript-1.0 compliant if:
 
 1. It accepts every program valid under §§2–11.
 2. It rejects any program violating a compile-time error.
-3. Its run-time behaviour (I/O, exceptions, global state) matches §§6–12.
+3. Its run-time behaviour (I/O, exceptions, global state) matches §§6–13.
 
 Performance, code layout, and optimization are out of scope.
 
 ---
 
-## 16. Annex A — Illustrative files (all valid)
+## 17. Annex A — Illustrative files (all valid)
 
 ```polyscript
 #!/usr/bin/env polyscript
@@ -453,7 +579,59 @@ function quicksort(arr){
 }
 ```
 
-Each file also passes unmodified through its donor-language compiler (with undeclared features stubbed), preserving the **“every donor program stays valid”** pledge.
+```polyscript
+// React component with JSX and TypeScript annotations
+interface Props {
+    title: string
+    items: string[]
+    onSelect?: (item: string) => void
+}
+
+function TodoList({ title, items, onSelect }: Props) {
+    const [filter, setFilter] = useState("")
+    
+    const filtered = items.filter(item => 
+        item.toLowerCase().includes(filter.toLowerCase())
+    )
+    
+    return (
+        <div className="todo-list">
+            <h2>{title}</h2>
+            <input 
+                type="text"
+                value={filter}
+                onChange={e => setFilter(e.target.value)}
+                placeholder="Filter items..."
+            />
+            <ul>
+                {filtered.map(item => (
+                    <li key={item} onClick={() => onSelect?.(item)}>
+                        {item}
+                    </li>
+                ))}
+            </ul>
+            {filtered.length === 0 && <p>No items found</p>}
+        </div>
+    )
+}
+
+// JSX with spread props and fragments
+const App = () => {
+    const props = { size: "large", variant: "primary" }
+    
+    return <>
+        <Button {...props}>Click me</Button>
+        <Container>
+            <TodoList 
+                title="My Tasks" 
+                items={["Learn PolyScript", "Build something"]}
+            />
+        </Container>
+    </>
+}
+```
+
+Each file also passes unmodified through its donor-language compiler (with undeclared features stubbed), preserving the **"every donor program stays valid"** pledge.
 
 
 
@@ -668,12 +846,31 @@ function parseExpr(p = 0): Expr {
 * Numbers: store raw, base, separators stripped, and suffix (`n` or width). Narrowing is a later pass.
 * Regex: `RegexLiteral` with flags; linebreaks rejected unless escaped.
 
-## 9) Directives and soft keywords
+## 9) JSX parsing
+
+* **JSX trigger**: When `<` is followed by:
+  * Capital letter → JSX Component
+  * Lowercase identifier from HTML tag list → JSX HTML element
+  * `>` → JSX Fragment (`<>`)
+  * `/` → JSX closing tag
+
+* **JSX lexer mode**: Track JSX depth, switch contexts:
+  * In JSX tag: tokenize attributes, handle `{` for expressions
+  * In JSX content: preserve text, handle `{` for expressions
+  * Exit on matching `>` or `/>`
+
+* **JSX AST construction**:
+  * Self-closing: `<Component />` → `JSXElement` with `selfClosing:true`
+  * Container: Match opening/closing tags, collect children
+  * Fragments: `<>...</>` → `JSXFragment`
+  * Spread props: `{...expr}` in attributes or children
+
+## 10) Directives and soft keywords
 
 * Keep a small parser state: `nextStmtGenericMode: "on"|"off"|"auto"`. Reset after consuming a statement.
 * `fallthrough`: accept only immediately before the **next** switch arm. Model as a boolean on the previous case arm.
 
-## 10) Error handling
+## 11) Error handling
 
 * Panic-mode recovery sets of likely followers:
 
@@ -681,7 +878,7 @@ function parseExpr(p = 0): Expr {
   * After header `:` when next line is not indented: report and synthesize a one-statement block.
 * Produce spans and one-line diagnostics with quick-fix hints (e.g., “add `div` before `/` for division”).
 
-## 11) AST shape (core, minimal)
+## 12) AST shape (core, minimal)
 
 ```ts
 type Id = { kind:"Ident", name:string, span:Span };
@@ -704,7 +901,18 @@ type Expr =
   | {kind:"Unary", op:string, arg:Expr, prefix:boolean, span:Span}
   | {kind:"Binary", op:string, left:Expr, right:Expr, span:Span}
   | {kind:"Assign", op:string, left:Expr, right:Expr, span:Span}
-  | {kind:"Lambda", params:Param[], ret?:TypeNode, body:Block|Expr, async?:boolean, unsafe?:boolean, span:Span};
+  | {kind:"Lambda", params:Param[], ret?:TypeNode, body:Block|Expr, async?:boolean, unsafe?:boolean, span:Span}
+  | {kind:"JSXElement", tag:string|Id, attrs:JSXAttr[], children:JSXChild[], selfClosing:boolean, span:Span}
+  | {kind:"JSXFragment", children:JSXChild[], span:Span};
+
+type JSXAttr = 
+  | {kind:"JSXAttr", name:string, value?:Expr|string, span:Span}
+  | {kind:"JSXSpread", expr:Expr, span:Span};
+
+type JSXChild =
+  | {kind:"JSXText", text:string, span:Span}
+  | {kind:"JSXExpr", expr:Expr, span:Span}
+  | Expr; // JSXElement or JSXFragment
 
 type Stmt =
   | {kind:"ExprStmt", expr:Expr, span:Span}
@@ -731,12 +939,12 @@ type Block = { kind:"Block", stmts:(Decl|Stmt)[], span:Span };
 type Param = { name:Id, type?:TypeNode, init?:Expr, span:Span };
 ```
 
-## 12) Lowering hooks
+## 13) Lowering hooks
 
 * During AST build, normalize synonyms (`elseif→elif`, `except→catch`, etc.).
 * Attach a `sourceName` vs `canonicalName` for identifiers to keep `$foo` and backticks intact for tooling.
 
-## 13) Tests you must pass
+## 14) Tests you must pass
 
 * MASI edge cases across all three rules.
 * Regex vs division at every precedence boundary; soft overrides.
@@ -745,6 +953,11 @@ type Param = { name:Id, type?:TypeNode, init?:Expr, span:Span };
 * All three block stacks, including crossing-stack error.
 * Numeric literal suffix matrix and invalid underscore placement.
 * `fallthrough` token and comment form.
+* JSX elements (self-closing, nested, fragments) with proper tag matching.
+* JSX attributes (spread, expressions, string literals).
+* JSX vs generics disambiguation based on context.
+* JSX text content with proper whitespace handling and entity escaping.
+* Mixed JSX/TypeScript with generic components and type assertions.
 
 This gives you a deterministic parser with rollback only where needed, a single AST that matches §4, and clean seams for later type checking and codegen.
 
