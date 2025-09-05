@@ -1458,7 +1458,7 @@ export class Parser {
     }
     
     if (this.peek().type === TokenType.RegexLiteral) {
-      return this.parseRegexLiteral();
+      return this.parsePostfix(this.parseRegexLiteral());
     }
     
     if (this.match("true", "false")) {
@@ -4979,6 +4979,16 @@ export class Parser {
       const properties: AST.ObjectProperty[] = [];
       
       do {
+        // Skip virtual semicolons between properties
+        while (this.peek().virtualSemi) {
+          this.advance();
+        }
+        
+        // Check for closing brace (end of object)
+        if (this.check("}")) {
+          break;
+        }
+        
         const propStart = this.current;
         
         // Check for spread property
@@ -5003,15 +5013,9 @@ export class Parser {
             computed: false,
             span: this.createSpan(propStart, this.current - 1)
           });
-          
-          // Continue to next property if there's a comma
-          if (this.match(",")) {
-            continue;
-          }
-          break;
-        }
-        
-        // Parse property key
+        } else {
+          // Parse regular property (not spread)
+          // Parse property key
         let key: AST.Identifier | AST.StringLiteral | AST.NumericLiteral;
         let computed = false;
         
@@ -5081,6 +5085,7 @@ export class Parser {
           computed,
           span: this.createSpan(propStart, this.current - 1)
         });
+        } // End of else block for non-spread properties
       } while (this.match(","));
       
       // Skip virtual semicolons before closing brace
