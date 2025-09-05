@@ -4594,6 +4594,16 @@ export class Parser {
     const members: AST.EnumMember[] = [];
     
     while (!this.check("}") && !this.isAtEnd()) {
+      // Skip virtual semicolons in enum body
+      while (this.peek().virtualSemi) {
+        this.advance();
+      }
+      
+      // Check for closing brace after skipping virtual semicolons
+      if (this.check("}")) {
+        break;
+      }
+      
       const memberName = this.parseIdentifier();
       let value: AST.Expr | undefined;
       
@@ -4606,6 +4616,11 @@ export class Parser {
         value,
         span: this.createSpanFrom(memberName)
       });
+      
+      // Skip trailing virtual semicolons
+      while (this.peek().virtualSemi) {
+        this.advance();
+      }
       
       if (!this.match(",")) {
         break;
@@ -4925,6 +4940,11 @@ export class Parser {
       // If not a comprehension, continue parsing regular array elements
       if (!this.check("for")) {
         while (this.match(",")) {
+          // Skip virtual semicolons after comma
+          while (this.peek().virtualSemi) {
+            this.advance();
+          }
+          
           if (this.check("]")) break; // Allow trailing comma
           
           // Check for spread operator
@@ -4942,8 +4962,18 @@ export class Parser {
           } else {
             elements.push(this.parseAssignmentExpression());
           }
+          
+          // Skip trailing virtual semicolons
+          while (this.peek().virtualSemi) {
+            this.advance();
+          }
         }
       }
+    }
+    
+    // Skip virtual semicolons before closing bracket
+    while (this.peek().virtualSemi) {
+      this.advance();
     }
     
     this.consume("]", "Expected ']' after array elements");
