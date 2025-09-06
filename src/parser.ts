@@ -1564,17 +1564,19 @@ export class Parser {
       
       const start = this.current - 1;
       
-      // Skip virtual semicolons after opening parenthesis
+      // Skip virtual semicolons and JSX whitespace after opening parenthesis
       while (this.peek().virtualSemi) {
         this.advance();
       }
+      this.skipJSXWhitespace();
       
       const expr = this.parseExpression();
       
-      // Skip virtual semicolons before closing parenthesis
+      // Skip virtual semicolons and JSX whitespace before closing parenthesis
       while (this.peek().virtualSemi) {
         this.advance();
       }
+      this.skipJSXWhitespace();
       
       // Check for generator comprehension: (expr for var in iterable)
       if (this.check("for")) {
