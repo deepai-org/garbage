@@ -245,8 +245,7 @@ export class Parser {
         // Note: We're ignoring decorators for now since AST doesn't have a field for them
         return func;
       } else if (this.match("class")) {
-        const cls = this.parseClassDecl();
-        // Note: We're ignoring decorators for now since AST doesn't have a field for them
+        const cls = this.parseClassDecl(decorators);
         return cls;
       }
       
@@ -3799,6 +3798,17 @@ export class Parser {
           elementType,
           span: this.createSpan(start, this.current - 1)
         };
+      } else if (this.check("<")) {
+        // Generic channel syntax: chan<T>
+        this.advance(); // consume <
+        const elementType = this.parseType();
+        this.consume(">", "Expected '>' after channel element type");
+        return {
+          kind: "ChanType",
+          direction: "both",
+          elementType,
+          span: this.createSpan(start, this.current - 1)
+        };
       } else {
         // Bidirectional channel: chan T
         let elementType: AST.TypeNode | undefined;
@@ -4039,7 +4049,7 @@ export class Parser {
     };
   }
   
-  private parseClassDecl(): AST.ClassDecl {
+  private parseClassDecl(decorators?: AST.Expr[]): AST.ClassDecl {
     const start = this.current - 1;
     const name = this.parseIdentifier();
     
@@ -4393,7 +4403,7 @@ export class Parser {
     
     this.consume("}", "Expected '}' after class body");
     
-    return {
+    const classDecl: AST.ClassDecl = {
       kind: "ClassDecl",
       name,
       typeParams,
@@ -4403,6 +4413,20 @@ export class Parser {
       members,
       span: this.createSpan(start, this.current - 1)
     };
+    
+    // Add decorators if provided
+    if (decorators && decorators.length > 0) {
+      classDecl.decorators = decorators.map(expr => ({
+        kind: "Decorator" as const,
+        name: expr.kind === "Identifier" ? expr : 
+              expr.kind === "Call" && expr.callee.kind === "Identifier" ? expr.callee :
+              { kind: "Identifier", name: "unknown", span: expr.span } as AST.Identifier,
+        args: expr.kind === "Call" ? expr.args : undefined,
+        span: expr.span
+      }));
+    }
+    
+    return classDecl;
   }
   
   private parseInterfaceDecl(): AST.InterfaceDecl {

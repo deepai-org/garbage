@@ -590,6 +590,13 @@ export interface TypeDecl {
   span: Span;
 }
 
+export interface Decorator {
+  kind: "Decorator";
+  name: Identifier;
+  args?: Expr[];
+  span: Span;
+}
+
 export interface ClassDecl {
   kind: "ClassDecl";
   name: Identifier;
@@ -598,6 +605,7 @@ export interface ClassDecl {
   extends?: TypeNode;
   implements?: TypeNode[];
   members: ClassMember[];
+  decorators?: Decorator[];
   span: Span;
 }
 

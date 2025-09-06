@@ -398,10 +398,11 @@ describe('Comprehensive Parser Tests (UPDATED)', () => {
       expect(type.kind).toBe('ChanType');
       expect(type.direction).toBe('both');
       
-      // Verify angle bracket usage for generic
-      const usage = analyzeAngleBrackets(ast);
-      // chan<string> should be recognized
-      expect(usage.genericCount + usage.channelCount).toBeGreaterThan(0);
+      // Verify the element type is properly parsed
+      expect(type.elementType).toBeDefined();
+      const elementType = type.elementType as AST.SimpleType;
+      expect(elementType.kind).toBe('SimpleType');
+      expect(elementType.id.name).toBe('string');
     });
   });
 

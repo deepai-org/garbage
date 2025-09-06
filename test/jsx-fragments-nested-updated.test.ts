@@ -179,15 +179,15 @@ const component = () => (
         ) as AST.JSXExpressionContainer;
         expect(exprContainer).toBeDefined();
         
-        const conditional = exprContainer.expression;
-        expect(conditional.kind).toBe('Conditional');
+        const conditional = exprContainer.expression as AST.Ternary;
+        expect(conditional.kind).toBe('Ternary');
         
         // Both branches should be JSX
-        verifyJSXElement(conditional.then as AST.JSXElement, 'Dashboard');
-        verifyJSXElement(conditional.else as AST.JSXElement, 'LoginForm');
+        verifyJSXElement(conditional.consequent as AST.JSXElement, 'Dashboard');
+        verifyJSXElement(conditional.alternate as AST.JSXElement, 'LoginForm');
         
         // Dashboard should have user prop
-        const dashboard = conditional.then as AST.JSXElement;
+        const dashboard = conditional.consequent as AST.JSXElement;
         expect(dashboard.openingElement.attributes.length).toBe(1);
     });
 
