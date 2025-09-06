@@ -4391,12 +4391,54 @@ export class Parser {
         
         // Handle async functions
         if (this.match("async")) {
+          // Check if followed by function keyword
           if (this.match("fn", "fun", "function", "func", "def")) {
             const method = this.parseFuncDecl(true);
             members.push(method as any);
             continue;
           }
-          // If not followed by function keyword, restore position
+          
+          // Check if followed by identifier (async method without function keyword)
+          // e.g., async handle<T>() { }
+          if (this.peek().type === TokenType.Identifier) {
+            const methodName = this.parseIdentifier();
+            
+            // Parse generic parameters if present
+            let genericParams: AST.Identifier[] | undefined;
+            if (this.match("<")) {
+              genericParams = [];
+              do {
+                genericParams.push(this.parseIdentifier());
+              } while (this.match(","));
+              this.consume(">", "Expected '>' after generic parameters");
+            }
+            
+            // Parse parameters
+            const params = this.parseParameterList();
+            
+            // Parse return type if present
+            let returnType: AST.TypeNode | undefined;
+            if (this.match(":")) {
+              returnType = this.parseType();
+            }
+            
+            // Parse method body
+            const body = this.parseBlock();
+            
+            members.push({
+              kind: "Method",
+              name: methodName,
+              params,
+              type: returnType,
+              body,
+              async: true,
+              genericParams,
+              span: this.createSpan(memberStart, this.current - 1)
+            } as any);
+            continue;
+          }
+          
+          // If not followed by function keyword or identifier, restore position
           this.current = memberStart;
         }
         
@@ -4449,6 +4491,31 @@ export class Parser {
             name: nameToken.value,
             span: this.createSpanFrom(nameToken)
           };
+          
+          // Check for generic parameters on methods: methodName<T, U>()
+          let genericParams: AST.Identifier[] | undefined;
+          if (this.check("<") && !this.check("<=") && !this.check("<<") && !this.check("<-")) {
+            const checkpoint = this.current;
+            try {
+              this.advance(); // consume <
+              genericParams = [];
+              do {
+                genericParams.push(this.parseIdentifier());
+              } while (this.match(","));
+              this.consume(">", "Expected '>' after generic parameters");
+              
+              // Verify this is followed by parentheses (method signature)
+              if (!this.check("(")) {
+                // Not a method with generics, restore position
+                genericParams = undefined;
+                this.current = checkpoint;
+              }
+            } catch {
+              // Failed to parse generics, restore position
+              genericParams = undefined;
+              this.current = checkpoint;
+            }
+          }
           
           // Method with parentheses: methodName(params): returnType { body }
           if (this.check("(")) {
@@ -4518,6 +4585,7 @@ export class Parser {
               params,
               type: returnType,
               body,
+              genericParams,
               span: this.createSpan(memberStart, this.current - 1)
             } as any);
             continue;
