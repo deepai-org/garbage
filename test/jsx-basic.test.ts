@@ -77,7 +77,7 @@ describe('JSX Basic Elements', () => {
         expect(jsx.children).toHaveLength(1);
         const text = jsx.children[0] as AST.JSXText;
         expect(text.kind).toBe('JSXText');
-        expect(text.value.trim()).toBe('HelloWorld'); // Space handling in JSX text
+        expect(text.value.trim()).toBe('Hello World'); // Space handling in JSX text
     });
 
     it('should parse container with expression', () => {

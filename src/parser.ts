@@ -6211,7 +6211,8 @@ export class Parser {
   private parseJSXOpeningElement(): AST.JSXOpeningElement {
     const start = this.current;
     
-    this.consume("<", "Expected '<'");
+    // We're already at '<', so advance past it
+    this.advance(); // consume '<'
     const name = this.parseJSXElementName();
     const attributes = this.parseJSXAttributes();
     
@@ -6233,7 +6234,8 @@ export class Parser {
   private parseJSXClosingElement(): AST.JSXClosingElement {
     const start = this.current;
     
-    this.consume("<", "Expected '<'");
+    // We're already at '<', so advance past it
+    this.advance(); // consume '<'
     this.consume("/", "Expected '/'");
     const name = this.parseJSXElementName();
     this.consume(">", "Expected '>'");
@@ -6289,6 +6291,14 @@ export class Parser {
       // Skip virtual semicolons
       while (this.peek().virtualSemi) {
         this.advance();
+      }
+      
+      // Skip whitespace tokens
+      this.skipJSXWhitespace();
+      
+      // Check again after skipping whitespace
+      if (this.check(">") || this.check("/")) {
+        break;
       }
       
       if (this.check("{")) {
@@ -6418,12 +6428,11 @@ export class Parser {
       }
       
       if (this.check("{")) {
-        // Expression or spread child
-        const start = this.current;
-        this.advance(); // consume {
-        
-        if (this.check("...")) {
+        // Check if it's a spread child
+        if (this.peekNext()?.value === "...") {
           // Spread child
+          const start = this.current;
+          this.advance(); // consume {
           this.advance(); // consume ...
           const expression = this.parseExpression();
           this.consume("}", "Expected '}'");
@@ -6433,27 +6442,9 @@ export class Parser {
             expression,
             span: this.createSpan(start, this.current - 1)
           });
-        } else if (this.check("}")) {
-          // Empty expression {}
-          this.advance(); // consume }
-          children.push({
-            kind: "JSXExpressionContainer",
-            expression: {
-              kind: "JSXEmptyExpression",
-              span: this.createSpan(start + 1, this.current - 1)
-            },
-            span: this.createSpan(start, this.current - 1)
-          });
         } else {
-          // Regular expression
-          const expression = this.parseExpression();
-          this.consume("}", "Expected '}'");
-          
-          children.push({
-            kind: "JSXExpressionContainer",
-            expression,
-            span: this.createSpan(start, this.current - 1)
-          });
+          // Regular expression container (including empty {})
+          children.push(this.parseJSXExpressionContainer());
         }
       } else if (this.check("<")) {
         // Nested element or fragment
@@ -6504,7 +6495,8 @@ export class Parser {
       // Accumulate text
       if (token.type === TokenType.Identifier || 
           token.type === TokenType.Keyword ||
-          token.type === TokenType.NumericLiteral) {
+          token.type === TokenType.NumericLiteral ||
+          token.type === TokenType.StringLiteral) {
         text += token.value;
         raw += token.value;
         lastTokenEnd = token.end;
@@ -6521,8 +6513,8 @@ export class Parser {
       }
     }
     
-    // Return null for empty text
-    if (text.trim() === "") {
+    // Return null for empty text, but preserve meaningful whitespace
+    if (text === "") {
       return null;
     }
     
@@ -6539,6 +6531,9 @@ export class Parser {
     
     this.consume("{", "Expected '{'");
     
+    // Skip whitespace inside JSX expression
+    this.skipJSXWhitespace();
+    
     if (this.check("}")) {
       // Empty expression
       this.advance();
@@ -6552,7 +6547,10 @@ export class Parser {
       };
     }
     
-    const expression = this.parseExpression();
+    const expression = this.parseJSXExpression();
+    
+    // Skip whitespace before closing brace
+    this.skipJSXWhitespace();
     this.consume("}", "Expected '}'");
     
     return {
@@ -6560,6 +6558,58 @@ export class Parser {
       expression,
       span: this.createSpan(start, this.current - 1)
     };
+  }
+
+  private parseJSXExpression(): AST.Expr {
+    // Parse expression while filtering out JSX whitespace tokens
+    // Create a temporary filtered token array that excludes JSX whitespace
+    const originalTokens = this.tokens;
+    const originalCurrent = this.current;
+    
+    // Filter tokens to remove JSX whitespace StringLiterals  
+    const filteredTokens: Token[] = [];
+    const indexMap: number[] = []; // Maps filtered index to original index
+    
+    for (let i = originalCurrent; i < originalTokens.length; i++) {
+      const token = originalTokens[i];
+      
+      // Stop at the closing brace
+      if (token.value === "}" && token.type === TokenType.Operator) {
+        filteredTokens.push(token);
+        indexMap.push(i);
+        break;
+      }
+      
+      // Skip JSX whitespace StringLiterals  
+      if (token.type === TokenType.StringLiteral && /^\s+$/.test(token.value)) {
+        continue;
+      }
+      
+      filteredTokens.push(token);
+      indexMap.push(i);
+    }
+    
+    // Temporarily replace tokens and reset position
+    this.tokens = [...originalTokens.slice(0, originalCurrent), ...filteredTokens];
+    this.current = originalCurrent;
+    
+    try {
+      const expr = this.parseExpression();
+      
+      // Calculate how far we moved in filtered tokens
+      const movedInFiltered = this.current - originalCurrent;
+      
+      // Restore original tokens and adjust position
+      this.tokens = originalTokens;
+      this.current = indexMap[movedInFiltered - 1] + 1;
+      
+      return expr;
+    } catch (error) {
+      // Restore original state on error
+      this.tokens = originalTokens;
+      this.current = originalCurrent;
+      throw error;
+    }
   }
 
   private getJSXElementNameString(name: AST.JSXElementName): string {
