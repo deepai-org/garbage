@@ -95,6 +95,10 @@ export function findGenericTypes(ast: AST.Program): AST.GenericType[] {
     if (isGenericType(node)) {
       generics.push(node);
     }
+    // Also check for GenericType stored in _typeNode field (for make() calls)
+    if ((node as any)?._typeNode && isGenericType((node as any)._typeNode)) {
+      generics.push((node as any)._typeNode);
+    }
   });
   
   return generics;

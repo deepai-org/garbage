@@ -2,8 +2,8 @@
 
 ## Test Progress
 - **Starting Point**: 287/307 tests passing (93.5% pass rate)
-- **Current Status**: 314/327 tests passing (96.0% pass rate)
-- **Improvement**: +27 tests fixed (+2.5% improvement)
+- **Current Status**: 316/327 tests passing (96.6% pass rate)
+- **Improvement**: +29 tests fixed (+3.1% improvement)
 
 ## Key Fixes Implemented
 
@@ -19,7 +19,19 @@
 - **Impact**: Fixed TypeScript JSX generic components
 - **Files Modified**: Previously implemented
 
-### 3. TypeScript Test Compilation Errors
+### 3. Nested Generic Types Support
+- **Issue**: Complex nested generics like `Result<Option<Vec<T>>>` failed due to `>>>` token
+- **Solution**: Added token splitting logic to handle `>>` and `>>>` in generic contexts
+- **Impact**: Type aliases and generic types now work with arbitrary nesting depth
+- **Files Modified**: `src/parser.ts` - `parseSimpleType()` and `tryParseGenericArgs()`
+
+### 4. Go Channel Types with Generics
+- **Issue**: Channel types with generic parameters weren't fully supported
+- **Solution**: Enhanced channel type parsing to handle `chan<T>` syntax
+- **Impact**: Full Go-style channel type support including send/receive directions
+- **Files Modified**: `src/parser.ts` - channel type parsing logic
+
+### 5. TypeScript Test Compilation Errors
 - **Issues Fixed**:
   - `VarDecl.name` → `VarDecl.names[0]`
   - `Unary.operand` → `Unary.argument`

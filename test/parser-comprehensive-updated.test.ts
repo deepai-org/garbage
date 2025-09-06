@@ -393,7 +393,9 @@ describe('Comprehensive Parser Tests (UPDATED)', () => {
       expect(decl.kind).toBe('VarDecl');
       expect(decl.names[0].name).toBe('ch');
       
-      const type = decl.type as AST.ChanType;
+      // Normalize the type (GenericType chan<T> or ChanType)
+      const { normalizeChannelType } = require('./helpers/ast-compat');
+      const type = normalizeChannelType(decl.type) as AST.ChanType;
       expect(type.kind).toBe('ChanType');
       expect(type.direction).toBe('both');
       

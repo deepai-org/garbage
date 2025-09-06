@@ -378,12 +378,14 @@ describe('Comprehensive Parser Tests', () => {
     test('parses channel types', () => {
       const ast = parseCode('let ch: chan<string>;');
       const decl = ast.body[0] as AST.VarDecl;
-      const type = decl.type as AST.ChanType;
+      
+      // Normalize the type (GenericType chan<T> or ChanType)
+      const { normalizeChannelType } = require('./helpers/ast-compat');
+      const type = normalizeChannelType(decl.type) as AST.ChanType;
       expect(type.kind).toBe('ChanType');
       expect(type.direction).toBe('both');
-      // Note: elementType parsing is currently not fully working
-      // This is a known limitation that needs further investigation
-      // For now, we just verify the basic channel type is recognized
+      // elementType is now properly parsed as part of GenericType args
+      expect(type.elementType).toBeDefined();
     });
 
     test('parses array type with brackets', () => {

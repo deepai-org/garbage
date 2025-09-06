@@ -42,6 +42,20 @@ export function isThrowStmt(node: any): boolean {
   return node.kind === 'Throw';
 }
 
+// Convert GenericType with chan base to ChanType for compatibility
+export function normalizeChannelType(type: any): any {
+  if (type.kind === 'GenericType' && type.base.name === 'chan') {
+    // Convert GenericType chan<T> to ChanType for backward compatibility
+    return {
+      kind: 'ChanType',
+      direction: 'both',
+      elementType: type.args[0],
+      span: type.span
+    };
+  }
+  return type;
+}
+
 // Get return value (handles value vs values)
 export function getReturnValue(returnStmt: any): any {
   // Support both single value and values array
