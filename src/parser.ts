@@ -650,7 +650,22 @@ export class Parser {
         
         const beforePos = this.current;
         try {
-          const stmt = this.parseTopLevel();
+          // Skip virtual semicolons
+          while (this.peek().virtualSemi) {
+            this.advance();
+          }
+          
+          // Inside a block, we need to handle both statements and declarations
+          // but we should use parseStatement/parseDeclaration directly
+          // rather than parseTopLevel which has module-level specific behavior
+          let stmt: AST.Decl | AST.Stmt | null = null;
+          
+          if (this.isDeclStart()) {
+            stmt = this.parseDeclaration();
+          } else if (!this.check("}")) {
+            stmt = this.parseStatement();
+          }
+          
           if (stmt) statements.push(stmt);
         } catch (error) {
           if (error instanceof ParseError) {
@@ -2847,7 +2862,25 @@ export class Parser {
     
     while (!this.check("case") && !this.check("default") && 
            !this.check("}") && !this.isAtEnd()) {
-      const stmt = this.parseTopLevel();
+      // Skip virtual semicolons
+      while (this.peek().virtualSemi) {
+        this.advance();
+      }
+      
+      // Check again after skipping virtual semicolons
+      if (this.check("case") || this.check("default") || 
+          this.check("}") || this.isAtEnd()) {
+        break;
+      }
+      
+      // Parse statements directly, not using parseTopLevel
+      let stmt: AST.Decl | AST.Stmt | null = null;
+      if (this.isDeclStart()) {
+        stmt = this.parseDeclaration();
+      } else {
+        stmt = this.parseStatement();
+      }
+      
       if (stmt) statements.push(stmt);
       
       // Check for break statement
@@ -3483,11 +3516,26 @@ export class Parser {
     const start = this.current - 1;
     let label: AST.Identifier | undefined;
     
-    // Check if next token is an identifier or keyword that could be a label
-    if ((this.peek().type === TokenType.Identifier || 
-         this.peek().type === TokenType.Keyword) && 
-        !this.check(";")) {
+    // Check if next token is an identifier that could be a label
+    // Don't treat keywords like "default", "case", "}", etc. as labels
+    const next = this.peek();
+    if (next.type === TokenType.Identifier && !this.check(";")) {
       // Parse as label identifier
+      const token = this.advance();
+      label = {
+        kind: "Identifier",
+        name: token.value,
+        span: this.createSpanFrom(token)
+      };
+    } else if (next.type === TokenType.Keyword && 
+               !this.check(";") &&
+               !this.check("default") && 
+               !this.check("case") &&
+               !this.check("}") &&
+               !this.check("else") &&
+               !this.check("catch") &&
+               !this.check("finally")) {
+      // Only treat certain keywords as potential labels, not control flow keywords
       const token = this.advance();
       label = {
         kind: "Identifier",
@@ -3509,11 +3557,26 @@ export class Parser {
     const start = this.current - 1;
     let label: AST.Identifier | undefined;
     
-    // Check if next token is an identifier or keyword that could be a label
-    if ((this.peek().type === TokenType.Identifier || 
-         this.peek().type === TokenType.Keyword) && 
-        !this.check(";")) {
+    // Check if next token is an identifier that could be a label
+    // Don't treat keywords like "default", "case", "}", etc. as labels
+    const next = this.peek();
+    if (next.type === TokenType.Identifier && !this.check(";")) {
       // Parse as label identifier
+      const token = this.advance();
+      label = {
+        kind: "Identifier",
+        name: token.value,
+        span: this.createSpanFrom(token)
+      };
+    } else if (next.type === TokenType.Keyword && 
+               !this.check(";") &&
+               !this.check("default") && 
+               !this.check("case") &&
+               !this.check("}") &&
+               !this.check("else") &&
+               !this.check("catch") &&
+               !this.check("finally")) {
+      // Only treat certain keywords as potential labels, not control flow keywords
       const token = this.advance();
       label = {
         kind: "Identifier",
