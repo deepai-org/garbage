@@ -6183,14 +6183,20 @@ export class Parser {
   private isJSXElement(): boolean {
     // Enhanced lookahead to better distinguish JSX from generics/comparisons
     const saved = this.current;
+    const DEBUG = false; // Set to true for debugging
     
     try {
       // Skip <
-      if (!this.match("<")) return false;
+      if (!this.match("<")) {
+        if (DEBUG) console.log('isJSXElement: no < found');
+        return false;
+      }
       
       // Check element name
       const name = this.peek();
+      if (DEBUG) console.log('isJSXElement: after <, token:', name.value);
       if (name.type !== TokenType.Identifier) {
+        if (DEBUG) console.log('isJSXElement: not an identifier');
         this.current = saved;
         return false;
       }
@@ -6215,6 +6221,13 @@ export class Parser {
       if (token2?.type === TokenType.Identifier && token3?.value === "=") {
         this.current = saved;
         return true; // Has attributes
+      }
+      
+      // Check for generic type parameters: <Component<Props>
+      if (token2?.value === "<") {
+        if (DEBUG) console.log('isJSXElement: found < after identifier, could be generics');
+        // This could be JSX with generics, need to look further
+        // We'll check this in the main loop below
       }
       
       // Check if it's an HTML tag or a component (capital letter)
@@ -6266,7 +6279,52 @@ export class Parser {
         }
         
         if (token.value === "<") {
-          // Generic like Component<Props>
+          if (DEBUG) console.log('isJSXElement: in loop, found < - checking for generics');
+          // Could be generic type parameters for JSX component: <Component<Props>>
+          // Need to look ahead to see if it's followed by valid JSX patterns
+          const genericStart = this.current;
+          this.advance(); // consume '<' (we're now inside the generic)
+          
+          // Try to skip the generic type parameters
+          let depth = 1;
+          while (!this.isAtEnd() && depth > 0) {
+            const t = this.peek();
+            if (DEBUG) console.log(`isJSXElement: in generic loop, token: "${t.value}", depth: ${depth}`);
+            if (t.value === "<") depth++;
+            else if (t.value === ">") depth--;
+            this.advance();
+            
+            if (depth === 0) {
+              // We've closed the generic, check what comes next
+              let next = this.peek();
+              if (DEBUG) console.log(`isJSXElement: closed generic, next token: "${next.value}"`);
+              
+              // Skip any whitespace/string tokens that the lexer incorrectly created
+              // This is a workaround for a lexer bug with JSX text mode
+              while (next && (next.type === TokenType.StringLiteral && next.value.trim() === "")) {
+                this.advance();
+                next = this.peek();
+                if (DEBUG) console.log(`isJSXElement: skipped whitespace, next token: "${next.value}"`);
+              }
+              
+              // If followed by JSX patterns, it's JSX with generics
+              if (next.value === ">" ||           // <Component<T>>
+                  next.value === "/" ||           // <Component<T>/>
+                  next.type === TokenType.Identifier || // <Component<T> prop=
+                  next.value === "{") {            // <Component<T> {...props}
+                if (DEBUG) console.log('isJSXElement: found JSX pattern after generics, returning true');
+                this.current = saved;
+                return true;
+              }
+              // Not JSX, restore and return false
+              if (DEBUG) console.log('isJSXElement: no JSX pattern after generics, returning false');
+              this.current = saved;
+              return false;
+            }
+          }
+          
+          // Didn't find matching >, not valid JSX
+          if (DEBUG) console.log('isJSXElement: did not find matching >, returning false');
           this.current = saved;
           return false;
         }
@@ -6438,6 +6496,28 @@ export class Parser {
         property,
         span: this.createSpan(start, this.current - 1)
       };
+    }
+    
+    // Handle generic type parameters like <Component<Props>>
+    // Note: We parse but don't store the generics in the AST yet
+    // This is just to consume the tokens correctly
+    if (this.check("<")) {
+      const genericStart = this.current;
+      this.advance(); // consume '<'
+      
+      let depth = 1;
+      while (!this.isAtEnd() && depth > 0) {
+        const token = this.peek();
+        if (token.value === "<") {
+          depth++;
+        } else if (token.value === ">") {
+          depth--;
+        }
+        this.advance();
+      }
+      
+      // Note: In a full implementation, we would parse and store the generic types
+      // For now, we just consume them to allow the JSX to parse correctly
     }
     
     return name;
