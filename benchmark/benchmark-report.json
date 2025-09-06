@@ -1,0 +1,195 @@
+{
+  "timestamp": "2025-09-06T00:28:06.928Z",
+  "environment": {
+    "node": "v23.10.0",
+    "platform": "darwin",
+    "arch": "arm64"
+  },
+  "results": [
+    {
+      "name": "Simple Variable Declaration",
+      "codeSize": 11,
+      "iterations": 10000,
+      "errors": 0,
+      "stats": {
+        "mean": "0.002",
+        "median": "0.001",
+        "min": "0.001",
+        "max": "0.294",
+        "p95": "0.003",
+        "p99": "0.012"
+      },
+      "throughput": {
+        "opsPerSec": "447146",
+        "charsPerMs": "4919"
+      }
+    },
+    {
+      "name": "Function Declaration",
+      "codeSize": 36,
+      "iterations": 5000,
+      "errors": 0,
+      "stats": {
+        "mean": "0.006",
+        "median": "0.005",
+        "min": "0.004",
+        "max": "0.132",
+        "p95": "0.008",
+        "p99": "0.020"
+      },
+      "throughput": {
+        "opsPerSec": "181388",
+        "charsPerMs": "6530"
+      }
+    },
+    {
+      "name": "JSX Element",
+      "codeSize": 45,
+      "iterations": 5000,
+      "errors": 0,
+      "stats": {
+        "mean": "0.007",
+        "median": "0.007",
+        "min": "0.006",
+        "max": "0.150",
+        "p95": "0.009",
+        "p99": "0.020"
+      },
+      "throughput": {
+        "opsPerSec": "135623",
+        "charsPerMs": "6103"
+      }
+    },
+    {
+      "name": "Complex Expression",
+      "codeSize": 50,
+      "iterations": 5000,
+      "errors": 0,
+      "stats": {
+        "mean": "0.009",
+        "median": "0.008",
+        "min": "0.007",
+        "max": "0.242",
+        "p95": "0.012",
+        "p99": "0.046"
+      },
+      "throughput": {
+        "opsPerSec": "110708",
+        "charsPerMs": "5535"
+      }
+    },
+    {
+      "name": "Class Declaration",
+      "codeSize": 191,
+      "iterations": 2000,
+      "errors": 0,
+      "stats": {
+        "mean": "0.016",
+        "median": "0.013",
+        "min": "0.011",
+        "max": "0.317",
+        "p95": "0.028",
+        "p99": "0.069"
+      },
+      "throughput": {
+        "opsPerSec": "61577",
+        "charsPerMs": "11761"
+      }
+    },
+    {
+      "name": "Pattern Matching",
+      "codeSize": 128,
+      "iterations": 3000,
+      "errors": 0,
+      "stats": {
+        "mean": "0.011",
+        "median": "0.009",
+        "min": "0.008",
+        "max": "0.136",
+        "p95": "0.016",
+        "p99": "0.042"
+      },
+      "throughput": {
+        "opsPerSec": "91326",
+        "charsPerMs": "11690"
+      }
+    },
+    {
+      "name": "Async/Await",
+      "codeSize": 206,
+      "iterations": 2000,
+      "errors": 0,
+      "stats": {
+        "mean": "0.015",
+        "median": "0.014",
+        "min": "0.012",
+        "max": "0.116",
+        "p95": "0.018",
+        "p99": "0.048"
+      },
+      "throughput": {
+        "opsPerSec": "67630",
+        "charsPerMs": "13932"
+      }
+    },
+    {
+      "name": "Channel Operations",
+      "codeSize": 84,
+      "iterations": 3000,
+      "errors": 0,
+      "stats": {
+        "mean": "0.019",
+        "median": "0.018",
+        "min": "0.015",
+        "max": "0.132",
+        "p95": "0.031",
+        "p99": "0.049"
+      },
+      "throughput": {
+        "opsPerSec": "51710",
+        "charsPerMs": "4344"
+      }
+    },
+    {
+      "name": "Mixed Paradigms",
+      "codeSize": 148,
+      "iterations": 2000,
+      "errors": 0,
+      "stats": {
+        "mean": "0.021",
+        "median": "0.020",
+        "min": "0.017",
+        "max": "0.145",
+        "p95": "0.028",
+        "p99": "0.046"
+      },
+      "throughput": {
+        "opsPerSec": "47024",
+        "charsPerMs": "6960"
+      }
+    },
+    {
+      "name": "Large File Simulation",
+      "codeSize": 3236,
+      "iterations": 100,
+      "errors": 0,
+      "stats": {
+        "mean": "0.584",
+        "median": "0.562",
+        "min": "0.475",
+        "max": "1.232",
+        "p95": "0.748",
+        "p99": "1.232"
+      },
+      "throughput": {
+        "opsPerSec": "1713",
+        "charsPerMs": "5545"
+      }
+    }
+  ],
+  "summary": {
+    "totalTests": 10,
+    "totalOperations": 37100,
+    "averageThroughput": 119584.5
+  }
+}

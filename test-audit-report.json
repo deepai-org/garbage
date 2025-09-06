@@ -1,0 +1,192 @@
+{
+  "summary": {
+    "totalFiles": 13,
+    "totalTests": 235,
+    "strongTests": 142,
+    "weakTests": 79,
+    "mixedTests": 13
+  },
+  "files": [
+    {
+      "fileName": "jsx-attributes.test.ts",
+      "totalTests": 10,
+      "weakTests": 0,
+      "strongTests": 10,
+      "weakTestNames": []
+    },
+    {
+      "fileName": "jsx-basic.test.ts",
+      "totalTests": 8,
+      "weakTests": 0,
+      "strongTests": 8,
+      "weakTestNames": []
+    },
+    {
+      "fileName": "jsx-edge-cases.test.ts",
+      "totalTests": 12,
+      "weakTests": 12,
+      "strongTests": 0,
+      "weakTestNames": [
+        "should disambiguate JSX vs less-than operator",
+        "should disambiguate generic vs JSX",
+        "should handle empty expressions",
+        "should handle whitespace correctly",
+        "should parse JSX in ternary",
+        "should parse JSX in array",
+        "should parse JSX as object value",
+        "should parse adjacent JSX elements with fragment",
+        "should parse JSX with template literals",
+        "should parse complex nested expression",
+        "should parse JSX with logical operators",
+        "should parse self-closing HTML tags"
+      ]
+    },
+    {
+      "fileName": "jsx-fragments-nested.test.ts",
+      "totalTests": 10,
+      "weakTests": 10,
+      "strongTests": 0,
+      "weakTestNames": [
+        "should parse simple fragment",
+        "should parse fragment with multiple children",
+        "should parse deeply nested elements",
+        "should parse fragment in expression",
+        "should parse conditional rendering",
+        "should parse map with keys",
+        "should parse nested fragments",
+        "should parse JSX comments",
+        "should parse spread children",
+        "should parse namespaced components"
+      ]
+    },
+    {
+      "fileName": "jsx-polyglot.test.ts",
+      "totalTests": 10,
+      "weakTests": 10,
+      "strongTests": 0,
+      "weakTestNames": [
+        "should parse JSX with Python list comprehension",
+        "should parse JSX with Go channels",
+        "should parse JSX with Ruby blocks",
+        "should parse JSX with pattern matching",
+        "should parse JSX with Python decorators",
+        "should parse JSX with C# properties",
+        "should parse JSX with Rust Option",
+        "should parse JSX with PHP variables",
+        "should parse JSX with multiple paradigms",
+        "should parse JSX with defer and using"
+      ]
+    },
+    {
+      "fileName": "jsx-typescript.test.ts",
+      "totalTests": 10,
+      "weakTests": 10,
+      "strongTests": 0,
+      "weakTestNames": [
+        "should parse component with typed props",
+        "should parse generic component",
+        "should parse type assertion in JSX",
+        "should parse JSX.Element return type",
+        "should parse React.FC type",
+        "should parse children prop type",
+        "should parse event handler types",
+        "should parse ref types",
+        "should parse union type props",
+        "should parse generic JSX element"
+      ]
+    },
+    {
+      "fileName": "parser-comprehensive.test.ts",
+      "totalTests": 79,
+      "weakTests": 5,
+      "strongTests": 74,
+      "weakTestNames": [
+        "handles shebang",
+        "handles multiple statements on one line",
+        "handles HTML comments",
+        "handles hash comments",
+        "handles double-dash comments"
+      ]
+    },
+    {
+      "fileName": "parser-polyglot-advanced.test.ts",
+      "totalTests": 25,
+      "weakTests": 20,
+      "strongTests": 1,
+      "weakTestNames": [
+        "parses extreme operator mixing and chaining",
+        "parses mixed async/concurrent patterns",
+        "parses complex pattern matching across languages",
+        "parses mixed class and trait definitions",
+        "parses extreme nesting with mixed syntax",
+        "parses mixed string interpolation and templates",
+        "parses mixed type systems and generics",
+        "parses mixed comprehensions and generators",
+        "parses mixed error handling paradigms",
+        "parses mixed module and import systems",
+        "parses mixed macro and metaprogramming",
+        "parses chained operations across paradigms",
+        "parses fused data structures across languages",
+        "parses polyglot file I/O and system calls",
+        "parses extreme conditional and loop fusions",
+        "parses fused memory management patterns",
+        "parses polyglot unit testing assertions",
+        "parses extreme regex and pattern handling",
+        "parses mixed build and configuration syntax",
+        "parses ultimate operator overloads and custom ops"
+      ]
+    },
+    {
+      "fileName": "parser-polyglot-showcase.test.ts",
+      "totalTests": 10,
+      "weakTests": 3,
+      "strongTests": 1,
+      "weakTestNames": [
+        "parses concurrent task orchestrator",
+        "parses real-world Python Django REST API code",
+        "parses real-world Python image processing code"
+      ]
+    },
+    {
+      "fileName": "parser-polyglot.test.ts",
+      "totalTests": 9,
+      "weakTests": 4,
+      "strongTests": 3,
+      "weakTestNames": [
+        "parses Go-style with TypeScript types",
+        "parses mixed control flow styles",
+        "parses mixed declarations and literals",
+        "parses exotic but valid combinations"
+      ]
+    },
+    {
+      "fileName": "parser-real-world.test.ts",
+      "totalTests": 3,
+      "weakTests": 1,
+      "strongTests": 1,
+      "weakTestNames": [
+        "parses real-world Go LLM client code"
+      ]
+    },
+    {
+      "fileName": "parser.test.ts",
+      "totalTests": 47,
+      "weakTests": 2,
+      "strongTests": 44,
+      "weakTestNames": [
+        "handles MASI (semicolon insertion)",
+        "recovers from missing semicolon"
+      ]
+    },
+    {
+      "fileName": "simple-showcase.test.ts",
+      "totalTests": 2,
+      "weakTests": 2,
+      "strongTests": 0,
+      "weakTestNames": [
+        "parses simple async function",
+        "parses function with string concat"
+      ]
+    }
+  ]
+}

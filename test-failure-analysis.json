@@ -1,0 +1,311 @@
+{
+  "timestamp": "2025-09-06T00:49:38.307Z",
+  "summary": {
+    "compilationFailures": 0,
+    "runtimeFailures": 1,
+    "assertionFailures": 7
+  },
+  "patterns": {},
+  "missingProperties": {},
+  "failures": {
+    "compilation": [],
+    "runtime": [
+      {
+        "file": "test/jsx-edge-cases-updated.test.ts",
+        "errors": [
+          {
+            "type": "runtime",
+            "message": "TypeError: Cannot read properties of undefined (reading 'expr')"
+          }
+        ]
+      }
+    ],
+    "assertion": [
+      {
+        "file": "test/parser-polyglot-showcase-updated.test.ts",
+        "errors": [
+          {
+            "type": "assertion",
+            "expected": "cls.genericParams",
+            "received": "toBeDefined();"
+          },
+          {
+            "type": "assertion",
+            "expected": "cls.genericParams![0].name",
+            "received": "toBe('T');"
+          },
+          {
+            "type": "assertion",
+            "expected": "cls.extends!.name",
+            "received": "toBe('EventEmitter');"
+          }
+        ]
+      },
+      {
+        "file": "test/jsx-typescript-updated.test.ts",
+        "errors": [
+          {
+            "type": "assertion",
+            "expected": ">= 1",
+            "received": "   0"
+          },
+          {
+            "type": "assertion",
+            "expected": "ast.body",
+            "received": "toHaveLength(1);"
+          },
+          {
+            "type": "assertion",
+            "expected": "received",
+            "received": "toHaveLength(expected)"
+          },
+          {
+            "type": "assertion",
+            "expected": "ast.body",
+            "received": "toHaveLength(2);"
+          },
+          {
+            "type": "assertion",
+            "expected": "received",
+            "received": "toHaveLength(expected)"
+          },
+          {
+            "type": "assertion",
+            "expected": "ast.body",
+            "received": "toHaveLength(1);"
+          },
+          {
+            "type": "assertion",
+            "expected": "received",
+            "received": "toHaveLength(expected)"
+          },
+          {
+            "type": "assertion",
+            "expected": "ast.body",
+            "received": "toHaveLength(1);"
+          },
+          {
+            "type": "assertion",
+            "expected": "decl.kind",
+            "received": "toBe('ConstDecl');"
+          },
+          {
+            "type": "assertion",
+            "expected": "received",
+            "received": "toHaveLength(expected)"
+          },
+          {
+            "type": "assertion",
+            "expected": "ast.body",
+            "received": "toHaveLength(1);"
+          },
+          {
+            "type": "assertion",
+            "expected": "decl.names[0].name",
+            "received": "toBe('Component');"
+          },
+          {
+            "type": "assertion",
+            "expected": "received",
+            "received": "toHaveLength(expected)"
+          },
+          {
+            "type": "assertion",
+            "expected": "ast.body",
+            "received": "toHaveLength(1);"
+          },
+          {
+            "type": "assertion",
+            "expected": "decl.names[0].name",
+            "received": "toBe('MyComponent');"
+          },
+          {
+            "type": "assertion",
+            "expected": "received",
+            "received": "toHaveLength(expected)"
+          },
+          {
+            "type": "assertion",
+            "expected": "ast.body",
+            "received": "toHaveLength(2);"
+          },
+          {
+            "type": "assertion",
+            "expected": "received",
+            "received": "toBeGreaterThanOrEqual(expected)"
+          },
+          {
+            "type": "assertion",
+            "expected": "genericTypes.length",
+            "received": "toBeGreaterThanOrEqual(1);"
+          },
+          {
+            "type": "assertion",
+            "expected": "received",
+            "received": "toHaveLength(expected)"
+          },
+          {
+            "type": "assertion",
+            "expected": "ast.body",
+            "received": "toHaveLength(2);"
+          }
+        ]
+      },
+      {
+        "file": "test/jsx-edge-cases-updated.test.ts",
+        "errors": [
+          {
+            "type": "assertion",
+            "expected": "received",
+            "received": "toHaveLength(expected)"
+          },
+          {
+            "type": "assertion",
+            "expected": "ast.body",
+            "received": "toHaveLength(1);"
+          },
+          {
+            "type": "assertion",
+            "expected": "received",
+            "received": "toContain(expected) // indexOf"
+          },
+          {
+            "type": "assertion",
+            "expected": "tagNames",
+            "received": "toContain('App');"
+          },
+          {
+            "type": "assertion",
+            "expected": "tagNames",
+            "received": "toContain('Header');"
+          },
+          {
+            "type": "assertion",
+            "expected": "tagNames",
+            "received": "toContain('Nav');"
+          },
+          {
+            "type": "assertion",
+            "expected": "tagNames",
+            "received": "toContain('Link');"
+          }
+        ]
+      },
+      {
+        "file": "test/parser-polyglot-updated.test.ts",
+        "errors": [
+          {
+            "type": "assertion",
+            "expected": "decl.value.kind",
+            "received": "toBe('Lambda');"
+          }
+        ]
+      },
+      {
+        "file": "test/parser-polyglot-advanced-updated.test.ts",
+        "errors": [
+          {
+            "type": "assertion",
+            "expected": "stmt1.name.name",
+            "received": "toBe('result');"
+          },
+          {
+            "type": "assertion",
+            "expected": "receive.operand.name",
+            "received": "toBe('ch');"
+          },
+          {
+            "type": "assertion",
+            "expected": "send.left.name",
+            "received": "toBe('ch');"
+          },
+          {
+            "type": "assertion",
+            "expected": "send.right.name",
+            "received": "toBe('item');"
+          },
+          {
+            "type": "assertion",
+            "expected": "classDecl.genericParams",
+            "received": "toBeDefined();"
+          },
+          {
+            "type": "assertion",
+            "expected": "classDecl.genericParams![0].name",
+            "received": "toBe('T');"
+          }
+        ]
+      },
+      {
+        "file": "test/parser-comprehensive-updated.test.ts",
+        "errors": [
+          {
+            "type": "assertion",
+            "expected": "\"main\"",
+            "received": "undefined"
+          },
+          {
+            "type": "assertion",
+            "expected": "> 0",
+            "received": "  0"
+          },
+          {
+            "type": "assertion",
+            "expected": "received",
+            "received": "toBe(expected) // Object.is equality"
+          },
+          {
+            "type": "assertion",
+            "expected": "stmt.kind",
+            "received": "toBe('PackageDecl');"
+          },
+          {
+            "type": "assertion",
+            "expected": "pkg.name.name",
+            "received": "toBe('main');"
+          },
+          {
+            "type": "assertion",
+            "expected": "stmt.kind",
+            "received": "toBeDefined();"
+          },
+          {
+            "type": "assertion",
+            "expected": "received",
+            "received": "toBeGreaterThan(expected)"
+          },
+          {
+            "type": "assertion",
+            "expected": "usage.genericCount + usage.channelCount",
+            "received": "toBeGreaterThan(0);"
+          }
+        ]
+      },
+      {
+        "file": "test/jsx-polyglot-updated.test.ts",
+        "errors": [
+          {
+            "type": "assertion",
+            "expected": "arg.object.name",
+            "received": "toBe('JSX');"
+          },
+          {
+            "type": "assertion",
+            "expected": "arg.property.name",
+            "received": "toBe('Element');"
+          },
+          {
+            "type": "assertion",
+            "expected": "classDecl.decorators",
+            "received": "toBeDefined();"
+          },
+          {
+            "type": "assertion",
+            "expected": "classDecl.decorators!.length",
+            "received": "toBe(2);"
+          }
+        ]
+      }
+    ]
+  }
+}

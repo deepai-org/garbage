@@ -594,6 +594,7 @@ export interface ClassDecl {
   kind: "ClassDecl";
   name: Identifier;
   typeParams?: Identifier[];
+  genericParams?: Identifier[]; // Alias for typeParams for compatibility
   extends?: TypeNode;
   implements?: TypeNode[];
   members: ClassMember[];
@@ -643,7 +644,7 @@ export interface EnumMember {
 
 export interface PackageDecl {
   kind: "PackageDecl";
-  name: string;
+  name: Identifier;
   span: Span;
 }
 

@@ -62,6 +62,7 @@ export class Lexer {
   private lineStart = true;
   private modeStack: LexerMode[] = [LexerMode.Normal];
   private bashBracketDepth = 0;
+  private jsxDepth = 0;  // Track JSX nesting depth for virtual semicolon suppression
   
   constructor(source: string) {
     this.source = source;
@@ -721,10 +722,38 @@ export class Lexer {
   
   private applyMASI(): void {
     const result: Token[] = [];
+    let jsxDepth = 0;
+    let braceDepth = 0;
     
     for (let i = 0; i < this.tokens.length; i++) {
       const token = this.tokens[i];
       result.push(token);
+      
+      // Track JSX context
+      if (token.value === '<' && i + 1 < this.tokens.length) {
+        const next = this.tokens[i + 1];
+        // Check if this looks like JSX: < followed by identifier or /
+        if (next.type === TokenType.Identifier || 
+            (next.value === '/' && i + 2 < this.tokens.length && 
+             this.tokens[i + 2].type === TokenType.Identifier)) {
+          jsxDepth++;
+        }
+      } else if (token.value === '>' && jsxDepth > 0) {
+        // Check if this is a self-closing tag />
+        if (i > 0 && this.tokens[i - 1].value === '/') {
+          jsxDepth--;
+        } else if (i > 2 && this.tokens[i - 2].value === '<' && this.tokens[i - 1].value === '/') {
+          // Closing tag </...>
+          jsxDepth--;
+        } else {
+          // Opening tag end
+          // Don't decrement for opening tags
+        }
+      } else if (token.value === '{' && jsxDepth > 0) {
+        braceDepth++;
+      } else if (token.value === '}' && jsxDepth > 0 && braceDepth > 0) {
+        braceDepth--;
+      }
       
       // Check if we should insert virtual semicolon after this token
       if (i < this.tokens.length - 1) {
@@ -732,8 +761,8 @@ export class Lexer {
         
         // Check if there's a line break between tokens
         if (nextToken.line > token.line) {
-          // Check MASI rules
-          if (!this.shouldSuppressVirtualSemi(token, nextToken)) {
+          // Check MASI rules (pass jsxDepth to shouldSuppressVirtualSemi)
+          if (!this.shouldSuppressVirtualSemi(token, nextToken, jsxDepth > 0)) {
             const virtualSemi: Token = {
               type: TokenType.VirtualSemi,
               value: ';',
@@ -752,7 +781,12 @@ export class Lexer {
     this.tokens = result;
   }
   
-  private shouldSuppressVirtualSemi(current: Token, next: Token): boolean {
+  private shouldSuppressVirtualSemi(current: Token, next: Token, inJSX: boolean = false): boolean {
+    // Rule 0: Never insert virtual semicolons inside JSX content
+    if (inJSX) {
+      return true;
+    }
+    
     // Rule 1: line's last non-space character is one of .,:;+-*/%&|^<>=!~?([{`
     const suppressChars = ['.', ',', ':', ';', '+', '-', '*', '/', '%', '&', '|', '^', '<', '>', '=', '!', '~', '?', '(', '[', '{', '`'];
     if (suppressChars.includes(current.value)) {

@@ -4397,6 +4397,7 @@ export class Parser {
       kind: "ClassDecl",
       name,
       typeParams,
+      genericParams: typeParams, // Provide both for compatibility
       extends: extendsType,
       implements: implementsTypes,
       members,
@@ -4451,9 +4452,15 @@ export class Parser {
   
   private parsePackageDecl(): AST.PackageDecl {
     const start = this.current - 1;
-    const name = this.peek().type === TokenType.Identifier ? 
-      this.advance().value : 
-      this.consume(TokenType.StringLiteral, "Expected package name").value;
+    const nameToken = this.peek().type === TokenType.Identifier ? 
+      this.advance() : 
+      this.consume(TokenType.StringLiteral, "Expected package name");
+    
+    const name: AST.Identifier = {
+      kind: "Identifier",
+      name: nameToken.value,
+      span: this.createSpanFrom(nameToken)
+    };
     
     this.consumeSemicolon();
     

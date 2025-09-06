@@ -1,0 +1,547 @@
+{
+  "summary": {
+    "totalAngleBracketTests": 235,
+    "weakAngleBracketTests": 72,
+    "percentageNeedingUpdate": "30.6"
+  },
+  "patternCounts": {
+    "JSX Element": 51,
+    "JSX Component": 36,
+    "Numeric Comparison": 19,
+    "Generic Collection": 14,
+    "JSX Fragment": 6,
+    "Generic Type": 8,
+    "Generic Function": 1,
+    "Shift Operator": 5,
+    "Channel Send": 6,
+    "Channel Receive": 3,
+    "Greater/Equal": 2
+  },
+  "testsByCategory": {
+    "JSX": [
+      {
+        "file": "jsx-edge-cases.test.ts",
+        "test": "should handle empty expressions",
+        "patterns": [
+          "JSX Element"
+        ],
+        "line": 30
+      },
+      {
+        "file": "jsx-edge-cases.test.ts",
+        "test": "should handle whitespace correctly",
+        "patterns": [
+          "JSX Element"
+        ],
+        "line": 45
+      },
+      {
+        "file": "jsx-edge-cases.test.ts",
+        "test": "should parse JSX in ternary",
+        "patterns": [
+          "JSX Component"
+        ],
+        "line": 61
+      },
+      {
+        "file": "jsx-edge-cases.test.ts",
+        "test": "should parse JSX in array",
+        "patterns": [
+          "JSX Component"
+        ],
+        "line": 72
+      },
+      {
+        "file": "jsx-edge-cases.test.ts",
+        "test": "should parse JSX as object value",
+        "patterns": [
+          "JSX Component"
+        ],
+        "line": 85
+      },
+      {
+        "file": "jsx-edge-cases.test.ts",
+        "test": "should parse adjacent JSX elements with fragment",
+        "patterns": [
+          "JSX Component",
+          "JSX Fragment"
+        ],
+        "line": 98
+      },
+      {
+        "file": "jsx-edge-cases.test.ts",
+        "test": "should parse JSX with template literals",
+        "patterns": [
+          "JSX Element"
+        ],
+        "line": 114
+      },
+      {
+        "file": "jsx-edge-cases.test.ts",
+        "test": "should parse complex nested expression",
+        "patterns": [
+          "JSX Component"
+        ],
+        "line": 125
+      },
+      {
+        "file": "jsx-edge-cases.test.ts",
+        "test": "should parse self-closing HTML tags",
+        "patterns": [
+          "JSX Element"
+        ],
+        "line": 161
+      },
+      {
+        "file": "jsx-fragments-nested.test.ts",
+        "test": "should parse simple fragment",
+        "patterns": [
+          "JSX Fragment"
+        ],
+        "line": 6
+      },
+      {
+        "file": "jsx-fragments-nested.test.ts",
+        "test": "should parse fragment with multiple children",
+        "patterns": [
+          "JSX Component",
+          "JSX Fragment"
+        ],
+        "line": 14
+      },
+      {
+        "file": "jsx-fragments-nested.test.ts",
+        "test": "should parse deeply nested elements",
+        "patterns": [
+          "JSX Element"
+        ],
+        "line": 27
+      },
+      {
+        "file": "jsx-fragments-nested.test.ts",
+        "test": "should parse fragment in expression",
+        "patterns": [
+          "JSX Element",
+          "JSX Fragment"
+        ],
+        "line": 47
+      },
+      {
+        "file": "jsx-fragments-nested.test.ts",
+        "test": "should parse conditional rendering",
+        "patterns": [
+          "JSX Component",
+          "JSX Element"
+        ],
+        "line": 55
+      },
+      {
+        "file": "jsx-fragments-nested.test.ts",
+        "test": "should parse map with keys",
+        "patterns": [
+          "JSX Element"
+        ],
+        "line": 67
+      },
+      {
+        "file": "jsx-fragments-nested.test.ts",
+        "test": "should parse nested fragments",
+        "patterns": [
+          "JSX Element",
+          "JSX Fragment"
+        ],
+        "line": 80
+      },
+      {
+        "file": "jsx-fragments-nested.test.ts",
+        "test": "should parse JSX comments",
+        "patterns": [
+          "JSX Element"
+        ],
+        "line": 96
+      },
+      {
+        "file": "jsx-fragments-nested.test.ts",
+        "test": "should parse spread children",
+        "patterns": [
+          "JSX Component"
+        ],
+        "line": 112
+      },
+      {
+        "file": "jsx-polyglot.test.ts",
+        "test": "should parse JSX with Python list comprehension",
+        "patterns": [
+          "JSX Element"
+        ],
+        "line": 6
+      },
+      {
+        "file": "jsx-polyglot.test.ts",
+        "test": "should parse JSX with Go channels",
+        "patterns": [
+          "JSX Component",
+          "JSX Element"
+        ],
+        "line": 19
+      },
+      {
+        "file": "jsx-polyglot.test.ts",
+        "test": "should parse JSX with Ruby blocks",
+        "patterns": [
+          "JSX Element"
+        ],
+        "line": 37
+      },
+      {
+        "file": "jsx-polyglot.test.ts",
+        "test": "should parse JSX with pattern matching",
+        "patterns": [
+          "JSX Component"
+        ],
+        "line": 52
+      },
+      {
+        "file": "jsx-polyglot.test.ts",
+        "test": "should parse JSX with Python decorators",
+        "patterns": [
+          "JSX Component",
+          "JSX Element"
+        ],
+        "line": 68
+      },
+      {
+        "file": "jsx-polyglot.test.ts",
+        "test": "should parse JSX with C# properties",
+        "patterns": [
+          "JSX Element"
+        ],
+        "line": 88
+      },
+      {
+        "file": "jsx-polyglot.test.ts",
+        "test": "should parse JSX with PHP variables",
+        "patterns": [
+          "JSX Element"
+        ],
+        "line": 119
+      },
+      {
+        "file": "jsx-polyglot.test.ts",
+        "test": "should parse JSX with multiple paradigms",
+        "patterns": [
+          "JSX Component",
+          "JSX Fragment"
+        ],
+        "line": 137
+      },
+      {
+        "file": "jsx-polyglot.test.ts",
+        "test": "should parse JSX with defer and using",
+        "patterns": [
+          "JSX Component"
+        ],
+        "line": 167
+      },
+      {
+        "file": "jsx-typescript.test.ts",
+        "test": "should parse component with typed props",
+        "patterns": [
+          "JSX Element"
+        ],
+        "line": 6
+      },
+      {
+        "file": "jsx-typescript.test.ts",
+        "test": "should parse type assertion in JSX",
+        "patterns": [
+          "JSX Component",
+          "JSX Element"
+        ],
+        "line": 38
+      },
+      {
+        "file": "jsx-typescript.test.ts",
+        "test": "should parse JSX.Element return type",
+        "patterns": [
+          "JSX Element"
+        ],
+        "line": 52
+      },
+      {
+        "file": "jsx-typescript.test.ts",
+        "test": "should parse React.FC type",
+        "patterns": [
+          "JSX Element"
+        ],
+        "line": 63
+      },
+      {
+        "file": "jsx-typescript.test.ts",
+        "test": "should parse children prop type",
+        "patterns": [
+          "JSX Element"
+        ],
+        "line": 74
+      },
+      {
+        "file": "jsx-typescript.test.ts",
+        "test": "should parse event handler types",
+        "patterns": [
+          "JSX Component",
+          "JSX Element"
+        ],
+        "line": 89
+      },
+      {
+        "file": "jsx-typescript.test.ts",
+        "test": "should parse ref types",
+        "patterns": [
+          "JSX Element"
+        ],
+        "line": 104
+      },
+      {
+        "file": "jsx-typescript.test.ts",
+        "test": "should parse union type props",
+        "patterns": [
+          "JSX Component"
+        ],
+        "line": 115
+      },
+      {
+        "file": "parser-polyglot-advanced.test.ts",
+        "test": "parses mixed string interpolation and templates",
+        "patterns": [
+          "JSX Component",
+          "Shift Operator"
+        ],
+        "line": 218
+      },
+      {
+        "file": "parser-polyglot-advanced.test.ts",
+        "test": "parses fused memory management patterns",
+        "patterns": [
+          "JSX Element"
+        ],
+        "line": 728
+      },
+      {
+        "file": "parser-polyglot.test.ts",
+        "test": "parses Go-style with TypeScript types",
+        "patterns": [
+          "JSX Element"
+        ],
+        "line": 33
+      }
+    ],
+    "Generics": [],
+    "Comparisons": [
+      {
+        "file": "parser-polyglot-advanced.test.ts",
+        "test": "parses complex pattern matching across languages",
+        "patterns": [
+          "Numeric Comparison",
+          "Greater/Equal"
+        ],
+        "line": 111
+      },
+      {
+        "file": "parser-polyglot-advanced.test.ts",
+        "test": "parses mixed comprehensions and generators",
+        "patterns": [
+          "Numeric Comparison"
+        ],
+        "line": 278
+      },
+      {
+        "file": "parser-polyglot-advanced.test.ts",
+        "test": "parses extreme conditional and loop fusions",
+        "patterns": [
+          "Numeric Comparison"
+        ],
+        "line": 667
+      },
+      {
+        "file": "parser-polyglot.test.ts",
+        "test": "parses mixed control flow styles",
+        "patterns": [
+          "Numeric Comparison"
+        ],
+        "line": 103
+      }
+    ],
+    "Channels": [
+      {
+        "file": "parser-polyglot-advanced.test.ts",
+        "test": "parses extreme operator mixing and chaining",
+        "patterns": [
+          "Channel Receive",
+          "Shift Operator"
+        ],
+        "line": 14
+      },
+      {
+        "file": "parser-real-world.test.ts",
+        "test": "parses real-world Go LLM client code",
+        "patterns": [
+          "Channel Send"
+        ],
+        "line": 332
+      }
+    ],
+    "Mixed": [
+      {
+        "file": "jsx-edge-cases.test.ts",
+        "test": "should disambiguate JSX vs less-than operator",
+        "patterns": [
+          "JSX Component",
+          "JSX Element",
+          "Numeric Comparison"
+        ],
+        "line": 6
+      },
+      {
+        "file": "jsx-edge-cases.test.ts",
+        "test": "should disambiguate generic vs JSX",
+        "patterns": [
+          "JSX Component",
+          "JSX Element",
+          "Generic Collection"
+        ],
+        "line": 18
+      },
+      {
+        "file": "jsx-edge-cases.test.ts",
+        "test": "should parse JSX with logical operators",
+        "patterns": [
+          "JSX Component",
+          "JSX Element",
+          "Numeric Comparison"
+        ],
+        "line": 148
+      },
+      {
+        "file": "jsx-polyglot.test.ts",
+        "test": "should parse JSX with Rust Option",
+        "patterns": [
+          "JSX Component",
+          "Generic Type",
+          "Generic Collection"
+        ],
+        "line": 105
+      },
+      {
+        "file": "jsx-typescript.test.ts",
+        "test": "should parse generic component",
+        "patterns": [
+          "JSX Component",
+          "JSX Element",
+          "Generic Collection",
+          "Generic Function"
+        ],
+        "line": 23
+      },
+      {
+        "file": "jsx-typescript.test.ts",
+        "test": "should parse generic JSX element",
+        "patterns": [
+          "JSX Element",
+          "Generic Collection"
+        ],
+        "line": 128
+      },
+      {
+        "file": "parser-polyglot-advanced.test.ts",
+        "test": "parses mixed async/concurrent patterns",
+        "patterns": [
+          "JSX Component",
+          "Generic Type",
+          "Generic Collection",
+          "Numeric Comparison",
+          "Channel Receive",
+          "Channel Send"
+        ],
+        "line": 76
+      },
+      {
+        "file": "parser-polyglot-advanced.test.ts",
+        "test": "parses mixed class and trait definitions",
+        "patterns": [
+          "JSX Component",
+          "Generic Collection"
+        ],
+        "line": 139
+      },
+      {
+        "file": "parser-polyglot-advanced.test.ts",
+        "test": "parses mixed type systems and generics",
+        "patterns": [
+          "JSX Component",
+          "Generic Type",
+          "Generic Collection"
+        ],
+        "line": 245
+      },
+      {
+        "file": "parser-polyglot-advanced.test.ts",
+        "test": "parses mixed error handling paradigms",
+        "patterns": [
+          "Generic Collection",
+          "Numeric Comparison"
+        ],
+        "line": 320
+      },
+      {
+        "file": "parser-polyglot-advanced.test.ts",
+        "test": "parses mixed macro and metaprogramming",
+        "patterns": [
+          "JSX Component",
+          "JSX Element",
+          "Generic Type"
+        ],
+        "line": 489
+      },
+      {
+        "file": "parser-polyglot-advanced.test.ts",
+        "test": "parses fused data structures across languages",
+        "patterns": [
+          "JSX Component",
+          "JSX Element",
+          "Generic Collection",
+          "Shift Operator"
+        ],
+        "line": 607
+      },
+      {
+        "file": "parser-polyglot-showcase.test.ts",
+        "test": "parses concurrent task orchestrator",
+        "patterns": [
+          "Numeric Comparison",
+          "Channel Receive",
+          "Channel Send"
+        ],
+        "line": 145
+      },
+      {
+        "file": "parser-polyglot-showcase.test.ts",
+        "test": "parses real-world Python Django REST API code",
+        "patterns": [
+          "JSX Element",
+          "Greater/Equal"
+        ],
+        "line": 735
+      },
+      {
+        "file": "parser-polyglot.test.ts",
+        "test": "parses exotic but valid combinations",
+        "patterns": [
+          "Numeric Comparison",
+          "Channel Send",
+          "Shift Operator"
+        ],
+        "line": 211
+      }
+    ]
+  }
+}

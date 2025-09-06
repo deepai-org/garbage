@@ -30,8 +30,7 @@ function parseCode(code: string): AST.Program {
 
 describe('JSX with TypeScript Types (UPDATED)', () => {
     it('should parse component with typed props', () => {
-        const code = `
-interface ButtonProps {
+        const code = `interface ButtonProps {
     size: 'small' | 'medium' | 'large'
     variant: string
     onClick?: () => void
@@ -75,8 +74,7 @@ function Button({ size, variant, onClick }: ButtonProps) {
     });
 
     it('should parse generic component', () => {
-        const code = `
-function List<T>({ items }: { items: T[] }) {
+        const code = `function List<T>({ items }: { items: T[] }) {
     return (
         <ul>
             {items.map((item, i) => <li key={i}>{item}</li>)}
@@ -120,8 +118,7 @@ function List<T>({ items }: { items: T[] }) {
     });
 
     it('should parse type assertion in JSX', () => {
-        const code = `
-const element = (
+        const code = `const element = (
     <input 
         ref={inputRef as React.RefObject<HTMLInputElement>}
         value={value as string}
@@ -153,8 +150,7 @@ const element = (
     });
 
     it('should parse JSX.Element return type', () => {
-        const code = `
-const Component = (): JSX.Element => {
+        const code = `const Component = (): JSX.Element => {
     return <div>Hello</div>
 }`;
         
@@ -179,8 +175,7 @@ const Component = (): JSX.Element => {
     });
 
     it('should parse React.FC type', () => {
-        const code = `
-const MyComponent: React.FC<{ title: string }> = ({ title }) => {
+        const code = `const MyComponent: React.FC<{ title: string }> = ({ title }) => {
     return <h1>{title}</h1>
 }`;
         
@@ -207,8 +202,7 @@ const MyComponent: React.FC<{ title: string }> = ({ title }) => {
     });
 
     it('should parse children prop type', () => {
-        const code = `
-interface Props {
+        const code = `interface Props {
     children: React.ReactNode
 }
 
@@ -250,8 +244,7 @@ function Container({ children }: Props) {
     });
 
     it('should parse event handler types', () => {
-        const code = `
-function Form() {
+        const code = `function Form() {
     const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
         e.preventDefault()
     }
@@ -291,8 +284,7 @@ function Form() {
     });
 
     it('should parse ref types', () => {
-        const code = `
-const Input = React.forwardRef<HTMLInputElement, InputProps>((props, ref) => {
+        const code = `const Input = React.forwardRef<HTMLInputElement, InputProps>((props, ref) => {
     return <input ref={ref} {...props} />
 })`;
         
@@ -328,8 +320,7 @@ const Input = React.forwardRef<HTMLInputElement, InputProps>((props, ref) => {
     });
 
     it('should parse union type props', () => {
-        const code = `
-type Status = 'loading' | 'success' | 'error'
+        const code = `type Status = 'loading' | 'success' | 'error'
 
 function StatusIcon({ status }: { status: Status }) {
     return <Icon type={status} />
