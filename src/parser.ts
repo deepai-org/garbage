@@ -6015,8 +6015,14 @@ export class Parser {
 
   // ============ JSX Parsing Methods ============
 
+  // Helper for multi-token lookahead
+  private lookahead(n: number): Token | null {
+    const pos = this.current + n;
+    return pos < this.tokens.length ? this.tokens[pos] : null;
+  }
+
   private isJSXElement(): boolean {
-    // Look ahead to determine if this is JSX or not
+    // Enhanced lookahead to better distinguish JSX from generics/comparisons
     const saved = this.current;
     
     try {
@@ -6030,14 +6036,46 @@ export class Parser {
         return false;
       }
       
+      // Enhanced check: Look at more context
+      const token1 = this.lookahead(0); // current token (identifier)
+      const token2 = this.lookahead(1);
+      const token3 = this.lookahead(2);
+      
+      // Quick wins: definitely JSX patterns
+      if (token2?.value === "/" && token3?.value === ">") {
+        this.current = saved;
+        return true; // Self-closing tag <Component/>
+      }
+      
+      if (token2?.value === ">") {
+        this.current = saved;
+        return true; // Simple tag <Component>
+      }
+      
+      // Check for JSX attributes pattern: <Component prop=
+      if (token2?.type === TokenType.Identifier && token3?.value === "=") {
+        this.current = saved;
+        return true; // Has attributes
+      }
+      
       // Check if it's an HTML tag or a component (capital letter)
       const isComponent = /^[A-Z]/.test(name.value);
       const isHTMLTag = this.isHTMLTag(name.value);
       
+      // If it's not a component or HTML tag, more likely to be generic
       if (!isComponent && !isHTMLTag) {
-        // Could be a generic like Array<T>
+        // But still check for JSX patterns
+        this.advance(); // consume identifier
+        
+        // Check for member expression like <Form.Input>
+        if (this.match(".")) {
+          const hasMember = this.peek().type === TokenType.Identifier;
+          this.current = saved;
+          return hasMember; // JSX if has member
+        }
+        
         this.current = saved;
-        return false;
+        return false; // Likely a generic
       }
       
       this.advance(); // consume identifier
