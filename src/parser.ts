@@ -200,10 +200,10 @@ export class Parser {
         return null;
       } else {
         // This } belongs to a class/interface/object literal/etc
-        // or is genuinely unmatched. Either way, consume it and continue.
-        // The calling context will handle validation.
+        // It should have been consumed already by the appropriate parser.
+        // If we see it here, it's an extra/unmatched brace - skip it and continue
         this.advance();
-        return null;
+        return this.parseTopLevel(); // Try to parse the next item
       }
     }
     
@@ -2342,8 +2342,34 @@ export class Parser {
     let name: AST.Identifier;
     const token = this.peek();
     
+    // Handle destructuring patterns { a, b } or [ a, b ]
+    if (token.value === "{" || token.value === "[") {
+      const openChar = token.value;
+      const closeChar = openChar === "{" ? "}" : "]";
+      this.advance(); // consume opening bracket
+      
+      // For now, skip the destructuring pattern content
+      let depth = 1;
+      let nameStr = openChar;
+      while (depth > 0 && !this.isAtEnd()) {
+        const t = this.peek();
+        if (t.value === openChar) depth++;
+        else if (t.value === closeChar) depth--;
+        nameStr += t.value;
+        this.advance();
+        if (depth > 0 && !this.isAtEnd()) nameStr += " ";
+      }
+      
+      // Create a synthetic identifier for the destructured parameter
+      name = {
+        kind: "Identifier",
+        name: nameStr,
+        originalSpelling: nameStr,
+        span: this.createSpan(start, this.current - 1)
+      };
+    }
     // In parameter context, allow any keyword or identifier as parameter name
-    if (token.type === TokenType.Identifier || 
+    else if (token.type === TokenType.Identifier || 
         token.type === TokenType.Keyword ||
         token.type === TokenType.SigilIdentifier) {
       this.advance();
@@ -6411,6 +6437,7 @@ export class Parser {
     const start = this.current;
     let text = "";
     let raw = "";
+    let lastTokenEnd = -1;
     
     while (!this.isAtEnd()) {
       const token = this.peek();
@@ -6426,12 +6453,20 @@ export class Parser {
         continue;
       }
       
+      // Check if we need to add space between tokens
+      if (lastTokenEnd >= 0 && token.start > lastTokenEnd) {
+        // There was whitespace between tokens
+        text += " ";
+        raw += " ";
+      }
+      
       // Accumulate text
       if (token.type === TokenType.Identifier || 
           token.type === TokenType.Keyword ||
           token.type === TokenType.NumericLiteral) {
         text += token.value;
         raw += token.value;
+        lastTokenEnd = token.end;
         this.advance();
       } else if (token.value === ">" || token.value === "}") {
         // These shouldn't appear in text
@@ -6440,13 +6475,8 @@ export class Parser {
         // Other tokens become part of text
         text += token.value;
         raw += token.value;
+        lastTokenEnd = token.end;
         this.advance();
-      }
-      
-      // Add space after token if there was whitespace
-      if (!this.isAtEnd() && this.peek().wsBefore) {
-        text += " ";
-        raw += " ";
       }
     }
     
