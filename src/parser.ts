@@ -1648,7 +1648,37 @@ export class Parser {
   }
   
   private parsePostfix(expr: AST.Expr): AST.Expr {
+    // First check for generic arguments before entering the loop
+    // This handles cases like forwardRef<T>() where the identifier is immediately followed by generics
+    if (this.check("<") && !this.check("<-") && !this.check("<<") && !this.check("<=")) {
+      const checkpoint = this.current;
+      const genericArgs = this.tryParseGenericArgs();
+      
+      if (genericArgs) {
+        // Store generic arguments for the next call expression
+        (expr as any)._genericArgs = genericArgs;
+      } else {
+        // Not generic arguments, restore position
+        this.current = checkpoint;
+      }
+    }
+    
     while (true) {
+      // Check for generic arguments after member access (e.g., React.forwardRef<T1, T2>)
+      // This handles cases where generics appear after a member access operation
+      if (this.check("<") && !this.check("<-") && !this.check("<<") && !this.check("<=") && expr.kind === "Member") {
+        const checkpoint = this.current;
+        const genericArgs = this.tryParseGenericArgs();
+        
+        if (genericArgs) {
+          // Store generic arguments for the next call expression
+          (expr as any)._genericArgs = genericArgs;
+        } else {
+          // Not generic arguments, restore position
+          this.current = checkpoint;
+        }
+      }
+      
       // Function call
       if (this.match("(")) {
         // Special case for make() with channel types
@@ -1708,12 +1738,25 @@ export class Parser {
         
         const args = this.parseArguments();
         this.must(")", { recoverWithSynthetic: true });
-        expr = {
+        
+        // Check if we have stored generic arguments
+        const genericArgs = (expr as any)._genericArgs;
+        
+        const callExpr: AST.Call = {
           kind: "Call",
           callee: expr,
           args,
           span: this.createSpanFrom(expr)
         };
+        
+        // Add generic arguments if they exist
+        if (genericArgs) {
+          (callExpr as any).genericArgs = genericArgs;
+          // Clean up the temporary storage
+          delete (expr as any)._genericArgs;
+        }
+        
+        expr = callExpr;
         continue;
       }
       

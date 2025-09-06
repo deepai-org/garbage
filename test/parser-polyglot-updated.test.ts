@@ -186,7 +186,7 @@ panic("error")
     });
     
     // Check for finally block
-    const withFinally = tryStmts.find(t => t.finally !== null);
+    const withFinally = tryStmts.find(t => t.finallyBody !== undefined);
     expect(withFinally).toBeDefined();
     
     // Find defer statements
@@ -262,7 +262,7 @@ result := when (x) {
       
       // Check for wildcard pattern
       const wildcardArm = match.arms.find(arm => 
-        arm.pattern.kind === 'Identifier' && arm.pattern.name === '_'
+        arm.patterns[0]?.kind === 'Identifier' && (arm.patterns[0] as any).name === '_'
       );
       expect(wildcardArm).toBeDefined();
     }
@@ -272,9 +272,8 @@ result := when (x) {
       expect(sw.cases.length).toBeGreaterThanOrEqual(2);
       
       // Check for default case
-      const defaultCase = sw.cases.find(c => c.isDefault);
-      if (defaultCase) {
-        expect(defaultCase.body.statements.length).toBeGreaterThan(0);
+      if (sw.defaultCase) {
+        expect(sw.defaultCase.statements.length).toBeGreaterThan(0);
       }
     });
   });

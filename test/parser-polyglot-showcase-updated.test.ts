@@ -195,17 +195,17 @@ server.start()
     expect(cls.name.name).toBe('WebServer');
     
     // Verify constructor exists
-    const constructor = cls.body.find(m => 
-      m.kind === 'FuncDecl' && m.name.name === 'constructor'
+    const constructor = cls.members.find((m: any) => 
+      m.kind === 'Constructor' || (m.kind === 'Method' && m.name?.name === 'constructor')
     );
     expect(constructor).toBeDefined();
     
     // Find methods in class
-    const methods = cls.body.filter(m => m.kind === 'FuncDecl');
+    const methods = cls.members.filter((m: any) => m.kind === 'Method' || m.kind === 'Constructor');
     expect(methods.length).toBeGreaterThanOrEqual(3); // constructor, use, handle, start
     
     // Verify async handle method with generic
-    const handleMethod = methods.find(m => m.name.name === 'handle');
+    const handleMethod = methods.find((m: any) => m.name?.name === 'handle');
     if (handleMethod) {
       expect(handleMethod.async).toBe(true);
       expect(handleMethod.genericParams).toBeDefined();
@@ -313,7 +313,7 @@ fn orchestrate(tasks: []Task) {
     expect(selectStmts.length).toBeGreaterThanOrEqual(2);
     
     // Find for loops
-    const forLoops = findByKind<AST.For>(ast, 'For');
+    const forLoops = findByKind<AST.Loop>(ast, 'Loop').filter(l => l.mode === 'for');
     expect(forLoops.length).toBeGreaterThanOrEqual(2);
     
     // Verify comprehensive angle bracket usage
@@ -422,32 +422,32 @@ store.setState(prev => ({...prev, count: prev.count + 1}))
     
     // Verify extends clause
     expect(cls.extends).toBeDefined();
-    expect(cls.extends!.name).toBe('EventEmitter');
+    expect((cls.extends as any).name).toBe('EventEmitter');
     
     // Find private members
-    const privateMembers = cls.body.filter(m => 
-      m.kind === 'ClassProperty' && m.modifiers?.includes('private')
+    const privateMembers = cls.members.filter((m: any) => 
+      m.kind === 'Field' && m.visibility === 'private'
     );
     expect(privateMembers.length).toBeGreaterThanOrEqual(3);
     
     // Find getter/setter
-    const getters = cls.body.filter(m => 
-      m.kind === 'FuncDecl' && m.name.name === 'get'
+    const getters = cls.members.filter((m: any) => 
+      m.kind === 'Method' && m.getter === true
     );
-    const setters = cls.body.filter(m => 
-      m.kind === 'FuncDecl' && m.name.name === 'set'
+    const setters = cls.members.filter((m: any) => 
+      m.kind === 'Method' && m.setter === true
     );
     expect(getters.length + setters.length).toBeGreaterThanOrEqual(2);
     
     // Find decorated method
-    const decoratedMethods = cls.body.filter(m => 
-      m.kind === 'FuncDecl' && m.decorators?.length > 0
+    const decoratedMethods = cls.members.filter((m: any) => 
+      m.kind === 'Method' && m.decorators?.length > 0
     );
     expect(decoratedMethods.length).toBeGreaterThanOrEqual(1);
     
     // Verify usage section
     const usageStart = ast.body.findIndex(s => 
-      s.kind === 'ShortDecl' && (s as AST.ShortDecl).name.name === 'store'
+      s.kind === 'ShortDecl' && (s as AST.ShortDecl).pairs[0]?.name.name === 'store'
     );
     expect(usageStart).toBeGreaterThan(0);
     

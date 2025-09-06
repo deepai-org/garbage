@@ -109,8 +109,8 @@ async fn processStream<T>(input: Stream<T>) -> Result<Vec<T>, Error> {
     // 2. Verify parameter type: Stream<T>
     const paramType = func.params[0].type;
     verifyGenericType(paramType, 'Stream', 1);
-    const paramGenericArg = (paramType as AST.GenericType).args[0] as AST.Identifier;
-    expect(paramGenericArg.name).toBe('T');
+    const paramGenericArg = (paramType as AST.GenericType).args[0];
+    expect((paramGenericArg as any).name || (paramGenericArg as any).id?.name).toBe('T');
     
     // 3. Verify return type: Result<Vec<T>, Error>
     const returnType = func.returnType;
@@ -119,23 +119,23 @@ async fn processStream<T>(input: Stream<T>) -> Result<Vec<T>, Error> {
     // Verify nested generic Vec<T>
     const vecType = (returnType as AST.GenericType).args[0];
     verifyGenericType(vecType, 'Vec', 1);
-    const vecGenericArg = (vecType as AST.GenericType).args[0] as AST.Identifier;
-    expect(vecGenericArg.name).toBe('T');
+    const vecGenericArg = (vecType as AST.GenericType).args[0];
+    expect((vecGenericArg as any).name || (vecGenericArg as any).id?.name).toBe('T');
     
     // Verify Error type
-    const errorType = returnType.args[1] as AST.Identifier;
-    expect(errorType.name).toBe('Error');
+    const errorType = (returnType as AST.GenericType).args[1];
+    expect((errorType as any).name || (errorType as any).id?.name).toBe('Error');
     
     // 4. Verify function body contains expected statements
     const body = func.body as AST.Block;
     expect(body.statements.length).toBeGreaterThanOrEqual(4);
     
     // 5. Find and verify the for loop
-    const forLoop = findFirst<AST.For>(body, n => n.kind === 'For');
+    const forLoop = findFirst<AST.Loop>(body as any, n => n.kind === 'Loop' && n.mode === 'for');
     expect(forLoop).toBeDefined();
     
     // Verify loop comparison: i < 10
-    verifyComparison(forLoop!.condition, '<', 'i', 10);
+    verifyComparison(forLoop!.test, '<', 'i', 10);
     
     // 6. Find go statement in loop body
     const goStmt = findFirst(forLoop!.body, n => n.kind === 'Go');
