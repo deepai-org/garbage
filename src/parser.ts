@@ -4058,7 +4058,28 @@ export class Parser {
         } while (this.match(","));
       }
       
-      this.consume(closeBracket, `Expected '${closeBracket}'`);
+      // Handle >> and >>> as closing brackets in generic types
+      if (closeBracket === ">") {
+        if (this.check(">>")) {
+          // Treat >> as a single > and leave the second > for the next parse
+          this.advance(); // consume >>
+          // Inject a synthetic > token back for the next level
+          const syntheticToken = { ...this.tokens[this.current - 1] };
+          syntheticToken.value = ">";
+          this.tokens.splice(this.current, 0, syntheticToken);
+        } else if (this.check(">>>")) {
+          // Treat >>> as a single > and leave >> for the next parse
+          this.advance(); // consume >>>
+          // Inject a synthetic >> token back for the next level
+          const syntheticToken = { ...this.tokens[this.current - 1] };
+          syntheticToken.value = ">>";
+          this.tokens.splice(this.current, 0, syntheticToken);
+        } else {
+          this.consume(">", "Expected '>'");
+        }
+      } else {
+        this.consume(closeBracket, `Expected '${closeBracket}'`);
+      }
       
       return {
         kind: "GenericType",
@@ -5929,15 +5950,19 @@ export class Parser {
       
       // Handle >> and >>> as closing brackets
       if (this.check(">>")) {
-        // Split >> into > >
-        const token = this.peek();
-        token.value = ">";
-        // Would need to insert another > token here
+        // Treat >> as a single > and leave the second > for the next parse
+        this.advance(); // consume >>
+        // Inject a synthetic > token back for the next level
+        const syntheticToken = { ...this.tokens[this.current - 1] };
+        syntheticToken.value = ">";
+        this.tokens.splice(this.current, 0, syntheticToken);
       } else if (this.check(">>>")) {
-        // Split >>> into > >>
-        const token = this.peek();
-        token.value = ">";
-        // Would need to insert >> token here
+        // Treat >>> as a single > and leave >> for the next parse
+        this.advance(); // consume >>>
+        // Inject a synthetic >> token back for the next level
+        const syntheticToken = { ...this.tokens[this.current - 1] };
+        syntheticToken.value = ">>";
+        this.tokens.splice(this.current, 0, syntheticToken);
       } else {
         this.consume(">", "Expected '>' after generic arguments");
       }
