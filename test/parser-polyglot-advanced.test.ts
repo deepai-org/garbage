@@ -3,6 +3,22 @@ import { Parser } from '../src/parser';
 import { Lexer } from '../src/lexer';
 import * as AST from '../src/ast';
 
+// Import test helpers for strong AST verification
+import {
+  verifyGenericType,
+  verifyComparison,
+  verifyAngleBrackets,
+  findInAST,
+  findAllInAST
+} from './helpers/ast-verifiers';
+
+import {
+  findComparisons,
+  findChannelOperations,
+  findAllAngleBracketUsages,
+  analyzeAngleBrackets
+} from './helpers/pattern-matchers';
+
 function parseCode(code: string): AST.Program {
   const lexer = new Lexer(code);
   const tokens = lexer.tokenize();
@@ -25,7 +41,30 @@ destructured := {x, y, ...rest} = obj
 `;
 
     const ast = parseCode(code);
+    
+    // ✅ STRONG: Verify AST structure
     expect(ast.body.length).toBeGreaterThanOrEqual(8);
+    
+    // Verify first statement is short declaration
+    const stmt1 = ast.body[0] as AST.ShortDecl;
+    expect(stmt1.kind).toBe('ShortDecl');
+    expect(stmt1.pairs[0].name.name).toBe('result');
+    
+    // Find and verify shift operators in the expression tree
+    const allBinary = findAllInAST(ast, n => n && n.kind === 'Binary') as AST.Binary[];
+    const shifts = allBinary.filter(n => ['<<', '>>', '>>>'].includes(n.op));
+    expect(shifts.length).toBe(3);
+    expect(shifts.map(s => s.op).sort()).toEqual(['<<', '>>', '>>>']);
+    
+    // Verify channel operations
+    const channelOps = findChannelOperations(ast);
+    expect(channelOps.receives.length).toBeGreaterThan(0);
+    
+    // Analyze angle bracket usage
+    const usage = findAllAngleBracketUsages(ast);
+    expect(usage.shifts.leftShift.length).toBe(1);
+    expect(usage.shifts.rightShift.length).toBe(1);
+    expect(usage.shifts.unsignedRightShift.length).toBe(1);
   });
 
   test('parses nested mixed-language blocks', () => {
