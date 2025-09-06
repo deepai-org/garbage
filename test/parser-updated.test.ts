@@ -13,6 +13,8 @@ import {
   findByKind
 } from './helpers/ast-verifiers';
 
+import { getReturnValue, getIfCondition } from './helpers/ast-compat';
+
 import {
   analyzeAngleBrackets
 } from './helpers/pattern-matchers';
@@ -45,7 +47,7 @@ describe('Parser Core Tests (UPDATED)', () => {
       // Verify condition
       expect(ifStmt.arms).toHaveLength(1);
       const arm = ifStmt.arms[0];
-      verifyComparison(arm.condition, '>', 'x', 0);
+      verifyComparison(getIfCondition(arm), '>', 'x', 0);
       
       // Verify then body
       expect(arm.body.statements).toHaveLength(1);
@@ -268,8 +270,9 @@ describe('Parser Core Tests (UPDATED)', () => {
       expect(returnStmt.kind).toBe('Return');
       
       // Verify return expression: a + b
-      if (returnStmt.value && returnStmt.value.kind === 'Binary') {
-        verifyBinaryOp(returnStmt.value, '+');
+      const returnValue = getReturnValue(returnStmt);
+      if (returnValue && returnValue.kind === 'Binary') {
+        verifyBinaryOp(returnValue, '+');
       }
     });
 
@@ -306,8 +309,9 @@ describe('Parser Core Tests (UPDATED)', () => {
       const body = func.body as AST.Block;
       const returnStmt = body.statements[0] as AST.Return;
       
-      if (returnStmt.value && returnStmt.value.kind === 'Unary') {
-        const unary = returnStmt.value as AST.Unary;
+      const returnValue = getReturnValue(returnStmt);
+      if (returnValue && returnValue.kind === 'Unary') {
+        const unary = returnValue as AST.Unary;
         expect(unary.op).toBe('await');
       }
     });

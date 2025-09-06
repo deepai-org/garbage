@@ -91,7 +91,8 @@ export type Expr =
   | Yield
   | TypeAssertion
   | JSXElement
-  | JSXFragment;
+  | JSXFragment
+  | Match;
 
 export interface NumericLiteral {
   kind: "NumericLiteral";
@@ -309,6 +310,19 @@ export interface SwitchCase {
   body: Block;
   fallthrough?: boolean;
   span: Span;
+}
+
+export interface Match {
+  kind: "Match";
+  expr: Expr;
+  arms: MatchArm[];
+  span: Span;
+}
+
+export interface MatchArm {
+  patterns: Expr[];
+  guard?: Expr;
+  body: Expr | Block;
 }
 
 export interface Try {

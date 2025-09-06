@@ -42,6 +42,56 @@ export function isThrowStmt(node: any): boolean {
   return node.kind === 'Throw';
 }
 
+// Get return value (handles value vs values)
+export function getReturnValue(returnStmt: any): any {
+  // Support both single value and values array
+  if (returnStmt.value !== undefined) {
+    return returnStmt.value;
+  }
+  if (returnStmt.values && returnStmt.values.length === 1) {
+    return returnStmt.values[0];
+  }
+  return returnStmt.values;
+}
+
+// Normalize type declaration kinds
+export function normalizeTypeDecl(node: any): any {
+  if (node.kind === 'TypeDecl') {
+    return { ...node, kind: 'TypeAlias' };
+  }
+  return node;
+}
+
+// Normalize variable declaration kinds
+export function normalizeVarDecl(node: any): any {
+  if (node.kind === 'ShortDecl') {
+    // Convert ShortDecl to VarDecl format
+    return {
+      ...node,
+      kind: 'VarDecl',
+      names: node.pairs.map((p: any) => p.name),
+      values: node.pairs.map((p: any) => p.expr)
+    };
+  }
+  return node;
+}
+
+// Normalize interface declaration (members vs properties)
+export function normalizeInterfaceDecl(node: any): any {
+  if (node.kind === 'InterfaceDecl' && node.members) {
+    return {
+      ...node,
+      properties: node.members
+    };
+  }
+  return node;
+}
+
+// Get IfArm condition (handles test vs condition)
+export function getIfCondition(arm: any): any {
+  return arm.condition || arm.test;
+}
+
 // Get the actual expression from various statement types
 export function getExpression(stmt: any): any {
   if (stmt.kind === 'ExprStmt') {

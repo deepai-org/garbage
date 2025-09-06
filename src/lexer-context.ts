@@ -56,6 +56,7 @@ export interface LexerContext {
   inJSXAttribute: boolean;
   inJSXOpeningTag: boolean;
   inJSXClosingTag: boolean;
+  inJSXExpression: boolean;  // Inside {} in JSX
   
   // Type context
   inTypeAnnotation: boolean;
@@ -107,6 +108,7 @@ export class ContextTracker {
       inJSXAttribute: false,
       inJSXOpeningTag: false,
       inJSXClosingTag: false,
+      inJSXExpression: false,
       
       inTypeAnnotation: false,
       inTypeDeclaration: false,
@@ -254,6 +256,25 @@ export class ContextTracker {
   }
   
   /**
+   * Enter JSX expression context (inside {})
+   */
+  enterJSXExpression(): void {
+    this.push({
+      inJSXExpression: true,
+      inJSXText: false  // Not in JSX text when in expression
+    });
+  }
+  
+  /**
+   * Exit JSX expression context
+   */
+  exitJSXExpression(): void {
+    this.push({
+      inJSXExpression: false
+    });
+  }
+  
+  /**
    * Exit JSX context
    */
   exitJSX(): void {
@@ -357,6 +378,11 @@ export class ContextTracker {
    * Check if whitespace should be preserved
    */
   shouldPreserveWhitespace(): boolean {
+    // Don't preserve whitespace inside JSX expressions
+    if (this.context.inJSXExpression) {
+      return false;
+    }
+    
     return this.context.inJSXText || 
            this.context.inTemplateString ||
            this.context.inString;

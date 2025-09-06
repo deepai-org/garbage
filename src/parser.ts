@@ -484,7 +484,7 @@ export class Parser {
     }
     
     if (this.match("switch", "match")) {
-      return this.parseSwitch();
+      return this.parseSwitch() as AST.Stmt;
     }
     
     // Don't parse 'case' as a statement when inside a switch
@@ -2536,7 +2536,7 @@ export class Parser {
     };
   }
   
-  private parseSwitch(): AST.Switch {
+  private parseSwitch(): AST.Switch | AST.Match {
     const start = this.current - 1;
     const isMatch = this.previous()?.value === "match";
     const discriminant = this.parseExpression();
@@ -2596,8 +2596,14 @@ export class Parser {
       
       // Handle default case
       if (this.match("default")) {
-        this.consume(":", "Expected ':' after default");
-        defaultCase = this.parseCaseBody();
+        // Match uses => while switch uses :
+        if (isMatch && !isPythonStyle) {
+          this.consume("=>", "Expected '=>' after default");
+          defaultCase = this.parseMatchCaseBody();
+        } else {
+          this.consume(":", "Expected ':' after default");
+          defaultCase = this.parseCaseBody();
+        }
         
         // Check for comma in match expressions
         if (isMatch && this.check(",")) {
@@ -2694,6 +2700,31 @@ export class Parser {
     
     // Restore switch context flag
     this.insideSwitch = wasInsideSwitch;
+    
+    // Return Match for match expressions, Switch for switch statements
+    if (isMatch) {
+      // Convert SwitchCase to MatchArm
+      const arms: AST.MatchArm[] = cases.map(c => ({
+        patterns: c.patterns,
+        guard: c.guard,
+        body: c.body
+      }));
+      
+      // Add default case as a catch-all arm if present
+      if (defaultCase) {
+        arms.push({
+          patterns: [{ kind: "Identifier", name: "_", span: defaultCase.span }],
+          body: defaultCase
+        });
+      }
+      
+      return {
+        kind: "Match",
+        expr: discriminant,
+        arms,
+        span: this.createSpan(start, this.current - 1)
+      } as AST.Match;
+    }
     
     return {
       kind: "Switch",
@@ -4494,9 +4525,35 @@ export class Parser {
     const members: AST.InterfaceMember[] = [];
     
     while (!this.check("}") && !this.isAtEnd()) {
-      // Parse interface members
-      // This is simplified - full implementation would handle all member types
-      this.advance(); // Skip for now
+      // Skip virtual semicolons and commas
+      while (this.peek().virtualSemi || this.check(",")) {
+        this.advance();
+      }
+      
+      if (this.check("}")) break;
+      
+      // Parse interface member
+      const memberStart = this.current;
+      
+      // Handle optional members (name?: type)
+      const memberName = this.parseIdentifier();
+      const optional = this.match("?");
+      
+      // Expect colon for type annotation
+      this.consume(":", "Expected ':' after member name");
+      
+      // Parse the type
+      const memberType = this.parseType();
+      
+      members.push({
+        name: memberName,
+        type: memberType,
+        optional,
+        span: this.createSpan(memberStart, this.current - 1)
+      });
+      
+      // Skip optional comma or semicolon
+      this.match(",") || this.match(";");
     }
     
     this.consume("}", "Expected '}' after interface body");
@@ -5531,7 +5588,36 @@ export class Parser {
     }
     
     // After closing paren, check for => or : (return type) then =>
-    return this.check("=>") || (this.check(":") && this.peekNext()?.value === "=>");
+    if (this.check("=>")) {
+      return true;
+    }
+    
+    // Check for return type annotation
+    if (this.check(":")) {
+      // Save position and scan ahead through the type to find =>
+      const savePos = this.current;
+      this.advance(); // consume :
+      
+      // Skip through the type expression
+      let typeDepth = 0;
+      while (!this.isAtEnd()) {
+        if (this.check("<")) {
+          typeDepth++;
+        } else if (this.check(">")) {
+          typeDepth--;
+        } else if (typeDepth === 0 && this.check("=>")) {
+          this.current = savePos;
+          return true;
+        } else if (typeDepth === 0 && (this.check("{") || this.check(";") || this.check(",") || this.isAtEnd())) {
+          // Not a lambda - stop scanning
+          break;
+        }
+        this.advance();
+      }
+      this.current = savePos;
+    }
+    
+    return false;
   }
   
   private parseNewExpression(): AST.Call {

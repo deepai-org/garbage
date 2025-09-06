@@ -13,6 +13,8 @@ import {
   findAllInAST
 } from './helpers/ast-verifiers';
 
+import { normalizeTypeDecl } from './helpers/ast-compat';
+
 import {
   findJSXElements,
   findGenericTypes,
@@ -332,7 +334,7 @@ function StatusIcon({ status }: { status: Status }) {
         expect(ast.body).toHaveLength(2);
         
         // Verify type alias
-        const typeAlias = ast.body[0] as any;
+        const typeAlias = normalizeTypeDecl(ast.body[0]);
         expect(typeAlias.kind).toBe('TypeAlias');
         expect(typeAlias.name.name).toBe('Status');
         

@@ -308,9 +308,9 @@ describe('Comprehensive Parser Tests', () => {
 
     test('parses match statements', () => {
       const ast = parseCode('match x { case 1 => "one" case 2 => "two" }');
-      const stmt = ast.body[0] as AST.Switch;
-      expect(stmt.kind).toBe('Switch');
-      expect(stmt.cases).toHaveLength(2);
+      const stmt = ast.body[0] as any; // Can be Match now
+      expect(stmt.kind).toBe('Match');
+      expect(stmt.arms).toHaveLength(2);
     });
 
     test('parses with statements', () => {

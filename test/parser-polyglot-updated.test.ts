@@ -128,7 +128,7 @@ multiLine := (x, y) => {
     // Find arrow functions (stored as short declarations)
     const shortDecls = findByKind<AST.ShortDecl>(ast, 'ShortDecl');
     const arrowDecls = shortDecls.filter(d => 
-      ['arrow', 'shortArrow', 'multiLine'].includes(d.name.name)
+      d.pairs && d.pairs[0] && ['arrow', 'shortArrow', 'multiLine'].includes(d.pairs[0].name.name)
     );
     expect(arrowDecls.length).toBeGreaterThanOrEqual(3);
     

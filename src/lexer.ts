@@ -686,6 +686,12 @@ export class Lexer {
           this.context.enterJSXText();
         }
       }
+    } else if (value === '{' && this.context.isInJSX()) {
+      // Entering JSX expression container
+      this.context.enterJSXExpression();
+    } else if (value === '}' && this.context.getContext().inJSXExpression) {
+      // Exiting JSX expression container
+      this.context.exitJSXExpression();
     }
     
     // Handle mode transitions
@@ -808,10 +814,11 @@ export class Lexer {
       // Track JSX context
       if (token.value === '<' && i + 1 < this.tokens.length) {
         const next = this.tokens[i + 1];
-        // Check if this looks like JSX: < followed by identifier or /
+        // Check if this looks like JSX: < followed by identifier, /, or > (fragment)
         if (next.type === TokenType.Identifier || 
+            next.value === '>' ||  // Fragment <>
             (next.value === '/' && i + 2 < this.tokens.length && 
-             this.tokens[i + 2].type === TokenType.Identifier)) {
+             (this.tokens[i + 2].type === TokenType.Identifier || this.tokens[i + 2].value === '>'))) {
           jsxDepth++;
         }
       } else if (token.value === '>' && jsxDepth > 0) {
@@ -837,8 +844,15 @@ export class Lexer {
         
         // Check if there's a line break between tokens
         if (nextToken.line > token.line) {
-          // Check MASI rules (pass jsxDepth to shouldSuppressVirtualSemi)
-          if (!this.shouldSuppressVirtualSemi(token, nextToken, jsxDepth > 0)) {
+          // Suppress virtual semicolons in JSX context
+          // This includes when we're inside JSX elements or when closing a JSX expression
+          const inJSXContext = jsxDepth > 0;
+          
+          // Also suppress after } if we're still within JSX (even at depth 0 of expressions)
+          const isJSXExpressionClose = token.value === '}' && braceDepth >= 0 && jsxDepth > 0;
+          
+          // Check MASI rules
+          if (!this.shouldSuppressVirtualSemi(token, nextToken, inJSXContext || isJSXExpressionClose)) {
             const virtualSemi: Token = {
               type: TokenType.VirtualSemi,
               value: ';',

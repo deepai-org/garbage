@@ -358,7 +358,8 @@ export function verifyInterfaceDecl(
   expect(node.name.name).toBe(name);
   
   if (options.propertyCount !== undefined) {
-    expect(node.properties).toHaveLength(options.propertyCount);
+    const properties = node.properties || node.members;
+    expect(properties).toHaveLength(options.propertyCount);
   }
   
   return node;
