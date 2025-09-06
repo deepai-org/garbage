@@ -6190,8 +6190,8 @@ export class Parser {
   private parseJSXFragment(): AST.JSXFragment {
     const start = this.current;
     
-    // Consume <>
-    this.consume("<", "Expected '<'");
+    // We're already at '<', so advance past it
+    this.advance(); // consume '<'
     this.consume(">", "Expected '>'");
     
     const children = this.parseJSXChildren();
@@ -6214,6 +6214,9 @@ export class Parser {
     this.consume("<", "Expected '<'");
     const name = this.parseJSXElementName();
     const attributes = this.parseJSXAttributes();
+    
+    // Skip whitespace tokens before checking for self-closing
+    this.skipJSXWhitespace();
     
     const selfClosing = this.match("/");
     this.consume(">", "Expected '>'");
@@ -6567,6 +6570,13 @@ export class Parser {
         return this.getJSXElementNameString(name.object) + "." + name.property.name;
       case "JSXNamespacedName":
         return name.namespace.name + ":" + name.name.name;
+    }
+  }
+
+  private skipJSXWhitespace(): void {
+    // Skip StringLiteral tokens that contain only whitespace
+    while (this.peek().type === TokenType.StringLiteral && /^\s*$/.test(this.peek().value)) {
+      this.advance();
     }
   }
 }

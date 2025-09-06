@@ -1,3 +1,5 @@
+import { ContextTracker } from './lexer-context';
+
 export enum TokenType {
   // Literals
   NumericLiteral = "NumericLiteral",
@@ -63,9 +65,11 @@ export class Lexer {
   private modeStack: LexerMode[] = [LexerMode.Normal];
   private bashBracketDepth = 0;
   private jsxDepth = 0;  // Track JSX nesting depth for virtual semicolon suppression
+  private context: ContextTracker;  // New context tracker
   
   constructor(source: string) {
     this.source = source;
+    this.context = new ContextTracker();  // Initialize context tracker
   }
   
   tokenize(): Token[] {
@@ -130,7 +134,29 @@ export class Lexer {
     
     // Whitespace
     if (/\s/.test(char)) {
-      // Track line starts and indentation
+      // In JSX text, preserve whitespace as text tokens
+      if (this.context.shouldPreserveWhitespace()) {
+        let whitespaceValue = char;
+        const start = this.position - 1;
+        const startLine = this.line;
+        const startColumn = this.column - 1;
+        
+        // Collect consecutive whitespace
+        while (/\s/.test(this.peek()) && !this.isAtEnd()) {
+          const wsChar = this.advance();
+          whitespaceValue += wsChar;
+          if (wsChar === '\n') {
+            this.line++;
+            this.column = 0;
+            this.lineStart = true;
+          }
+        }
+        
+        this.addTokenEx(TokenType.StringLiteral, whitespaceValue, start, this.position, startLine, startColumn);
+        return;
+      }
+      
+      // Normal whitespace handling - track line starts and indentation
       if (char === '\n') {
         this.lineStart = true;
         this.line++;
@@ -612,6 +638,56 @@ export class Lexer {
     const startColumn = this.column - 1;
     let value = this.source[start];
     
+    // Handle JSX context detection for '<' and '>'
+    if (value === '<') {
+      const nextChar = this.peek();
+      if (nextChar === '/') {
+        // This is closing tag </tagname> - exit JSX text and mark as closing
+        if (this.context.isInJSXText()) {
+          this.context.exitJSXText();
+        }
+        // Set flag to indicate we're in a closing tag
+        this.context.push({ inJSXClosingTag: true });
+      } else if (nextChar && (/[a-zA-Z_]/.test(nextChar) || nextChar === '>')) {
+        // Check if this should be JSX or generic based on context
+        if (this.context.canBeJSX() && !this.context.canBeGeneric()) {
+          // Strong JSX context, weak generic context
+          this.context.enterJSX();
+          if (nextChar === '>') {
+            this.context.enterJSXText();
+          }
+        } else if (this.context.canBeGeneric() && !this.context.canBeJSX()) {
+          // Strong generic context, weak JSX context
+          // Generic will be handled in updateTypeContext
+        } else {
+          // Ambiguous context - use heuristics
+          // JSX elements typically have lowercase names or fragments
+          if (nextChar === '>' || (nextChar >= 'a' && nextChar <= 'z')) {
+            this.context.enterJSX();
+            if (nextChar === '>') {
+              this.context.enterJSXText();
+            }
+          }
+          // Otherwise assume generic and let updateTypeContext handle it
+        }
+      }
+    } else if (value === '>' && this.context.isInJSX()) {
+      // Handle JSX tag completion
+      if (this.context.getContext().inJSXClosingTag) {
+        // This is the end of closing tag like </div> - exit JSX entirely
+        this.context.exitJSX();
+      } else {
+        const prevChar = this.position > 1 ? this.source[this.position - 2] : '';
+        if (prevChar === '/') {
+          // Self-closing element like <Component />
+          this.context.exitJSX();
+        } else {
+          // Opening tag completed, enter JSX text
+          this.context.enterJSXText();
+        }
+      }
+    }
+    
     // Handle mode transitions
     if (value === '.' && this.peek() !== '.' && this.peek() !== '*') {
       // After single dot (not .. or .*), push MemberAccess mode
@@ -963,6 +1039,9 @@ export class Lexer {
     
     if (type !== TokenType.Whitespace && type !== TokenType.Comment) {
       this.lastNonWSToken = token;
+      
+      // Update context position based on this token
+      this.context.updatePosition(value, type);
     }
   }
   
@@ -987,6 +1066,37 @@ export class Lexer {
     
     if (type !== TokenType.Whitespace && type !== TokenType.Comment) {
       this.lastNonWSToken = token;
+      
+      // Update context position based on this token
+      this.context.updatePosition(value, type);
+      
+      // Handle type context transitions
+      this.updateTypeContext(value, type);
+    }
+  }
+
+  private updateTypeContext(value: string, type: TokenType): void {
+    // Enter type context after these tokens
+    if (value === ':' && !this.context.isInJSX()) {
+      // Type annotation context (but not JSX attributes)
+      this.context.enterTypeAnnotation();
+    } else if (value === '<' && this.context.canBeGeneric()) {
+      // Generic type parameters
+      this.context.enterGeneric();
+    } else if (value === 'extends' || value === 'implements' || 
+               value === 'as' || value === 'typeof' || value === 'keyof') {
+      // TypeScript type contexts
+      this.context.enterTypeAnnotation();
+    }
+    
+    // Exit type context after these tokens
+    if (value === '>' && this.context.getContext().genericDepth > 0) {
+      // End of generic parameters
+      this.context.exitGeneric();
+    } else if ((value === ',' || value === ')' || value === ';' || value === '=' || 
+                value === '{' || value === '}') && this.context.isInType()) {
+      // End of type annotation in many contexts
+      this.context.exitTypeAnnotation();
     }
   }
 }

@@ -402,7 +402,8 @@ export class ContextTracker {
            pos.afterArrow ||
            pos.afterOpenParen ||
            pos.afterOpenBrace ||
-           pos.afterComma;
+           pos.afterComma ||
+           pos.lineStart;
   }
   
   /**
