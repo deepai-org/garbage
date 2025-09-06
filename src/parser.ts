@@ -5034,7 +5034,15 @@ export class Parser {
     const comprehensions: any[] = [];
     
     while (this.match("for")) {
-      const variable = this.parseIdentifier();
+      // Parse one or more variables (e.g., "x" or "item, i")
+      const variables: AST.Identifier[] = [];
+      variables.push(this.parseIdentifier());
+      
+      // Handle multiple variables separated by commas
+      while (this.match(",")) {
+        variables.push(this.parseIdentifier());
+      }
+      
       this.consume("in", "Expected 'in' in list comprehension");
       const iterable = this.parseExpression();
       
@@ -5044,7 +5052,7 @@ export class Parser {
       }
       
       comprehensions.push({
-        variable,
+        variables,
         iterable,
         condition
       });
@@ -5339,7 +5347,15 @@ export class Parser {
     const comprehensions: any[] = [];
     
     while (this.match("for")) {
-      const variable = this.parseIdentifier();
+      // Parse one or more variables (e.g., "x" or "item, i")
+      const variables: AST.Identifier[] = [];
+      variables.push(this.parseIdentifier());
+      
+      // Handle multiple variables separated by commas
+      while (this.match(",")) {
+        variables.push(this.parseIdentifier());
+      }
+      
       this.consume("in", "Expected 'in' in set comprehension");
       const iterable = this.parseExpression();
       
@@ -5349,7 +5365,7 @@ export class Parser {
       }
       
       comprehensions.push({
-        variable,
+        variables,
         iterable,
         condition
       });
@@ -5418,7 +5434,15 @@ export class Parser {
     const comprehensions: any[] = [];
     
     while (this.match("for")) {
-      const variable = this.parseIdentifier();
+      // Parse one or more variables (e.g., "x" or "item, i")
+      const variables: AST.Identifier[] = [];
+      variables.push(this.parseIdentifier());
+      
+      // Handle multiple variables separated by commas
+      while (this.match(",")) {
+        variables.push(this.parseIdentifier());
+      }
+      
       this.consume("in", "Expected 'in' in generator comprehension");
       const iterable = this.parseExpression();
       
@@ -5428,7 +5452,7 @@ export class Parser {
       }
       
       comprehensions.push({
-        variable,
+        variables,
         iterable,
         condition
       });

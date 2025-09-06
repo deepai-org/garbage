@@ -134,7 +134,7 @@ multiLine := (x, y) => {
     
     // Verify arrow function values are lambdas
     arrowDecls.forEach(decl => {
-      expect(decl.value.kind).toBe('Lambda');
+      expect(decl.pairs[0].expr.kind).toBe('Lambda');
     });
   });
 
