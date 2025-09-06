@@ -4535,22 +4535,59 @@ export class Parser {
       // Parse interface member
       const memberStart = this.current;
       
-      // Handle optional members (name?: type)
+      // Parse member name
       const memberName = this.parseIdentifier();
-      const optional = this.match("?");
       
-      // Expect colon for type annotation
-      this.consume(":", "Expected ':' after member name");
-      
-      // Parse the type
-      const memberType = this.parseType();
-      
-      members.push({
-        name: memberName,
-        type: memberType,
-        optional,
-        span: this.createSpan(memberStart, this.current - 1)
-      });
+      // Check if it's a method (has parentheses) or property
+      if (this.check("(")) {
+        // It's a method signature
+        const params = this.parseParameterList();
+        
+        // Parse return type
+        let returnType: AST.TypeNode | undefined;
+        if (this.match(":")) {
+          returnType = this.parseType();
+        }
+        
+        // Create a function type for the method
+        const methodType: AST.FuncType = {
+          kind: "FuncType",
+          params: params.map(p => p.type || {
+            kind: "SimpleType",
+            id: { kind: "Identifier", name: "any", span: p.span },
+            span: p.span
+          }),
+          ret: returnType || {
+            kind: "SimpleType",
+            id: { kind: "Identifier", name: "void", span: this.createSpan(this.current, this.current) },
+            span: this.createSpan(this.current, this.current)
+          },
+          span: this.createSpan(memberStart, this.current - 1)
+        };
+        
+        members.push({
+          name: memberName,
+          type: methodType,
+          optional: false,
+          span: this.createSpan(memberStart, this.current - 1)
+        });
+      } else {
+        // It's a property
+        const optional = this.match("?");
+        
+        // Expect colon for type annotation
+        this.consume(":", "Expected ':' after member name");
+        
+        // Parse the type
+        const memberType = this.parseType();
+        
+        members.push({
+          name: memberName,
+          type: memberType,
+          optional,
+          span: this.createSpan(memberStart, this.current - 1)
+        });
+      }
       
       // Skip optional comma or semicolon
       this.match(",") || this.match(";");

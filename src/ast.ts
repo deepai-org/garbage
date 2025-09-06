@@ -250,6 +250,7 @@ export type Stmt =
   | If
   | Loop
   | Switch
+  | Match
   | Try
   | Using
   | Defer

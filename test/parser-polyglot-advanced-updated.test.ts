@@ -109,7 +109,7 @@ async fn processStream<T>(input: Stream<T>) -> Result<Vec<T>, Error> {
     // 2. Verify parameter type: Stream<T>
     const paramType = func.params[0].type;
     verifyGenericType(paramType, 'Stream', 1);
-    const paramGenericArg = paramType.args[0] as AST.Identifier;
+    const paramGenericArg = (paramType as AST.GenericType).args[0] as AST.Identifier;
     expect(paramGenericArg.name).toBe('T');
     
     // 3. Verify return type: Result<Vec<T>, Error>
@@ -117,9 +117,9 @@ async fn processStream<T>(input: Stream<T>) -> Result<Vec<T>, Error> {
     verifyGenericType(returnType, 'Result', 2);
     
     // Verify nested generic Vec<T>
-    const vecType = returnType.args[0];
+    const vecType = (returnType as AST.GenericType).args[0];
     verifyGenericType(vecType, 'Vec', 1);
-    const vecGenericArg = vecType.args[0] as AST.Identifier;
+    const vecGenericArg = (vecType as AST.GenericType).args[0] as AST.Identifier;
     expect(vecGenericArg.name).toBe('T');
     
     // Verify Error type
@@ -327,11 +327,11 @@ fn deepNest<T, U, V>(x: Option<Result<Vec<(T, U)>, Error>>) -> Box<dyn Future<It
     verifyGenericType(paramType, 'Option', 1);
     
     // Verify Result<Vec<(T, U)>, Error>
-    const resultType = paramType.args[0];
+    const resultType = (paramType as AST.GenericType).args[0];
     verifyGenericType(resultType, 'Result', 2);
     
     // Verify Vec<(T, U)>
-    const vecType = resultType.args[0];
+    const vecType = (resultType as AST.GenericType).args[0];
     verifyGenericType(vecType, 'Vec', 1);
     
     // Find comparison in nested block

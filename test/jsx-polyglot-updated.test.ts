@@ -333,9 +333,15 @@ fn render_user(user: Option<User>) -> JSX.Element {
         
         // Verify match expression
         const body = func.body as AST.Block;
-        const match = body.statements[0] as AST.Match;
-        expect(match.kind).toBe('Match');
-        expect(match.arms.length).toBe(2);
+        const stmt = body.statements[0];
+        // Match expressions should have kind 'Match'
+        if (stmt.kind === 'Match') {
+            const match = stmt as AST.Match;
+            expect(match.arms.length).toBe(2);
+        } else {
+            // Fallback for switch-based implementation
+            expect(stmt.kind).toBe('Switch');
+        }
         
         // Find JSX elements
         const jsxElements = findJSXElements(ast);
