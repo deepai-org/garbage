@@ -207,9 +207,9 @@ server.start()
     // Verify async handle method with generic
     const handleMethod = methods.find((m: any) => m.name?.name === 'handle');
     if (handleMethod) {
-      expect(handleMethod.async).toBe(true);
-      expect(handleMethod.genericParams).toBeDefined();
-      expect(handleMethod.genericParams![0].name).toBe('T');
+      expect((handleMethod as any).async).toBe(true);
+      expect((handleMethod as any).genericParams).toBeDefined();
+      expect((handleMethod as any).genericParams![0].name).toBe('T');
     }
     
     // Find defer statements in methods

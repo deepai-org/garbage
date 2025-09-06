@@ -196,7 +196,7 @@ describe('Parser Core Tests (UPDATED)', () => {
       }
       
       // Verify default case
-      const defaultCase = switchStmt.cases.find(c => c.isDefault);
+      const defaultCase = switchStmt.cases.find((c: any) => c.isDefault);
       expect(defaultCase).not.toBeUndefined();
       if (defaultCase) {
         expect(defaultCase.body.statements.length).toBeGreaterThan(0);

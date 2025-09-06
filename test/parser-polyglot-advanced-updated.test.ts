@@ -39,7 +39,7 @@ destructured := {x, y, ...rest} = obj
     // Verify first statement has complex operator chain
     const stmt1 = ast.body[0] as AST.ShortDecl;
     expect(stmt1.kind).toBe('ShortDecl');
-    expect(stmt1.names[0].name).toBe('result');
+    expect(stmt1.pairs[0].name.name).toBe('result');
     
     // Find shift operators
     const shifts = findByKind<AST.Binary>(ast, 'Binary')
