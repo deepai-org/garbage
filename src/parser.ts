@@ -1261,6 +1261,9 @@ export class Parser {
     }
     
     while (true) {
+      // Skip JSX whitespace tokens if we're in a JSX context
+      this.skipJSXWhitespace();
+      
       const op = this.peek();
       
       // Check for 'as' type assertion (TypeScript)
@@ -1287,6 +1290,9 @@ export class Parser {
       
       this.advance();
       
+      // Skip JSX whitespace after operators
+      this.skipJSXWhitespace();
+      
       // Skip virtual semicolons after binary operators
       while (this.peek().virtualSemi) {
         this.advance();
@@ -1294,8 +1300,11 @@ export class Parser {
       
       // Handle ternary operator
       if (op.value === "?") {
+        this.skipJSXWhitespace();
         const consequent = this.parseExpression();
+        this.skipJSXWhitespace();
         this.consume(":", "Expected ':' in ternary expression");
+        this.skipJSXWhitespace();
         const alternate = this.parseExpression(precedence);
         left = {
           kind: "Ternary",
@@ -6547,7 +6556,7 @@ export class Parser {
       };
     }
     
-    const expression = this.parseJSXExpression();
+    const expression = this.parseExpression();
     
     // Skip whitespace before closing brace
     this.skipJSXWhitespace();
