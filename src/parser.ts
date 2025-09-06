@@ -4329,11 +4329,25 @@ export class Parser {
       } while (this.match(","));
     }
     
-    // Parse class body
-    this.consume("{", "Expected '{' before class body");
+    // Parse class body - support both JavaScript ({}) and Python (:) syntax
+    let isPythonStyle = false;
+    if (this.check(":")) {
+      isPythonStyle = true;
+      this.advance(); // consume ':'
+    } else {
+      this.consume("{", "Expected '{' or ':' before class body");
+    }
+    
     const members: AST.ClassMember[] = [];
     
-    while (!this.check("}") && !this.isAtEnd()) {
+    // For Python style, we need to parse until we find a dedent or EOF
+    // For JavaScript style, parse until }
+    while ((!isPythonStyle && !this.check("}")) || (isPythonStyle && !this.isAtEnd())) {
+      // For Python-style classes, break if we see a top-level statement
+      // (this is a simple heuristic since we don't have proper indentation tracking)
+      if (isPythonStyle && (this.check("class") || this.check("def") || this.check("import") || this.isAtEnd())) {
+        break;
+      }
       // Skip virtual semicolons and regular semicolons
       while (this.check(";") || this.peek().virtualSemi) {
         this.advance();
@@ -4720,7 +4734,10 @@ export class Parser {
       }
     }
     
-    this.consume("}", "Expected '}' after class body");
+    // Consume closing delimiter based on style
+    if (!isPythonStyle) {
+      this.consume("}", "Expected '}' after class body");
+    }
     
     const classDecl: AST.ClassDecl = {
       kind: "ClassDecl",
