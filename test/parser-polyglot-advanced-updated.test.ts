@@ -39,7 +39,7 @@ destructured := {x, y, ...rest} = obj
     // Verify first statement has complex operator chain
     const stmt1 = ast.body[0] as AST.VarDecl;
     expect(stmt1.kind).toBe('VarDecl');
-    expect(stmt1.name.name).toBe('result');
+    expect(stmt1.names[0].name).toBe('result');
     
     // Find shift operators
     const shifts = findByKind<AST.Binary>(ast, 'Binary')
@@ -147,13 +147,13 @@ async fn processStream<T>(input: Stream<T>) -> Result<Vec<T>, Error> {
     // Verify channel receive: <-ch
     expect(channelOps.channels.receives.length).toBeGreaterThan(0);
     const receive = channelOps.channels.receives[0];
-    expect(receive.operand.name).toBe('ch');
+    expect((receive.argument as any).name).toBe('ch');
     
     // Verify channel send: ch <- item
     expect(channelOps.channels.sends.length).toBeGreaterThan(0);
     const send = channelOps.channels.sends[0];
-    expect(send.left.name).toBe('ch');
-    expect(send.right.name).toBe('item');
+    expect((send.left as any).name).toBe('ch');
+    expect((send.right as any).name).toBe('item');
     
     // 8. Comprehensive angle bracket verification
     verifyAngleBrackets(ast, {
@@ -207,7 +207,7 @@ match value {
     expect(ast.body).toHaveLength(1);
     const matchStmt = ast.body[0] as AST.Match;
     expect(matchStmt.kind).toBe('Match');
-    expect(matchStmt.expr.name).toBe('value');
+    expect((matchStmt.expr as any).name).toBe('value');
     expect(matchStmt.arms.length).toBeGreaterThanOrEqual(4);
     
     // Verify pattern with guard clause (x > 0)

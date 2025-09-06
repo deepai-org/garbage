@@ -1730,11 +1730,12 @@ export class Parser {
         continue;
       }
       
-      // Regular member access (including pointer dereference and force unwrap)
-      if (this.match(".", ".*", "!.")) {
+      // Regular member access (including pointer dereference, force unwrap, and PHP arrow)
+      if (this.match(".", ".*", "!.", "->")) {
         const op = this.previous()?.value;
         const deref = op === ".*";
         const forceUnwrap = op === "!.";
+        const phpArrow = op === "->";
         
         // Special case for .*. pattern (pointer member access)
         if (deref && this.match(".")) {
@@ -1754,7 +1755,7 @@ export class Parser {
             span: this.createSpanFrom(expr)
           };
         } else if (!deref) {
-          // Regular member access or force unwrap
+          // Regular member access, force unwrap, or PHP arrow
           const property = this.parseIdentifier();
           
           // If it was force unwrap, wrap the object in a non-null assertion
@@ -1773,6 +1774,7 @@ export class Parser {
               span: this.createSpanFrom(expr)
             };
           } else {
+            // Regular member access (. or ->)
             expr = {
               kind: "Member",
               object: expr,
