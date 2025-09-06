@@ -228,7 +228,11 @@ export class Parser {
       }
       
       // After decorators, we expect a declaration (function or class)
-      if (this.match("async", "unsafe")) {
+      // Check for class first since Python can have 'def' inside class
+      if (this.match("class")) {
+        const cls = this.parseClassDecl(decorators);
+        return cls;
+      } else if (this.match("async", "unsafe")) {
         // Handle async/unsafe before function
         const isAsync = this.previous()?.value === "async";
         const isUnsafe = this.previous()?.value === "unsafe";
@@ -244,9 +248,6 @@ export class Parser {
         const func = this.parseFuncDecl(false, false, isGenerator);
         // Note: We're ignoring decorators for now since AST doesn't have a field for them
         return func;
-      } else if (this.match("class")) {
-        const cls = this.parseClassDecl(decorators);
-        return cls;
       }
       
       // If we have decorators but no valid declaration follows, it's an error
