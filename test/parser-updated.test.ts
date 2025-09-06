@@ -72,10 +72,10 @@ describe('Parser Core Tests (UPDATED)', () => {
       expect(ifStmt.arms).toHaveLength(2);
       
       // Verify first condition: x > 0
-      verifyComparison(ifStmt.arms[0].condition, '>', 'x', 0);
+      verifyComparison(ifStmt.arms[0].test, '>', 'x', 0);
       
       // Verify second condition: x < 0
-      verifyComparison(ifStmt.arms[1].condition, '<', 'x', 0);
+      verifyComparison(ifStmt.arms[1].test, '<', 'x', 0);
       
       // Verify else body has content
       expect(ifStmt.elseBody).not.toBeNull();

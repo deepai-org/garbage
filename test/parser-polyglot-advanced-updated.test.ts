@@ -37,8 +37,8 @@ destructured := {x, y, ...rest} = obj
     expect(ast.body.length).toBeGreaterThanOrEqual(8);
     
     // Verify first statement has complex operator chain
-    const stmt1 = ast.body[0] as AST.VarDecl;
-    expect(stmt1.kind).toBe('VarDecl');
+    const stmt1 = ast.body[0] as AST.ShortDecl;
+    expect(stmt1.kind).toBe('ShortDecl');
     expect(stmt1.names[0].name).toBe('result');
     
     // Find shift operators
