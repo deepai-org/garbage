@@ -2874,7 +2874,20 @@ export class Parser {
     }
     
     // Parse constructor pattern like Some(v) or simple identifier
-    const id = this.parseIdentifier();
+    let id: AST.Expr = this.parseIdentifier();
+    
+    // Check for qualified pattern like Pattern::Regex
+    if (this.check("::")) {
+      this.advance(); // consume ::
+      const property = this.parseIdentifier();
+      id = {
+        kind: "Member",
+        object: id,
+        property,
+        computed: false,
+        span: this.createSpan(start, this.current - 1)
+      };
+    }
     
     // Check for constructor pattern with arguments
     if (this.match("(")) {

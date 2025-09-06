@@ -138,7 +138,7 @@ async fn processStream<T>(input: Stream<T>) -> Result<Vec<T>, Error> {
     verifyComparison(forLoop!.test, '<', 'i', 10);
     
     // 6. Find go statement in loop body
-    const goStmt = findFirst(forLoop!.body, n => n.kind === 'Go');
+    const goStmt = findFirst({ body: forLoop!.body.statements } as AST.Program, n => n.kind === 'Go');
     expect(goStmt).toBeDefined();
     
     // 7. Find channel operations
