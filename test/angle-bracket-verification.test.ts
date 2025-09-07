@@ -162,7 +162,8 @@ function process<T, U>(data: Stream<T>) {
         ],
         generics: [
           { base: 'Stream', argCount: 1 },
-          { base: 'Vec', argCount: 1 }
+          { base: 'Result', argCount: 2 }, // Result<Vec<T>, Error> in type assertion
+          { base: 'Vec', argCount: 1 }     // Vec<T> nested in Result
         ],
         comparisons: [
           { op: '<', left: 'x', right: 5 },
@@ -178,13 +179,13 @@ function process<T, U>(data: Stream<T>) {
       // Verify statistics
       const stats = analyzeAngleBrackets(ast);
       expect(stats.jsxCount).toBe(1); // Only Button is JSX
-      expect(stats.genericCount).toBe(2);
+      expect(stats.genericCount).toBe(3); // Stream<T>, Result<Vec<T>, Error>, Vec<T>
       expect(stats.comparisonCount).toBe(3);
       expect(stats.channelCount).toBe(2);
       expect(stats.shiftCount).toBe(2);
       
       // Total should be sum of all
-      expect(stats.totalUsages).toBe(10);
+      expect(stats.totalUsages).toBe(11); // Updated: 1 JSX + 3 generics + 3 comparisons + 2 channels + 2 shifts
     });
     
     test('handles deeply nested generics', () => {

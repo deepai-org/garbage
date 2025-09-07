@@ -687,9 +687,13 @@ export class Lexer {
             const afterGeneric = this.source[posAfterGeneric];
             
             // Check for JSX patterns after generic params
-            // JSX: <Component<T> />, <Component<T> attr=, <Component<T>>
-            // Not JSX: Result<Vec<T>, Error> (followed by comma, semicolon, etc)
-            if (afterGeneric === ' ' || afterGeneric === '/' || afterGeneric === '>' ||
+            // JSX: <Component<T> />, <Component<T> attr=, <Component<T>>content
+            // Not JSX: <Result<Vec<T>, Error>>{} (type assertion)
+            // If we see >> after generics, it's likely a type assertion with object literal
+            if (afterGeneric === '>' && this.source[posAfterGeneric + 1] === '{') {
+              // This looks like <Type<...>>{ - type assertion with object literal
+              // Don't treat as JSX
+            } else if (afterGeneric === ' ' || afterGeneric === '/' || afterGeneric === '>' ||
                 (afterGeneric && /[a-zA-Z_]/.test(afterGeneric))) {
               // This is JSX! Create JSXTagStart token instead of operator
               this.addTokenEx(TokenType.JSXTagStart, '<', start, this.position, startLine, startColumn);
@@ -913,8 +917,9 @@ export class Lexer {
           // Also suppress after } if we're still within JSX (even at depth 0 of expressions)
           const isJSXExpressionClose = token.value === '}' && braceDepth >= 0 && jsxDepth > 0;
           
-          // Check MASI rules
-          if (!this.shouldSuppressVirtualSemi(token, nextToken, inJSXContext || isJSXExpressionClose)) {
+          // Check MASI rules (pass previous token for context)
+          const prevToken = i > 0 ? this.tokens[i - 1] : null;
+          if (!this.shouldSuppressVirtualSemi(token, nextToken, inJSXContext || isJSXExpressionClose, prevToken)) {
             const virtualSemi: Token = {
               type: TokenType.VirtualSemi,
               value: ';',
@@ -933,7 +938,7 @@ export class Lexer {
     this.tokens = result;
   }
   
-  private shouldSuppressVirtualSemi(current: Token, next: Token, inJSX: boolean = false): boolean {
+  private shouldSuppressVirtualSemi(current: Token, next: Token, inJSX: boolean = false, prev: Token | null = null): boolean {
     // Special case: Some keywords should always have a virtual semicolon after them
     // when they appear alone on a line (no expression following on same line)
     // This takes precedence even over JSX context since these keywords can't appear in JSX expressions
@@ -949,6 +954,12 @@ export class Lexer {
     }
     
     // Rule 1: line's last non-space character is one of .,:;+-*/%&|^<>=!~?([{`
+    // Special case: ? after ) or ] is likely the try operator, not ternary start
+    if (current.value === '?' && prev && (prev.value === ')' || prev.value === ']')) {
+      // This is likely the try operator (error propagation) - insert virtual semicolon
+      return false;
+    }
+    
     const suppressChars = ['.', ',', ':', ';', '+', '-', '*', '/', '%', '&', '|', '^', '<', '>', '=', '!', '~', '?', '(', '[', '{', '`'];
     if (suppressChars.includes(current.value)) {
       return true;
