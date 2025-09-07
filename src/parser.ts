@@ -330,6 +330,8 @@ export class Parser {
         value === "trait" || value === "enum" ||
         value === "package" || value === "export"
       ) ||
+      // Also check for 'impl' as an identifier (Rust-style impl blocks)
+      (type === TokenType.Identifier && value === "impl") ||
       type === TokenType.Operator && value === "#" && 
       this.peekNext()?.type === TokenType.Identifier && 
       this.peekNext()?.value === "include"
@@ -442,6 +444,11 @@ export class Parser {
     
     if (this.match("interface", "trait")) {
       return this.parseInterfaceDecl();
+    }
+    
+    // Handle Rust-style impl blocks as a special class-like structure
+    if (this.peek().value === "impl" && this.peek().type === TokenType.Identifier) {
+      return this.parseImplBlock();
     }
     
     if (this.match("enum")) {
@@ -756,7 +763,7 @@ export class Parser {
     return false;
   }
   
-  private parseSelectStatement(): AST.Switch {
+  private parseSelectStatement(): AST.Select {
     const start = this.current - 1;
     const cases: AST.SwitchCase[] = [];
     let defaultCase: AST.Block | undefined;
@@ -802,16 +809,8 @@ export class Parser {
     this.consume("}", "Expected '}' after select body");
     
     // Create a pseudo-discriminant for select (since it doesn't have one)
-    const discriminant: AST.Identifier = {
-      kind: "Identifier",
-      name: "__select__",
-      originalSpelling: "__select__",
-      span: this.createSpan(start, start)
-    };
-    
     return {
-      kind: "Switch",
-      discriminant,
+      kind: "Select",
       cases,
       defaultCase,
       span: this.createSpan(start, this.current - 1)
@@ -5452,6 +5451,17 @@ export class Parser {
       // Parse member name
       const memberName = this.parseIdentifier();
       
+      // Check for generic parameters on methods
+      let genericParams: AST.Identifier[] | undefined;
+      if (this.check("<")) {
+        this.advance(); // consume <
+        genericParams = [];
+        do {
+          genericParams.push(this.parseIdentifier());
+        } while (this.match(","));
+        this.consume(">", "Expected '>' after generic parameters");
+      }
+      
       // Check if it's a method (has parentheses) or property
       if (this.check("(")) {
         // It's a method signature
@@ -5514,6 +5524,94 @@ export class Parser {
       name,
       typeParams,
       extends: extendsTypes,
+      members,
+      span: this.createSpan(start, this.current - 1)
+    };
+  }
+  
+  private parseImplBlock(): AST.ClassDecl {
+    // Parse Rust-style impl blocks as a ClassDecl with special handling
+    // impl Display for Container<T> where T: Display { ... }
+    const start = this.current;
+    this.advance(); // consume 'impl'
+    
+    // Parse the trait being implemented (e.g., Display)
+    const traitName = this.parseIdentifier();
+    
+    // Consume 'for'
+    if (!this.match("for")) {
+      throw this.error(this.peek(), "Expected 'for' in impl block");
+    }
+    
+    // Parse the type being implemented for (e.g., Container<T>)
+    const name = this.parseIdentifier();
+    
+    // Parse generic parameters if present
+    let genericParams: AST.Identifier[] | undefined;
+    if (this.match("<")) {
+      genericParams = [];
+      do {
+        genericParams.push(this.parseIdentifier());
+      } while (this.match(","));
+      this.consume(">", "Expected '>' after generic parameters");
+    }
+    
+    // Parse where clause if present
+    if (this.peek().value === "where") {
+      this.advance(); // consume 'where'
+      // Skip the where clause for now
+      while (!this.check("{") && !this.isAtEnd()) {
+        this.advance();
+      }
+    }
+    
+    // Parse impl body
+    this.consume("{", "Expected '{' before impl body");
+    const members: AST.ClassMember[] = [];
+    
+    while (!this.check("}") && !this.isAtEnd()) {
+      // Skip virtual semicolons
+      while (this.peek().virtualSemi) {
+        this.advance();
+      }
+      
+      if (this.check("}")) break;
+      
+      // Parse impl members (usually functions)
+      if (this.match("fn", "fun", "func", "function")) {
+        const isGenerator = this.previous()?.value === "function" && this.match("*");
+        const func = this.parseFuncDecl(false, false, isGenerator);
+        // Convert FuncDecl to Method for ClassMember
+        members.push({
+          kind: "Method",
+          name: func.name,
+          params: func.params,
+          type: func.returnType,
+          body: func.body,
+          async: func.async,
+          static: false,
+          visibility: "public",
+          span: func.span
+        } as any);
+      } else {
+        // Skip unknown members for now
+        this.advance();
+      }
+    }
+    
+    this.consume("}", "Expected '}' after impl body");
+    
+    // Return as a ClassDecl with the trait as an implemented interface
+    return {
+      kind: "ClassDecl",
+      name,
+      genericParams,
+      extends: undefined,
+      implements: [{
+        kind: "SimpleType",
+        id: traitName,
+        span: this.createSpanFrom(traitName)
+      }],
       members,
       span: this.createSpan(start, this.current - 1)
     };

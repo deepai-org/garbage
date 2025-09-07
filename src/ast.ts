@@ -257,6 +257,7 @@ export type Stmt =
   | If
   | Loop
   | Switch
+  | Select
   | Match
   | Try
   | Using
@@ -307,6 +308,13 @@ export interface Loop {
 export interface Switch {
   kind: "Switch";
   discriminant: Expr;
+  cases: SwitchCase[];
+  defaultCase?: Block;
+  span: Span;
+}
+
+export interface Select {
+  kind: "Select";
   cases: SwitchCase[];
   defaultCase?: Block;
   span: Span;
