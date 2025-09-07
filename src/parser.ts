@@ -4474,11 +4474,37 @@ export class Parser {
       } while (this.match(","));
     }
     
-    // Parse class body
-    this.consume("{", "Expected '{' before class body");
+    // Parse class body - handle both { } and Python-style :
     const members: AST.ClassMember[] = [];
+    let isPythonStyle = false;
+    let classIndent = -1;
     
-    while (!this.check("}") && !this.isAtEnd()) {
+    if (this.match(":")) {
+      // Python-style class with colon
+      isPythonStyle = true;
+      // Skip virtual semicolons after colon
+      while (this.peek().virtualSemi) {
+        this.advance();
+      }
+      // Record the indentation level of the class body
+      classIndent = this.peek().indentCol ?? 0;
+    } else {
+      // Traditional braces style
+      this.consume("{", "Expected '{' before class body");
+    }
+    
+    while (!this.isAtEnd()) {
+      // For Python style, check if we've dedented out of the class
+      if (isPythonStyle) {
+        const currentIndent = this.peek().indentCol ?? 0;
+        if (currentIndent < classIndent) {
+          // We've dedented out of the class
+          break;
+        }
+      } else if (this.check("}")) {
+        // For brace style, check for closing brace
+        break;
+      }
       // Skip virtual semicolons and regular semicolons
       while (this.check(";") || this.peek().virtualSemi) {
         this.advance();
@@ -4754,10 +4780,24 @@ export class Parser {
               }
             }
             
-            // Method body
+            // Method body - handle both block and arrow function
             let body: AST.Block;
             try {
-              body = this.parseBlock();
+              if (this.match("=>")) {
+                // Arrow function body
+                const expr = this.parseExpression();
+                body = {
+                  kind: "Block",
+                  statements: [{
+                    kind: "Return",
+                    values: [expr],
+                    span: expr.span
+                  }],
+                  span: expr.span
+                };
+              } else {
+                body = this.parseBlock();
+              }
             } catch (error) {
               // If parsing the method body fails, create an empty block
               // and try to skip to the closing brace
@@ -4934,7 +4974,10 @@ export class Parser {
       }
     }
     
-    this.consume("}", "Expected '}' after class body");
+    // Only consume closing brace for non-Python style
+    if (!isPythonStyle) {
+      this.consume("}", "Expected '}' after class body");
+    }
     
     const classDecl: AST.ClassDecl = {
       kind: "ClassDecl",
