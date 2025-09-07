@@ -2589,17 +2589,88 @@ export class Parser {
       // Ruby-style def without braces - parse until matching 'end'
       const statements: (AST.Decl | AST.Stmt)[] = [];
       
-      while (!this.isAtEnd()) {
+      // Track nested blocks that also use 'end'
+      let endCount = 1; // We need to find one matching 'end' for this def
+      
+      while (!this.isAtEnd() && endCount > 0) {
         if (this.peek().virtualSemi) {
           this.advance();
           continue;
         }
         
-        // Check if we've reached the function's closing 'end'
-        if (this.peek().value === "end") {
-          // This should be the function's end since Ruby blocks are now parsed
-          // as part of expressions (e.g., items.each do...end)
-          break;
+        // Check for keywords that start blocks ending with 'end'
+        const token = this.peek();
+        if (token.value === "def" || token.value === "class" || token.value === "module") {
+          // These start a new block that will need its own 'end'
+          endCount++;
+        } else if (token.value === "begin") {
+          // 'begin' blocks are handled by parseBeginBlock which consumes its own 'end'
+          // So we don't need to track it here - parseTopLevel will handle it
+        } else if (token.value === "do") {
+          // 'do' blocks might end with 'end' (Ruby) or 'done' (bash)
+          // Check context to determine if this is a Ruby do...end block
+          if (this.current > 0) {
+            const prevToken = this.tokens[this.current - 1];
+            // Ruby do...end typically follows method calls or control structures
+            if (prevToken.type === TokenType.Identifier || 
+                prevToken.value === ")" || prevToken.value === "|") {
+              endCount++;
+            }
+          }
+        } else if (token.value === "if" || token.value === "unless" ||
+                   token.value === "while" || token.value === "until") {
+          // These might use 'end' in Ruby style or other endings in bash style
+          // Look ahead to see if there's a 'then' or ':' suggesting Ruby style
+          const nextIdx = this.current + 1;
+          let isRubyStyle = false;
+          for (let i = nextIdx; i < this.tokens.length && i < nextIdx + 10; i++) {
+            if (this.tokens[i].value === "then" || 
+                (this.tokens[i].value === ":" && this.tokens[i].type === TokenType.Operator)) {
+              isRubyStyle = true;
+              break;
+            }
+            if (this.tokens[i].virtualSemi || this.tokens[i].value === "{") break;
+          }
+          if (isRubyStyle) endCount++;
+        } else if (token.value === "case") {
+          // case might end with 'end' (Ruby) or 'esac' (bash)
+          // Look for 'when' to determine Ruby style
+          const nextIdx = this.current + 1;
+          let isRubyStyle = false;
+          for (let i = nextIdx; i < this.tokens.length && i < nextIdx + 20; i++) {
+            if (this.tokens[i].value === "when") {
+              isRubyStyle = true;
+              break;
+            }
+            if (this.tokens[i].value === "in" || this.tokens[i].value === ")") {
+              // Bash style case
+              break;
+            }
+          }
+          if (isRubyStyle) endCount++;
+        } else if (token.value === "try") {
+          // try blocks might use rescue...end in Ruby style
+          // Look for 'rescue' to determine Ruby style
+          const nextIdx = this.current + 1;
+          let isRubyStyle = false;
+          for (let i = nextIdx; i < this.tokens.length && i < nextIdx + 50; i++) {
+            if (this.tokens[i].value === "rescue") {
+              isRubyStyle = true;
+              break;
+            }
+            if (this.tokens[i].value === "catch" || this.tokens[i].value === "except") {
+              // JavaScript/Python style
+              break;
+            }
+          }
+          if (isRubyStyle) endCount++;
+        } else if (token.value === "end") {
+          // Found an 'end' - decrement counter
+          endCount--;
+          if (endCount === 0) {
+            // This is our matching 'end'
+            break;
+          }
         }
         
         try {
