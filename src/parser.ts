@@ -847,22 +847,30 @@ export class Parser {
         
         // Parse case body
         const statements: (AST.Decl | AST.Stmt)[] = [];
-        while (!this.check(";;") && !this.check("esac") && !this.isAtEnd() && 
-               !(this.peek().type === TokenType.NumericLiteral || 
-                 this.peek().type === TokenType.StringLiteral ||
-                 this.peek().value === "*") ) {
+        while (!this.check(";;") && !this.check("esac") && !this.isAtEnd()) {
           const stmt = this.parseTopLevel();
           if (stmt) statements.push(stmt);
         }
         
-        defaultCase = {
+        const body: AST.Block = {
           kind: "Block",
           statements,
           span: this.createSpan(this.current, this.current)
         };
         
-        // Consume ;; if present
-        this.match(";;");
+        // Check for fallthrough (no ;;)
+        const fallthrough = !this.match(";;");
+        
+        // Add default case to cases array with empty patterns to indicate default
+        cases.push({
+          patterns: [], // Empty patterns indicate default case
+          body,
+          fallthrough,
+          span: this.createSpan(this.current, this.current)
+        });
+        
+        // Also set defaultCase for backward compatibility
+        defaultCase = body;
       } else {
         // Parse pattern (number, string, etc.)
         patterns.push(this.parseExpression());
@@ -871,10 +879,7 @@ export class Parser {
         
         // Parse case body
         const statements: (AST.Decl | AST.Stmt)[] = [];
-        while (!this.check(";;") && !this.check("esac") && !this.isAtEnd() && 
-               !(this.peek().type === TokenType.NumericLiteral || 
-                 this.peek().type === TokenType.StringLiteral ||
-                 this.peek().value === "*")) {
+        while (!this.check(";;") && !this.check("esac") && !this.isAtEnd()) {
           const stmt = this.parseTopLevel();
           if (stmt) statements.push(stmt);
         }
@@ -1409,6 +1414,7 @@ export class Parser {
       const isAsyncFunction = next && (
         next.value === "(" ||  // async () => 
         next.value === "{" ||  // async { ... }
+        next.value === "move" || // async move { ... } (Rust-style)
         (next.type === TokenType.Identifier && this.peekAt(2)?.value === "=>") || // async x =>
         next.value === "function" // async function
       );
@@ -1416,10 +1422,18 @@ export class Parser {
       if (isAsyncFunction) {
         this.advance(); // consume 'async'
         const start = this.current - 1;
+        
+        // Check for 'move' keyword (Rust-style async move block)
+        const hasMove = this.match("move");
+        
         // Check for lambda or async block
         if (this.check("(") || this.peek().type === TokenType.Identifier || this.check("{")) {
           // Parse as async lambda or async block
           const lambda = this.parseAsyncLambda(start);
+          // Mark if it has move semantics
+          if (hasMove) {
+            (lambda as any).move = true;
+          }
           // Allow postfix operations on the lambda (like calls)
           return this.parsePostfix(lambda);
         }
@@ -1447,27 +1461,35 @@ export class Parser {
       };
     }
     
-    // Handle JSX elements and fragments
+    // Handle JSX elements and fragments (spec 10.6)
     if (this.peek().value === "<") {
-      const next = this.peekNext();
-      
-      // Check for JSX fragment <>
-      if (next && next.value === ">") {
-        return this.parseJSXFragment();
-      }
-      
-      // Check for JSX closing tag </
-      if (next && next.value === "/") {
-        // This shouldn't happen in primary expression position
-        throw this.error(this.peek(), "Unexpected JSX closing tag");
-      }
-      
-      // Check if this looks like JSX element
-      if (next && next.type === TokenType.Identifier) {
-        // Distinguish between JSX and type assertion/generics
-        if (this.isJSXElement()) {
-          return this.parseJSXElement();
+      // Check if we're in a valid JSX expression context
+      if (this.isInJSXExpressionContext()) {
+        const next = this.peekNext();
+        
+        // Check for JSX fragment <>
+        if (next && next.value === ">") {
+          return this.parseJSXFragment();
         }
+        
+        // Check for JSX closing tag </
+        if (next && next.value === "/") {
+          // This shouldn't happen in primary expression position
+          throw this.error(this.peek(), "Unexpected JSX closing tag");
+        }
+        
+        // Check if this looks like JSX element using new disambiguation
+        if (next && (next.type === TokenType.Identifier || next.value === ">")) {
+          if (this.isJSXElement()) {
+            return this.parseJSXElement();
+          }
+        }
+      }
+      
+      // Not JSX - try other interpretations
+      const next = this.peekNext();
+      if (next && next.type === TokenType.Identifier) {
+        // Try type assertion or generic parsing
         
         // Try type assertion <Type>expr
         const checkpoint = this.current;
@@ -1920,6 +1942,35 @@ export class Parser {
         continue;
       }
       
+      // Scope resolution operator (C++/Rust style)
+      if (this.match("::")) {
+        // After ::, keywords can be used as identifiers
+        const next = this.peek();
+        let property: AST.Identifier;
+        
+        if (next.type === TokenType.Identifier || next.type === TokenType.Keyword) {
+          property = {
+            kind: "Identifier",
+            name: next.value,
+            originalSpelling: next.value,
+            span: this.createSpan(this.current, this.current)
+          };
+          this.advance();
+        } else {
+          property = this.parseIdentifier();
+        }
+        
+        expr = {
+          kind: "Member",
+          object: expr,
+          property,
+          computed: false,
+          optional: false,
+          span: this.createSpanFrom(expr)
+        };
+        continue;
+      }
+      
       // Regular member access (including pointer dereference, force unwrap, and PHP arrow)
       if (this.match(".", ".*", "!.", "->")) {
         const op = this.previous()?.value;
@@ -1945,6 +1996,19 @@ export class Parser {
             span: this.createSpanFrom(expr)
           };
         } else if (!deref) {
+          // Check for .await syntax (Rust-style)
+          if (this.peek().value === "await") {
+            this.advance(); // consume await
+            expr = {
+              kind: "Unary",
+              op: "await",
+              argument: expr,
+              prefix: false,
+              span: this.createSpanFrom(expr)
+            };
+            continue;
+          }
+          
           // Regular member access, force unwrap, or PHP arrow
           const property = this.parseIdentifier();
           
@@ -2030,6 +2094,37 @@ export class Parser {
           expr = {
             kind: "Unary",
             op: "!",
+            argument: expr,
+            prefix: false,
+            span: this.createSpanFrom(expr)
+          };
+          continue;
+        }
+      }
+      
+      // Try operator (Rust) - only at end of expression or before certain tokens
+      if (this.check("?")) {
+        const next = this.peekNext();
+        // Treat as postfix ? if followed by:
+        // - End of statement (; or newline)
+        // - Closing bracket/paren
+        // - Comma
+        // - Binary operators (but not :)
+        const isPostfix = !next || 
+                         next.type === TokenType.EOF ||
+                         next.value === ";" || 
+                         next.value === ")" || 
+                         next.value === "]" || 
+                         next.value === "}" ||
+                         next.value === "," ||
+                         next.virtualSemi ||
+                         (this.isBinaryOp(next) && next.value !== ":" && next.value !== "<");
+        
+        if (isPostfix) {
+          this.advance(); // consume ?
+          expr = {
+            kind: "Unary",
+            op: "?",
             argument: expr,
             prefix: false,
             span: this.createSpanFrom(expr)
@@ -2779,6 +2874,7 @@ export class Parser {
     // Support both { } and : styles
     const isPythonStyle = this.check(":");
     let baseIndent = 0;
+    
     if (isPythonStyle) {
       this.consume(":", "Expected ':' after match expression");
       // Get the indentation level for Python-style match
@@ -2790,10 +2886,27 @@ export class Parser {
       }
     } else {
       this.consume("{", "Expected '{' after switch expression");
+      // We've consumed a brace but didn't increment braceDepth
+      // Track this so we know when we're back at the match level
     }
+    
+    // Track the initial brace depth (before parsing any arms)
+    const matchBraceDepth = this.braceDepth;
+    
+    // Debug flag for deep nest issue
+    const debugMatch = false; // discriminant.kind === "Identifier" && discriminant.name === "x";
     
     // Loop condition depends on style
     while (!this.isAtEnd()) {
+      // Skip virtual semicolons first
+      while (this.peek().virtualSemi) {
+        this.advance();
+      }
+      
+      if (debugMatch) {
+        console.log(`[DEBUG] Match loop at pos ${this.current}, token: "${this.peek().value}" (type: ${this.peek().type}), braceDepth: ${this.braceDepth}`);
+      }
+      
       // For Python style, check if we've dedented back
       if (isPythonStyle) {
         const currentIndent = this.peek().indentCol;
@@ -2803,20 +2916,12 @@ export class Parser {
         }
       } else {
         // For brace style, check for closing brace
-        if (this.check("}")) {
+        // We should only exit if we're back at the same brace depth as when we started
+        if (this.check("}") && this.braceDepth === matchBraceDepth) {
           break;
         }
       }
       
-      // Skip virtual semicolons
-      while (this.peek().virtualSemi) {
-        this.advance();
-      }
-      
-      // Check again after skipping virtual semicolons
-      if (!isPythonStyle && this.check("}")) {
-        break;
-      }
       if (this.isAtEnd()) {
         break;
       }
@@ -2914,6 +3019,7 @@ export class Parser {
         fallthrough,
         span: this.createSpan(caseStart, this.current - 1)
       });
+      
       
       // In match expressions, cases can be separated by commas
       if (isMatch && this.check(",")) {
@@ -6833,7 +6939,7 @@ export class Parser {
   }
 
   private isJSXElement(): boolean {
-    // Enhanced lookahead to better distinguish JSX from generics/comparisons
+    // JSX disambiguation based on spec 10.6
     const saved = this.current;
     const DEBUG = false; // Set to true for debugging
     
@@ -6844,151 +6950,223 @@ export class Parser {
         return false;
       }
       
-      // Check element name
-      const name = this.peek();
-      if (DEBUG) console.log('isJSXElement: after <, token:', name.value);
-      if (name.type !== TokenType.Identifier) {
-        if (DEBUG) console.log('isJSXElement: not an identifier');
+      // Check what follows < to apply JSX recognition patterns (spec 10.6.2)
+      const next = this.peek();
+      
+      // Pattern 1: Fragment <> 
+      if (next.value === ">") {
+        this.current = saved;
+        return true;
+      }
+      
+      // Pattern 2: Closing tag </
+      if (next.value === "/") {
+        this.current = saved;
+        return true;
+      }
+      
+      // Pattern 3 & 4: Identifier (component or HTML element)
+      if (next.type !== TokenType.Identifier) {
+        if (DEBUG) console.log('isJSXElement: not an identifier after <');
         this.current = saved;
         return false;
       }
       
-      // Enhanced check: Look at more context
-      const token1 = this.lookahead(0); // current token (identifier)
-      const token2 = this.lookahead(1);
-      const token3 = this.lookahead(2);
+      const elementName = next.value;
       
-      // Quick wins: definitely JSX patterns
-      if (token2?.value === "/" && token3?.value === ">") {
+      // Pattern 3: Capital letter → JSX Component
+      if (/^[A-Z]/.test(elementName)) {
+        if (DEBUG) console.log('isJSXElement: found capital letter component');
         this.current = saved;
-        return true; // Self-closing tag <Component/>
+        return this.isValidJSXContinuation();
       }
       
-      if (token2?.value === ">") {
+      // Pattern 4: HTML tag name → JSX Element  
+      if (this.isHTMLTag(elementName)) {
+        if (DEBUG) console.log('isJSXElement: found HTML tag');
         this.current = saved;
-        return true; // Simple tag <Component>
+        return this.isValidJSXContinuation();
       }
       
-      // Check for JSX attributes pattern: <Component prop=
-      if (token2?.type === TokenType.Identifier && token3?.value === "=") {
+      // Pattern 5: Qualified name (namespace.component)
+      this.advance(); // consume identifier
+      if (this.peek().value === ".") {
+        if (DEBUG) console.log('isJSXElement: found qualified name');
         this.current = saved;
-        return true; // Has attributes
+        return this.isValidJSXContinuation();
       }
       
-      // Check for generic type parameters: <Component<Props>
-      if (token2?.value === "<") {
-        if (DEBUG) console.log('isJSXElement: found < after identifier, could be generics');
-        // This could be JSX with generics, need to look further
-        // We'll check this in the main loop below
+      // Not a JSX pattern - check if it's a primitive type (non-JSX pattern)
+      if (this.isPrimitiveType(elementName)) {
+        if (DEBUG) console.log('isJSXElement: primitive type, not JSX');
+        this.current = saved;
+        return false;
       }
       
-      // Check if it's an HTML tag or a component (capital letter)
-      const isComponent = /^[A-Z]/.test(name.value);
-      const isHTMLTag = this.isHTMLTag(name.value);
+      // For other identifiers, use lookahead to disambiguate
+      // This could be a generic, comparison, or unrecognized JSX pattern
+      this.current = saved;
+      return this.isValidJSXContinuation();
+    } catch {
+      this.current = saved;
+      return false;
+    }
+  }
+
+  private isPrimitiveType(name: string): boolean {
+    const primitiveTypes = new Set([
+      'string', 'number', 'boolean', 'object', 'undefined', 'null',
+      'bigint', 'symbol', 'any', 'unknown', 'never', 'void'
+    ]);
+    return primitiveTypes.has(name);
+  }
+
+  private isInJSXExpressionContext(): boolean {
+    // Based on spec 10.6.1 - JSX is valid in these expression contexts
+    if (this.current === 0) return true; // Start of program
+    
+    // Look at recent meaningful tokens to determine context
+    const meaningfulTokens: Token[] = [];
+    
+    // Collect last few meaningful tokens
+    for (let i = this.current - 1; i >= 0 && meaningfulTokens.length < 5; i--) {
+      const token = this.tokens[i];
       
-      // If it's not a component or HTML tag, more likely to be generic
-      if (!isComponent && !isHTMLTag) {
-        // But still check for JSX patterns
-        this.advance(); // consume identifier
+      // Skip whitespace and comments
+      if (token.type === TokenType.Whitespace || 
+          token.type === TokenType.Comment ||
+          token.virtualSemi) {
+        continue;
+      }
+      
+      meaningfulTokens.unshift(token); // Add to beginning for correct order
+      
+      // Stop at statement boundaries to avoid looking too far back
+      if (token.value === ';' || token.value === '}' || token.newline) {
+        break;
+      }
+    }
+    
+    if (meaningfulTokens.length === 0) return true;
+    
+    // Check last token for immediate context
+    const lastToken = meaningfulTokens[meaningfulTokens.length - 1];
+    
+    // JSX expression contexts (spec 10.6.1)
+    switch (lastToken.value) {
+      // Assignment operators
+      case '=':
+      case ':=':
+      case '+=':
+      case '-=':
+      case '*=':
+      case '/=':
+        return true;
         
-        // Check for member expression like <Form.Input>
-        if (this.match(".")) {
-          const hasMember = this.peek().type === TokenType.Identifier;
-          this.current = saved;
-          return hasMember; // JSX if has member
-        }
+      // Control flow
+      case 'return':
+        return true;
         
-        this.current = saved;
-        return false; // Likely a generic
+      // Ternary operators  
+      case '?':
+      case ':':
+        return true;
+        
+      // Logical operators
+      case '&&':
+      case '||':
+      case '!':
+        return true;
+        
+      // Array/object literals
+      case '[':
+      case '{':
+      case ',':
+        return true;
+        
+      // Function calls and parentheses
+      case '(':
+        return true;
+        
+      // Arrow functions
+      case '=>':
+        return true;
+        
+      // After keywords that expect expressions
+      case 'yield':
+      case 'throw':
+      case 'await':
+        return true;
+        
+      // Type contexts (NOT JSX contexts)
+      case 'extends':
+      case 'implements':
+      case 'instanceof':
+        return false;
+    }
+    
+    // Check for patterns in recent token sequence
+    if (meaningfulTokens.length >= 2) {
+      const recent = meaningfulTokens.slice(-2);
+      
+      // Pattern: identifier ? (ternary condition)
+      if (recent[0].type === TokenType.Identifier && recent[1].value === '?') {
+        return true;
       }
       
+      // Pattern: ) ? (complex condition in ternary)
+      if (recent[0].value === ')' && recent[1].value === '?') {
+        return true;
+      }
+    }
+    
+    return true; // Default to allowing JSX in expression contexts
+  }
+
+  private isValidJSXContinuation(): boolean {
+    // Use lookahead to check for valid JSX continuation patterns
+    const saved = this.current;
+    
+    try {
+      // Skip < and identifier  
+      this.advance(); // consume <
       this.advance(); // consume identifier
       
-      // Look for JSX patterns: attributes, >, />, or .
       while (!this.isAtEnd()) {
         const token = this.peek();
         
+        // JSX continuation patterns
         if (token.value === ">" || token.value === "/") {
-          this.current = saved;
-          return true; // Definitely JSX
+          return true; // <Tag> or <Tag/>
+        }
+        
+        if (token.type === TokenType.Identifier || token.type === TokenType.Keyword || token.value === "{") {
+          return true; // <Tag attr= or <Tag {...props}
         }
         
         if (token.value === ".") {
-          // Member expression like <Form.Input>
+          // Qualified name <Form.Input
           this.advance();
-          if (this.peek().type !== TokenType.Identifier) {
-            this.current = saved;
-            return false;
+          if (this.peek().type === TokenType.Identifier) {
+            this.advance();
+            continue;
           }
+          return false;
+        }
+        
+        // Space is ok - keep looking
+        if (token.type === TokenType.Whitespace) {
           this.advance();
           continue;
         }
         
-        if (token.type === TokenType.Identifier || token.type === TokenType.Keyword || token.value === "{") {
-          // Likely an attribute (can be identifier, keyword, or spread)
-          this.current = saved;
-          return true;
-        }
-        
-        if (token.value === "<") {
-          if (DEBUG) console.log('isJSXElement: in loop, found < - checking for generics');
-          // Could be generic type parameters for JSX component: <Component<Props>>
-          // Need to look ahead to see if it's followed by valid JSX patterns
-          const genericStart = this.current;
-          this.advance(); // consume '<' (we're now inside the generic)
-          
-          // Try to skip the generic type parameters
-          let depth = 1;
-          while (!this.isAtEnd() && depth > 0) {
-            const t = this.peek();
-            if (DEBUG) console.log(`isJSXElement: in generic loop, token: "${t.value}", depth: ${depth}`);
-            if (t.value === "<") depth++;
-            else if (t.value === ">") depth--;
-            this.advance();
-            
-            if (depth === 0) {
-              // We've closed the generic, check what comes next
-              let next = this.peek();
-              if (DEBUG) console.log(`isJSXElement: closed generic, next token: "${next.value}"`);
-              
-              // Skip any whitespace/string tokens that the lexer incorrectly created
-              // This is a workaround for a lexer bug with JSX text mode
-              while (next && (next.type === TokenType.StringLiteral && next.value.trim() === "")) {
-                this.advance();
-                next = this.peek();
-                if (DEBUG) console.log(`isJSXElement: skipped whitespace, next token: "${next.value}"`);
-              }
-              
-              // If followed by JSX patterns, it's JSX with generics
-              if (next.value === ">" ||           // <Component<T>>
-                  next.value === "/" ||           // <Component<T>/>
-                  next.type === TokenType.Identifier || // <Component<T> prop=
-                  next.value === "{") {            // <Component<T> {...props}
-                if (DEBUG) console.log('isJSXElement: found JSX pattern after generics, returning true');
-                this.current = saved;
-                return true;
-              }
-              // Not JSX, restore and return false
-              if (DEBUG) console.log('isJSXElement: no JSX pattern after generics, returning false');
-              this.current = saved;
-              return false;
-            }
-          }
-          
-          // Didn't find matching >, not valid JSX
-          if (DEBUG) console.log('isJSXElement: did not find matching >, returning false');
-          this.current = saved;
-          return false;
-        }
-        
-        break;
+        // Anything else is not JSX
+        return false;
       }
       
-      this.current = saved;
       return false;
-    } catch {
+    } finally {
       this.current = saved;
-      return false;
     }
   }
 
