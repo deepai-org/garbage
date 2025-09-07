@@ -3311,12 +3311,48 @@ export class Parser {
         this.current = checkpoint;
       }
       
-      // Check for for-of/for-in without const/let/var (just identifier)
+      // Check for for-of/for-in without const/let/var (just identifier or destructuring)
       if (this.peek().type === TokenType.Identifier) {
         const checkpoint = this.current;
-        const variable = this.parseIdentifier();
         
-        if (this.match("of", "in")) {
+        // Check if this might be a destructuring pattern
+        const firstId = this.parseIdentifier();
+        
+        // Check for destructuring pattern like a, b (note: we're already inside parentheses)
+        if (this.check(",")) {
+          // This is a destructuring pattern
+          const elements: AST.Identifier[] = [firstId];
+          while (this.match(",")) {
+            elements.push(this.parseIdentifier());
+          }
+          
+          // Check if followed by 'in' or 'of'
+          if (this.check(")") && (this.peekNext()?.value === "in" || this.peekNext()?.value === "of")) {
+            this.advance(); // consume )
+            this.advance(); // consume in/of
+            const iterType = this.previous()?.value; // "in" or "of"
+            const iterable = this.parseExpression();
+            const body = this.parseBlockOrStatement();
+            
+            // Create a pseudo-identifier for the destructured pattern
+            const variable: AST.Identifier = {
+              kind: "Identifier",
+              name: `(${elements.map(e => e.name).join(", ")})`,
+              originalSpelling: `(${elements.map(e => e.name).join(", ")})`,
+              span: this.createSpan(checkpoint, checkpoint + elements.length - 1)
+            };
+            
+            return {
+              kind: "Loop",
+              mode: "foreach",
+              variable,
+              iterable,
+              body,
+              span: this.createSpan(start, this.current - 1)
+            };
+          }
+        } else if (this.match("of", "in")) {
+          // Simple identifier with in/of
           const iterType = this.previous()?.value; // "of" or "in"
           const iterable = this.parseExpression();
           this.consume(")", "Expected ')' after for-of/for-in");
@@ -3325,7 +3361,7 @@ export class Parser {
           return {
             kind: "Loop",
             mode: "foreach",
-            variable,
+            variable: firstId,
             iterable,
             body,
             span: this.createSpan(start, this.current - 1)

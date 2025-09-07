@@ -4,9 +4,9 @@
 PolyScript is a universal parser that handles multiple programming language syntaxes in a single file.
 
 ## Current Status
-- **287/307 tests passing (93.5% pass rate)**
-- JSX/TSX support implemented
-- 20 tests failing - mainly due to virtual semicolon issue in JSX
+- **342/354 tests passing (96.6% pass rate)**
+- Major improvements in type parsing and multi-paradigm support
+- 12 tests failing - edge cases with specific language combinations
 
 ## Quick Debugging Commands
 ```bash
@@ -60,58 +60,35 @@ The lexer has 5 modes that change tokenization behavior:
 
 ## Recently Fixed Issues
 
-### parseBeginBlock Infinite Loop
-- Rescue clause body parsing wasn't checking for position advancement
-- Fixed by adding: `if (this.current === beforePos) this.advance()`
+### Rust Type System Support
+- Added `DynType` for trait objects (`dyn Trait`)
+- Handle associated type constraints in generics (`Item = V`)
+- Fixed tuple type parsing `(T, U)` in nested generics
 
-### Template Literal Escaping
-- Test files had escaped backticks causing parser hangs
-- Solution: Use proper string concatenation instead
+### Function Declaration Improvements  
+- Fixed `fn` with return type arrow (`->`) being parsed as lambda
+- Proper handling of complex nested generic signatures
 
-### Bash Conditionals
-- Added `parseBashTestExpression()` for `[ ]` patterns
-- Skip semicolon before `do` in bash loops
+### Class Declaration Enhancements
+- Added support for `with` clause for mixins/traits
+- Fixed decorator parsing with complex inheritance chains
+- Improved generic parameter handling
 
-## Path to Full Compatibility (20 remaining failures)
+### Ruby Block Support
+- Added `do...end` block parsing after method calls
+- Fixed `def...end` function parsing with proper nesting
 
-### Priority Fixes (by impact)
+## Remaining Failures (12 tests)
 
-#### 🔴 Critical: Virtual Semicolon in JSX (19 failures)
-**Problem**: Lexer inserts virtual semicolons after `}` in JSX children
-```jsx
-<div>
-    {expr}    // <- Virtual semicolon breaks parsing here
-    <span>test</span>
-</div>
-```
-**Solution**: Add JSX context tracking to lexer
-- Effort: 2-3 days
-- File: `src/lexer.ts`
-- Impact: Fixes ~95% of JSX failures
+### Current Issues to Investigate
+1. **Comparison chain parsing** - Possible issue with chained comparisons
+2. **Specific edge cases** in mixed language features
+3. **Test expectation mismatches** vs actual parsing errors
 
-#### 🟡 Quick Win: Class Generic Parameters (4 failures)
-**Problem**: Classes use `typeParams` instead of `genericParams`
-**Solution**: Rename property or add both
-- Effort: 1 hour
-- Files: `src/parser.ts`, `src/ast.ts`
-
-#### 🟡 Quick Win: Package Declarations (1-2 failures)
-**Problem**: `package main;` not recognized
-**Solution**: Add package declaration parsing
-- Effort: 2 hours
-- Files: `src/parser.ts`, `src/ast.ts`
-
-#### 🟢 Minor: Decorator & AST Mismatches (2-3 failures)
-**Solution**: Update compatibility layer
-- Effort: 2-3 hours
-- File: `test/helpers/ast-compat.ts`
-
-### Implementation Schedule
-- **Day 1**: Quick wins (genericParams, package) → 291/307 tests (95%)
-- **Day 2-3**: Virtual semicolon fix → 306/307 tests (99.7%)
-- **Day 4**: Final polish → 307/307 tests (100%)
-
-**Total effort: 3-4 days to achieve 100% compatibility**
+### Next Steps
+1. Analyze each failing test individually
+2. Create minimal reproducible test cases
+3. Fix issues in order of impact
 
 ## Detailed Implementation Plans
 
