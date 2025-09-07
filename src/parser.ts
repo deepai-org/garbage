@@ -1407,6 +1407,42 @@ export class Parser {
   }
   
   private parsePrimary(): AST.Expr {
+    // Handle function expressions (including async)
+    if (this.peek().value === "function") {
+      const start = this.current;
+      this.advance(); // consume 'function'
+      
+      // Check for generator function*
+      const isGenerator = this.match("*");
+      
+      // Function expressions can be anonymous
+      let name: AST.Identifier | undefined = undefined;
+      if (this.peek().type === TokenType.Identifier) {
+        name = this.parseIdentifier();
+      }
+      
+      // Parse parameters
+      const params = this.parseParameterList();
+      
+      // Parse return type if present
+      let returnType: AST.TypeNode | undefined = undefined;
+      if (this.match(":")) {
+        returnType = this.parseType();
+      }
+      
+      // Parse body
+      const body = this.parseBlock();
+      
+      // Return as a Lambda expression (anonymous function)
+      return {
+        kind: "Lambda",
+        params,
+        returnType,
+        body,
+        span: this.createSpan(start, this.current - 1)
+      };
+    }
+    
     // Handle async lambda/function expressions
     if (this.peek().value === "async") {
       // Look ahead to see if this is really an async function/lambda
@@ -1422,6 +1458,42 @@ export class Parser {
       if (isAsyncFunction) {
         this.advance(); // consume 'async'
         const start = this.current - 1;
+        
+        // Check for async function expression
+        if (this.match("function")) {
+          // Parse async function expression
+          const isGenerator = this.match("*");
+          
+          // Function expressions can be anonymous
+          let name: AST.Identifier | undefined = undefined;
+          if (this.peek().type === TokenType.Identifier) {
+            name = this.parseIdentifier();
+          }
+          
+          // Parse parameters
+          const params = this.parseParameterList();
+          
+          // Parse return type if present
+          let returnType: AST.TypeNode | undefined = undefined;
+          if (this.match(":")) {
+            returnType = this.parseType();
+          }
+          
+          // Parse body
+          const body = this.parseBlock();
+          
+          // Return as an async Lambda expression
+          const lambda: any = {
+            kind: "Lambda",
+            params,
+            returnType,
+            body,
+            span: this.createSpan(start, this.current - 1)
+          };
+          lambda.async = true;
+          if (isGenerator) lambda.generator = true;
+          return lambda;
+        }
         
         // Check for 'move' keyword (Rust-style async move block)
         const hasMove = this.match("move");
