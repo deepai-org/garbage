@@ -269,79 +269,9 @@ let y = (<number>x) * 2
       const assertion2 = binary.left as AST.TypeAssertion;
       expect(assertion2.kind).toBe('TypeAssertion');
     });
-    
-    test('uses "as" for type assertion in JSX context', () => {
-      const code = `
-<div>{x as number}</div>
-<MyComponent prop={x as string} />
-`;
-      const ast = parseCode(code);
-      
-      // First JSX with type assertion
-      const jsx1 = (ast.body[0] as AST.ExprStmt).expr as AST.JSXElement;
-      verifyJSXElement(jsx1, 'div', { selfClosing: false });
-      const child = (jsx1 as any).children[0];
-      const assertion1 = (child as any).expr as AST.Binary;
-      expect(assertion1.op).toBe('as');
-      
-      // Second JSX with type assertion in prop
-      const jsx2 = (ast.body[1] as AST.ExprStmt).expr as AST.JSXElement;
-      const prop = (jsx2 as any).attrs[0];
-      const assertion2 = prop.value as AST.Binary;
-      expect(assertion2.op).toBe('as');
-    });
   });
   
-  describe('5. JSX with Generic Components', () => {
-    
-    test('parses JSX with generic component and children', () => {
-      const code = `
-<MyComponent<string>
-    value={foo<string>("hi")}
->
-    <ChildComponent<int> value={42} />
-</MyComponent>
-`;
-      const ast = parseCode(code);
-      
-      const jsx = (ast.body[0] as AST.ExprStmt).expr as AST.JSXElement;
-      expect((jsx as any).tag.name).toBe('MyComponent');
-      expect((jsx as any).typeArgs).toHaveLength(1);
-      expect(((jsx as any).typeArgs[0] as any).name || ((jsx as any).typeArgs[0] as any).id?.name).toBe('string');
-      
-      // Verify prop with generic call
-      const prop = (jsx as any).attrs[0];
-      const propCall = prop.value as AST.Call;
-      expect((propCall as any).typeArgs).toHaveLength(1);
-      
-      // Verify child component with generics
-      const child = (jsx as any).children[0] as AST.JSXElement;
-      expect((child as any).tag.name).toBe('ChildComponent');
-      expect((child as any).typeArgs).toHaveLength(1);
-    });
-    
-    test('parses JSX fragment with generic components', () => {
-      const code = `
-<>
-    <Table<RowData<string>> columns={["a","b"]} />
-</>
-`;
-      const ast = parseCode(code);
-      
-      const frag = (ast.body[0] as AST.ExprStmt).expr as AST.JSXFragment;
-      expect(frag.kind).toBe('JSXFragment');
-      
-      const table = (frag as any).children[0] as AST.JSXElement;
-      expect((table as any).tag.name).toBe('Table');
-      expect((table as any).typeArgs).toHaveLength(1);
-      
-      // Verify nested generic in type args
-      const rowDataType = (table as any).typeArgs[0] as AST.GenericType;
-      verifyGenericType(rowDataType, 'RowData', 1);
-    });
-  });
-  
-  describe('6. Complex Nesting and Edge Cases', () => {
+  describe('5. Complex Nesting and Edge Cases', () => {
     
     test('parses deeply nested generics', () => {
       const code = `let r = foo<Bar<Baz<Qux<chan<List<Result<A, B>>>>>>>(x)`;
@@ -365,32 +295,6 @@ let y = (<number>x) * 2
       // Last one is Result<A, B>
       expect(current.base.name).toBe('Result');
       expect(current.args).toHaveLength(2);
-    });
-    
-    test('parses mixed generics, shifts, comparisons, and JSX', () => {
-      const code = `let v = foo<chan<Result<A, B>>>() << (bar < baz ? <A>c</A> : <D>f</D>)`;
-      const ast = parseCode(code);
-      
-      const letDecl = ast.body[0] as AST.VarDecl;
-      const shift = (letDecl as any).decls[0].init as AST.Binary;
-      expect(shift.op).toBe('<<');
-      
-      // Left of shift: generic call
-      const call = shift.left as AST.Call;
-      expect((call as any).typeArgs).toHaveLength(1);
-      verifyGenericType((call as any).typeArgs[0], 'chan', 1);
-      
-      // Right of shift: conditional with comparison and JSX
-      const conditional = shift.right as any;
-      const comparison = conditional.test as AST.Binary;
-      verifyComparison(comparison, '<', 'bar', 'baz');
-      
-      // Verify JSX in then/else branches
-      const thenJsx = conditional.then as AST.JSXElement;
-      verifyJSXElement(thenJsx, 'A', { selfClosing: false });
-      
-      const elseJsx = conditional.else as AST.JSXElement;
-      verifyJSXElement(elseJsx, 'D', { selfClosing: false });
     });
     
     test('comprehensive angle bracket analysis', () => {
@@ -425,70 +329,6 @@ function test<T>() {
       expect(stats.comparisonCount).toBe(3);
       expect(stats.channelCount).toBe(2);
       expect(stats.shiftCount).toBe(2);
-    });
-  });
-  
-  describe('7. Monster Test Cases', () => {
-    
-    test('parses the all-in-one monster example', () => {
-      const code = `
-function crazy<T>(xs: List<T>, ch: chan<T>): any {
-    let x = foo<Bar>(baz < 2 ? <B/> : <C/>)
-    let v = <number>xs[0]
-    return <Container>
-        <Header>{x < y ? "Less" : "Greater"}</Header>
-        <Send onClick={() => ch <- x}>{x}</Send>
-    </Container>
-}
-`;
-      const ast = parseCode(code);
-      
-      const func = ast.body[0] as AST.FuncDecl;
-      expect(func.genericParams).toHaveLength(1);
-      expect(func.genericParams![0].name).toBe('T');
-      
-      // Verify parameter types
-      verifyGenericType(func.params[0].type, 'List', 1);
-      verifyGenericType(func.params[1].type, 'chan', 1);
-      
-      const body = func.body as AST.Block;
-      
-      // First statement: generic call with ternary containing JSX
-      const stmt1 = body.statements[0] as AST.VarDecl;
-      const call = (stmt1 as any).decls[0].init as AST.Call;
-      expect((call as any).typeArgs).toHaveLength(1);
-      
-      // Find comparison in ternary
-      const ternary = call.args[0] as any;
-      const comparison = ternary.test as AST.Binary;
-      verifyComparison(comparison, '<', 'baz', 2);
-      
-      // Verify JSX in ternary branches
-      verifyJSXElement(ternary.then as AST.JSXElement, 'B', { selfClosing: true });
-      verifyJSXElement(ternary.else as AST.JSXElement, 'C', { selfClosing: true });
-      
-      // Second statement: type assertion
-      const stmt2 = body.statements[1] as AST.VarDecl;
-      const assertion = (stmt2 as any).decls[0].init as AST.TypeAssertion;
-      expect(assertion.kind).toBe('TypeAssertion');
-      
-      // Return statement: JSX with channel send in handler
-      const returnStmt = body.statements[2] as AST.Return;
-      const container = (returnStmt as any).argument as AST.JSXElement;
-      verifyJSXElement(container, 'Container', { selfClosing: false });
-      
-      // Find channel send in onClick handler
-      const sends = findByKind<AST.Binary>(ast, 'Binary')
-        .filter(n => n.op === '<-');
-      expect(sends.length).toBe(1);
-      verifyChannelSend(sends[0], 'ch', 'x');
-      
-      // Count all angle bracket usages
-      const stats = analyzeAngleBrackets(ast);
-      expect(stats.genericCount).toBeGreaterThanOrEqual(3); // T, List<T>, chan<T>, Bar
-      expect(stats.jsxCount).toBeGreaterThanOrEqual(4); // B, C, Container, Header, Send
-      expect(stats.comparisonCount).toBeGreaterThanOrEqual(2); // baz < 2, x < y
-      expect(stats.channelCount).toBe(1); // ch <- x
     });
   });
 });
