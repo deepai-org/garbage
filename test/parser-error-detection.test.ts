@@ -1,14 +1,6 @@
-import { Lexer } from '../src/lexer';
-import { Parser } from '../src/parser';
+import { parseCode, parseCodeWithErrors } from './helpers';
 
 describe('Parser Error Detection', () => {
-  function parseWithErrors(code: string): { ast: any; errors: any[] } {
-    const lexer = new Lexer(code);
-    const tokens = lexer.tokenize();
-    const parser = new Parser(tokens);
-    const ast = parser.parse();
-    return { ast, errors: (parser as any).errors || [] };
-  }
 
   test('detects no errors in valid code', () => {
     const code = `
@@ -16,8 +8,11 @@ describe('Parser Error Detection', () => {
       function test() { return x; }
       class Foo { bar() {} }
     `;
-    const { errors } = parseWithErrors(code);
+    const { errors } = parseCodeWithErrors(code);
     expect(errors).toHaveLength(0);
+    
+    // Also test that parseCode doesn't throw
+    expect(() => parseCode(code)).not.toThrow();
   });
 
   test('detects and recovers from syntax errors', () => {
@@ -26,11 +21,14 @@ describe('Parser Error Detection', () => {
       const y = { // missing closing brace
       const z = 20
     `;
-    const { ast, errors } = parseWithErrors(code);
+    const { ast, errors } = parseCodeWithErrors(code);
     // Should still produce an AST due to error recovery
     expect(ast.body.length).toBeGreaterThan(0);
     // But should have recorded errors
     expect(errors.length).toBeGreaterThan(0);
+    
+    // parseCode should throw on this code
+    expect(() => parseCode(code)).toThrow(/Parser produced/);
   });
 
   test('detects missing closing brackets', () => {
@@ -41,8 +39,11 @@ describe('Parser Error Detection', () => {
         }
       }
     `;
-    const { errors } = parseWithErrors(code);
+    const { errors } = parseCodeWithErrors(code);
     expect(errors.length).toBeGreaterThan(0);
+    
+    // parseCode should throw on this code
+    expect(() => parseCode(code)).toThrow(/Parser produced/);
   });
 
   test('detects invalid token sequences', () => {
@@ -50,8 +51,11 @@ describe('Parser Error Detection', () => {
       const const x = 10;
       function function test() {}
     `;
-    const { errors } = parseWithErrors(code);
+    const { errors } = parseCodeWithErrors(code);
     expect(errors.length).toBeGreaterThan(0);
+    
+    // parseCode should throw on this code
+    expect(() => parseCode(code)).toThrow(/Parser produced/);
   });
 
   test('complex valid code should have no errors', () => {
@@ -79,8 +83,11 @@ describe('Parser Error Detection', () => {
         None => 0
       }
     `;
-    const { errors } = parseWithErrors(code);
+    const { errors } = parseCodeWithErrors(code);
     expect(errors).toHaveLength(0);
+    
+    // parseCode should not throw on valid code
+    expect(() => parseCode(code)).not.toThrow();
   });
 
   test('tracks multiple errors', () => {
@@ -89,8 +96,11 @@ describe('Parser Error Detection', () => {
       function test( // missing closing paren
       class { // missing class name
     `;
-    const { errors } = parseWithErrors(code);
+    const { errors } = parseCodeWithErrors(code);
     // Parser may combine related errors or recover efficiently
     expect(errors.length).toBeGreaterThanOrEqual(1);
+    
+    // parseCode should throw on this code
+    expect(() => parseCode(code)).toThrow(/Parser produced/);
   });
 });
