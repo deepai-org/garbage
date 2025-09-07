@@ -1,0 +1,1 @@
+const { Lexer } = require('./dist/lexer'); const { Parser } = require('./dist/parser'); const code = `<Success />`; console.log('Testing simple JSX:', code); const lexer = new Lexer(code); const tokens = lexer.tokenize(); const parser = new Parser(tokens); const ast = parser.parse(); console.log('Success - body length:', ast.body.length);

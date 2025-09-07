@@ -1,0 +1,469 @@
+
+> polyscript@0.1.0 test
+> jest
+
+FAIL test/parser-polyglot-updated.test.ts
+  ● Polyglot Parser Tests (UPDATED) › parses mixed error handling patterns
+
+    expect(received).toBeGreaterThanOrEqual(expected)
+
+    Expected: >= 1
+    Received:    0
+
+      192 |     // Find defer statements
+      193 |     const deferStmts = findByKind(ast, 'Defer');
+    > 194 |     expect(deferStmts.length).toBeGreaterThanOrEqual(1);
+          |                               ^
+      195 |     
+      196 |     // Find panic (might be parsed as call)
+      197 |     const panicCall = findFirst(ast, n => 
+
+      at Object.<anonymous> (test/parser-polyglot-updated.test.ts:194:31)
+
+  ● Polyglot Parser Tests (UPDATED) › parses Bash-style with modern JavaScript
+
+    expect(received).toBeGreaterThanOrEqual(expected)
+
+    Expected: >= 3
+    Received:    2
+
+      332 |     const switchStmt = ast.body[0] as AST.Switch;
+      333 |     expect(switchStmt.kind).toBe('Switch');
+    > 334 |     expect(switchStmt.cases.length).toBeGreaterThanOrEqual(3);
+          |                                     ^
+      335 |     
+      336 |     // Verify if statement
+      337 |     const ifStmt = ast.body[1] as AST.If;
+
+      at Object.<anonymous> (test/parser-polyglot-updated.test.ts:334:37)
+
+FAIL test/parser-polyglot-showcase-updated.test.ts
+  ● Polyglot Parser Showcase Tests (UPDATED) › parses multi-paradigm web server
+
+    expect(received).toBeGreaterThanOrEqual(expected)
+
+    Expected: >= 2
+    Received:    0
+
+      190 |     
+      191 |     // ✅ STRONG: Verify class structure
+    > 192 |     expect(ast.body.length).toBeGreaterThanOrEqual(2);
+          |                             ^
+      193 |     const cls = ast.body[0] as AST.ClassDecl;
+      194 |     expect(cls.kind).toBe('ClassDecl');
+      195 |     expect(cls.name.name).toBe('WebServer');
+
+      at Object.<anonymous> (test/parser-polyglot-showcase-updated.test.ts:192:29)
+
+  ● Polyglot Parser Showcase Tests (UPDATED) › parses concurrent task orchestrator
+
+    expect(received).toBeGreaterThanOrEqual(expected)
+
+    Expected: >= 3
+    Received:    0
+
+      303 |       n.kind === 'Call' && n.func?.name === 'make'
+      304 |     );
+    > 305 |     expect(makeCalls.length).toBeGreaterThanOrEqual(3); // results, errors, done channels
+          |                              ^
+      306 |     
+      307 |     // Find go statements
+      308 |     const goStmts = findByKind(ast, 'Go');
+
+      at Object.<anonymous> (test/parser-polyglot-showcase-updated.test.ts:305:30)
+
+  ● Polyglot Parser Showcase Tests (UPDATED) › parses reactive state management system
+
+    expect(received).toBeGreaterThanOrEqual(expected)
+
+    Expected: >= 3
+    Received:    1
+
+      412 |     
+      413 |     // ✅ STRONG: Verify generic class declaration
+    > 414 |     expect(ast.body.length).toBeGreaterThanOrEqual(3);
+          |                             ^
+      415 |     const cls = ast.body[0] as AST.ClassDecl;
+      416 |     expect(cls.kind).toBe('ClassDecl');
+      417 |     expect(cls.name.name).toBe('Store');
+
+      at Object.<anonymous> (test/parser-polyglot-showcase-updated.test.ts:414:29)
+
+PASS test/jsx-attributes.test.ts
+FAIL test/angle-bracket-verification.test.ts
+  ● Console
+
+    console.log
+      Angle Bracket Statistics:
+
+      at Object.<anonymous> (test/angle-bracket-verification.test.ts:300:15)
+
+    console.log
+        JSX: 4
+
+      at Object.<anonymous> (test/angle-bracket-verification.test.ts:301:15)
+
+    console.log
+        Generics: 5
+
+      at Object.<anonymous> (test/angle-bracket-verification.test.ts:302:15)
+
+    console.log
+        Comparisons: 6
+
+      at Object.<anonymous> (test/angle-bracket-verification.test.ts:303:15)
+
+    console.log
+        Channels: 2
+
+      at Object.<anonymous> (test/angle-bracket-verification.test.ts:304:15)
+
+    console.log
+        Shifts: 3
+
+      at Object.<anonymous> (test/angle-bracket-verification.test.ts:305:15)
+
+    console.log
+        Total: 20
+
+      at Object.<anonymous> (test/angle-bracket-verification.test.ts:306:15)
+
+    console.log
+        Summary: 4 JSX, 5 generic, 6 comparison, 2 channel, 3 shift
+
+      at Object.<anonymous> (test/angle-bracket-verification.test.ts:307:15)
+
+  ● Angle Bracket Disambiguation Verification › Complex Mixed Cases › handles all angle bracket types in one expression
+
+    expect(received).toHaveLength(expected)
+
+    Expected length: 2
+    Received length: 1
+    Received array:  [{"args": [{"id": {"kind": "Identifier", "name": "T", "originalSpelling": "T", "span": {"column": 36, "end": 38, "line": 2, "start": 37}}, "kind": "SimpleType", "span": {"column": 36, "end": 38, "line": 2, "start": 37}}], "base": {"kind": "Identifier", "name": "Stream", "originalSpelling": "Stream", "span": {"column": 29, "end": 36, "line": 2, "start": 30}}, "kind": "GenericType", "span": {"column": 29, "end": 39, "line": 2, "start": 30}}]
+
+      274 |   if (expectations.generics) {
+      275 |     const genericTypes = findAllInAST(ast, n => n.kind === 'GenericType');
+    > 276 |     expect(genericTypes).toHaveLength(expectations.generics.length);
+          |                          ^
+      277 |     
+      278 |     expectations.generics.forEach((expected, i) => {
+      279 |       verifyGenericType(genericTypes[i], expected.base, expected.argCount);
+
+      at verifyAngleBrackets (test/helpers/ast-verifiers.ts:276:26)
+      at Object.<anonymous> (test/angle-bracket-verification.test.ts:158:26)
+
+PASS test/jsx-fragments-nested-updated.test.ts
+PASS test/jsx-typescript-updated.test.ts
+PASS test/parser.test.ts
+FAIL test/parser-polyglot-showcase.test.ts
+  ● Polyglot Parser Showcase Tests › parses multi-paradigm web server
+
+    expect(received).toBeGreaterThanOrEqual(expected)
+
+    Expected: >= 2
+    Received:    0
+
+      138 |
+      139 |     const ast = parseCode(code);
+    > 140 |     expect(ast.body.length).toBeGreaterThanOrEqual(2);
+          |                             ^
+      141 |     const cls = ast.body[0] as AST.ClassDecl;
+      142 |     expect(cls.kind).toBe('ClassDecl');
+      143 |   });
+
+      at Object.<anonymous> (test/parser-polyglot-showcase.test.ts:140:29)
+
+PASS test/jsx-polyglot-updated.test.ts
+PASS test/jsx-edge-cases-updated.test.ts
+FAIL test/parser-polyglot-advanced.test.ts
+  ● Advanced Polyglot Parser Tests › parses mixed type systems and generics
+
+    expect(received).toBeGreaterThanOrEqual(expected)
+
+    Expected: >= 5
+    Received:    4
+
+      312 |
+      313 |     const ast = parseCode(code);
+    > 314 |     expect(ast.body.length).toBeGreaterThanOrEqual(5);
+          |                             ^
+      315 |   });
+      316 |
+      317 |   test('parses mixed comprehensions and generators', () => {
+
+      at Object.<anonymous> (test/parser-polyglot-advanced.test.ts:314:29)
+
+PASS test/jsx-polyglot.test.ts
+PASS test/simple-showcase.test.ts
+PASS test/parser-updated.test.ts
+FAIL test/parser-polyglot-advanced-updated.test.ts
+  ● Console
+
+    console.log
+      Angle bracket usage: 1 JSX, 1 generic, 3 comparison, 2 channel, 2 shift
+
+      at Object.<anonymous> (test/parser-polyglot-advanced-updated.test.ts:391:13)
+
+  ● Parser - Advanced Polyglot Patterns (UPDATED) › parses extreme operator mixing and chaining
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: "<<"
+    Received: ">>>"
+
+      46 |       .filter(n => ['<<', '>>', '>>>'].includes(n.op));
+      47 |     expect(shifts.length).toBe(3);
+    > 48 |     expect(shifts[0].op).toBe('<<');
+         |                          ^
+      49 |     expect(shifts[1].op).toBe('>>');
+      50 |     expect(shifts[2].op).toBe('>>>');
+      51 |     
+
+      at Object.<anonymous> (test/parser-polyglot-advanced-updated.test.ts:48:26)
+
+  ● Parser - Advanced Polyglot Patterns (UPDATED) › parses mixed class and trait definitions
+
+    expect(received).toHaveLength(expected)
+
+    Expected length: 1
+    Received length: 3
+    Received array:  [{"decorators": [{"args": undefined, "kind": "Decorator", "name": {"kind": "Identifier", "name": "dataclass", "originalSpelling": "dataclass", "span": {"column": 1, "end": 11, "line": 2, "start": 2}}, "span": {"column": 1, "end": 11, "line": 2, "start": 2}}], "extends": {"id": {"kind": "Identifier", "name": "Base", "originalSpelling": "Base", "span": {"column": 27, "end": 43, "line": 3, "start": 39}}, "kind": "SimpleType", "span": {"column": 27, "end": 43, "line": 3, "start": 39}}, "genericParams": [{"kind": "Identifier", "name": "T", "originalSpelling": "T", "span": {"column": 16, "end": 29, "line": 3, "start": 28}}], "implements": [{"args": [{"id": {"kind": "Identifier", "name": "T", "originalSpelling": "T", "span": {"column": 54, "end": 67, "line": 3, "start": 66}}, "kind": "SimpleType", "span": {"column": 54, "end": 67, "line": 3, "start": 66}}], "base": {"kind": "Identifier", "name": "IContainer", "originalSpelling": "IContainer", "span": {"column": 43, "end": 65, "line": 3, "start": 55}}, "kind": "GenericType", "span": {"column": 43, "end": 68, "line": 3, "start": 55}}, {"id": {"kind": "Identifier", "name": "Sortable", "originalSpelling": "Sortable", "span": {"column": 62, "end": 82, "line": 3, "start": 74}}, "kind": "SimpleType", "span": {"column": 62, "end": 82, "line": 3, "start": 74}}], "kind": "ClassDecl", "members": [{"kind": "Field", "name": {"kind": "Identifier", "name": "items", "span": {"column": 10, "end": 100, "line": 4, "start": 95}}, "span": {"column": 2, "end": 113, "line": 4, "start": 87}, "type": {"args": [{"id": {"kind": "Identifier", "name": "T", "originalSpelling": "T", "span": {"column": 21, "end": 107, "line": 4, "start": 106}}, "kind": "SimpleType", "span": {"column": 21, "end": 107, "line": 4, "start": 106}}], "base": {"kind": "Identifier", "name": "Vec", "originalSpelling": "Vec", "span": {"column": 17, "end": 105, "line": 4, "start": 102}}, "kind": "GenericType", "span": {"column": 17, "end": 108, "line": 4, "start": 102}}, "value": {"elements": [], "kind": "ArrayLiteral", "span": {"column": 26, "end": 113, "line": 4, "start": 111}}}, {"kind": "Field", "name": {"kind": "Identifier", "name": "capacity", "span": {"column": 11, "end": 133, "line": 5, "start": 125}}, "span": {"column": 2, "end": 138, "line": 5, "start": 116}, "type": {"id": {"kind": "Identifier", "name": "int", "originalSpelling": "int", "span": {"column": 21, "end": 138, "line": 5, "start": 135}}, "kind": "SimpleType", "span": {"column": 21, "end": 138, "line": 5, "start": 135}}, "value": undefined}, {"body": {"kind": "Block", "span": {"column": 38, "end": 221, "line": 7, "start": 179}, "statements": [{"expr": {"args": [], "callee": {"kind": "Identifier", "name": "super", "span": {"column": 4, "end": 190, "line": 8, "start": 185}}, "kind": "Call", "span": {"column": 4, "end": 192, "line": 8, "start": 185}}, "kind": "ExprStmt", "span": {"column": 4, "end": 192, "line": 8, "start": 185}}, {"expr": {"kind": "Assign", "left": {"kind": "Member", "object": {"kind": "Identifier", "name": "this", "span": [Object]}, "optional": false, "property": {"kind": "Identifier", "name": "capacity", "originalSpelling": "capacity", "span": [Object]}, "span": {"column": 4, "end": 210, "line": 9, "start": 197}}, "op": "=", "right": {"kind": "Identifier", "name": "size", "originalSpelling": "size", "span": {"column": 20, "end": 217, "line": 9, "start": 213}}, "span": {"column": 4, "end": 217, "line": 9, "start": 197}}, "kind": "ExprStmt", "span": {"column": 4, "end": 217, "line": 9, "start": 197}}]}, "kind": "Constructor", "params": [{"blockParam": false, "defaultValue": {"base": "decimal", "kind": "NumericLiteral", "raw": "10", "span": {"column": 34, "end": 177, "line": 7, "start": 175}, "suffix": undefined}, "name": {"kind": "Identifier", "name": "size", "originalSpelling": "size", "span": {"column": 22, "end": 167, "line": 7, "start": 163}}, "readonly": false, "span": {"column": 15, "end": 177, "line": 7, "start": 156}, "spread": false, "type": {"id": {"kind": "Identifier", "name": "int", "originalSpelling": "int", "span": {"column": 28, "end": 172, "line": 7, "start": 169}}, "kind": "SimpleType", "span": {"column": 28, "end": 172, "line": 7, "start": 169}}, "visibility": "public"}], "span": {"column": 3, "end": 221, "line": 7, "start": 144}}, {"kind": "Field", "name": {"kind": "Identifier", "name": "operator", "span": {"column": 3, "end": 235, "line": 12, "start": 227}}, "span": {"column": 3, "end": 235, "line": 12, "start": 227}}, {"kind": "Field", "name": {"kind": "Identifier", "name": "override", "span": {"column": 3, "end": 293, "line": 14, "start": 285}}, "span": {"column": 3, "end": 293, "line": 14, "start": 285}}, {"async": false, "body": {"kind": "Block", "span": {"column": 38, "end": 433, "line": 14, "start": 320}, "statements": [{"expr": {"kind": "Identifier", "name": "guard", "originalSpelling": "guard", "span": {"column": 4, "end": 331, "line": 15, "start": 326}}, "kind": "ExprStmt", "span": {"column": 4, "end": 331, "line": 15, "start": 326}}, {"expr": {"kind": "Binary", "left": {"kind": "Member", "object": {"kind": "Member", "object": [Object], "optional": false, "property": [Object], "span": [Object]}, "optional": false, "property": {"kind": "Identifier", "name": "length", "originalSpelling": "length", "span": [Object]}, "span": {"column": 10, "end": 349, "line": 15, "start": 332}}, "op": "<", "right": {"kind": "Member", "object": {"kind": "Identifier", "name": "this", "span": [Object]}, "optional": false, "property": {"kind": "Identifier", "name": "capacity", "originalSpelling": "capacity", "span": [Object]}, "span": {"column": 30, "end": 365, "line": 15, "start": 352}}, "span": {"column": 10, "end": 365, "line": 15, "start": 332}}, "kind": "ExprStmt", "span": {"column": 10, "end": 365, "line": 15, "start": 332}}, {"expr": {"kind": "Identifier", "name": "else", "span": {"column": 44, "end": 370, "line": 15, "start": 366}}, "kind": "ExprStmt", "span": {"column": 44, "end": 370, "line": 15, "start": 366}}, {"kind": "Block", "span": {"column": 49, "end": 387, "line": 15, "start": 371}, "statements": [{"kind": "Return", "span": {"column": 51, "end": 385, "line": 15, "start": 373}, "values": [[Object]]}]}, {"expr": {"args": [{"kind": "Identifier", "name": "item", "originalSpelling": "item", "span": [Object]}], "callee": {"kind": "Member", "object": {"kind": "Member", "object": [Object], "optional": false, "property": [Object], "span": [Object]}, "optional": false, "property": {"kind": "Identifier", "name": "push", "originalSpelling": "push", "span": [Object]}, "span": {"column": 4, "end": 407, "line": 16, "start": 392}}, "kind": "Call", "span": {"column": 4, "end": 413, "line": 16, "start": 392}}, "kind": "ExprStmt", "span": {"column": 4, "end": 413, "line": 16, "start": 392}}, {"kind": "Return", "span": {"column": 4, "end": 429, "line": 17, "start": 418}, "values": [{"kind": "BooleanLiteral", "span": {"column": 11, "end": 429, "line": 17, "start": 425}, "value": true}]}]}, "generator": false, "genericParams": undefined, "kind": "FuncDecl", "name": {"kind": "Identifier", "name": "add", "originalSpelling": "add", "span": {"column": 17, "end": 302, "line": 14, "start": 299}}, "params": [{"blockParam": false, "defaultValue": undefined, "name": {"kind": "Identifier", "name": "item", "originalSpelling": "item", "span": {"column": 21, "end": 307, "line": 14, "start": 303}}, "readonly": false, "span": {"column": 21, "end": 310, "line": 14, "start": 303}, "spread": false, "type": {"id": {"kind": "Identifier", "name": "T", "originalSpelling": "T", "span": {"column": 27, "end": 310, "line": 14, "start": 309}}, "kind": "SimpleType", "span": {"column": 27, "end": 310, "line": 14, "start": 309}}, "visibility": undefined}], "returnType": {"id": {"kind": "Identifier", "name": "bool", "originalSpelling": "bool", "span": {"column": 33, "end": 319, "line": 14, "start": 315}}, "kind": "SimpleType", "span": {"column": 33, "end": 319, "line": 14, "start": 315}}, "span": {"column": 12, "end": 433, "line": 14, "start": 294}, "unsafe": false}, {"kind": "Field", "name": {"kind": "Identifier", "name": "trait", "span": {"column": 3, "end": 444, "line": 20, "start": 439}}, "span": {"column": 3, "end": 444, "line": 20, "start": 439}}, {"kind": "Field", "name": {"kind": "Identifier", "name": "Sortable", "span": {"column": 9, "end": 453, "line": 20, "start": 445}}, "span": {"column": 9, "end": 453, "line": 20, "start": 445}}], "name": {"kind": "Identifier", "name": "Container", "originalSpelling": "Container", "span": {"column": 6, "end": 27, "line": 3, "start": 18}}, "span": {"column": 0, "end": 481, "line": 3, "start": 12}, "typeParams": [{"kind": "Identifier", "name": "T", "originalSpelling": "T", "span": {"column": 16, "end": 29, "line": 3, "start": 28}}]}, {"expr": {"kind": "Identifier", "name": "impl", "originalSpelling": "impl", "span": {"column": 3, "end": 491, "line": 24, "start": 487}}, "kind": "ExprStmt", "span": {"column": 3, "end": 491, "line": 24, "start": 487}}, {"expr": {"kind": "Identifier", "name": "Display", "originalSpelling": "Display", "span": {"column": 8, "end": 499, "line": 24, "start": 492}}, "kind": "ExprStmt", "span": {"column": 8, "end": 499, "line": 24, "start": 492}}]
+
+      261 |     
+      262 |     // ✅ STRONG: Verify class structure
+    > 263 |     expect(ast.body).toHaveLength(1);
+          |                      ^
+      264 |     const classDecl = ast.body[0] as AST.ClassDecl;
+      265 |     expect(classDecl.kind).toBe('ClassDecl');
+      266 |     expect(classDecl.name.name).toBe('Container');
+
+      at Object.<anonymous> (test/parser-polyglot-advanced-updated.test.ts:263:22)
+
+  ● Parser - Advanced Polyglot Patterns (UPDATED) › parses extreme nesting with mixed syntax
+
+    TypeError: Cannot read properties of null (reading 'kind')
+
+      119 |   rightKind?: string
+      120 | ) {
+    > 121 |   expect(node.kind).toBe('Binary');
+          |               ^
+      122 |   expect(node.op).toBe(op);
+      123 |   
+      124 |   if (leftKind) {
+
+      at verifyBinaryOp (test/helpers/ast-verifiers.ts:121:15)
+      at verifyComparison (test/helpers/ast-verifiers.ts:141:3)
+      at Object.<anonymous> (test/parser-polyglot-advanced-updated.test.ts:342:21)
+
+PASS test/jsx-basic.test.ts
+PASS test/parser-real-world.test.ts
+PASS test/parser-comprehensive.test.ts
+PASS test/parser-polyglot-advanced-fixed.test.ts
+PASS test/parser-polyglot.test.ts
+PASS test/jsx-typescript.test.ts
+PASS test/jsx-edge-cases.test.ts
+PASS test/parser-comprehensive-updated.test.ts
+PASS test/jsx-fragments-nested.test.ts
+
+Summary of all failing tests
+FAIL test/parser-polyglot-updated.test.ts
+  ● Polyglot Parser Tests (UPDATED) › parses mixed error handling patterns
+
+    expect(received).toBeGreaterThanOrEqual(expected)
+
+    Expected: >= 1
+    Received:    0
+
+      192 |     // Find defer statements
+      193 |     const deferStmts = findByKind(ast, 'Defer');
+    > 194 |     expect(deferStmts.length).toBeGreaterThanOrEqual(1);
+          |                               ^
+      195 |     
+      196 |     // Find panic (might be parsed as call)
+      197 |     const panicCall = findFirst(ast, n => 
+
+      at Object.<anonymous> (test/parser-polyglot-updated.test.ts:194:31)
+
+  ● Polyglot Parser Tests (UPDATED) › parses Bash-style with modern JavaScript
+
+    expect(received).toBeGreaterThanOrEqual(expected)
+
+    Expected: >= 3
+    Received:    2
+
+      332 |     const switchStmt = ast.body[0] as AST.Switch;
+      333 |     expect(switchStmt.kind).toBe('Switch');
+    > 334 |     expect(switchStmt.cases.length).toBeGreaterThanOrEqual(3);
+          |                                     ^
+      335 |     
+      336 |     // Verify if statement
+      337 |     const ifStmt = ast.body[1] as AST.If;
+
+      at Object.<anonymous> (test/parser-polyglot-updated.test.ts:334:37)
+
+FAIL test/parser-polyglot-showcase-updated.test.ts
+  ● Polyglot Parser Showcase Tests (UPDATED) › parses multi-paradigm web server
+
+    expect(received).toBeGreaterThanOrEqual(expected)
+
+    Expected: >= 2
+    Received:    0
+
+      190 |     
+      191 |     // ✅ STRONG: Verify class structure
+    > 192 |     expect(ast.body.length).toBeGreaterThanOrEqual(2);
+          |                             ^
+      193 |     const cls = ast.body[0] as AST.ClassDecl;
+      194 |     expect(cls.kind).toBe('ClassDecl');
+      195 |     expect(cls.name.name).toBe('WebServer');
+
+      at Object.<anonymous> (test/parser-polyglot-showcase-updated.test.ts:192:29)
+
+  ● Polyglot Parser Showcase Tests (UPDATED) › parses concurrent task orchestrator
+
+    expect(received).toBeGreaterThanOrEqual(expected)
+
+    Expected: >= 3
+    Received:    0
+
+      303 |       n.kind === 'Call' && n.func?.name === 'make'
+      304 |     );
+    > 305 |     expect(makeCalls.length).toBeGreaterThanOrEqual(3); // results, errors, done channels
+          |                              ^
+      306 |     
+      307 |     // Find go statements
+      308 |     const goStmts = findByKind(ast, 'Go');
+
+      at Object.<anonymous> (test/parser-polyglot-showcase-updated.test.ts:305:30)
+
+  ● Polyglot Parser Showcase Tests (UPDATED) › parses reactive state management system
+
+    expect(received).toBeGreaterThanOrEqual(expected)
+
+    Expected: >= 3
+    Received:    1
+
+      412 |     
+      413 |     // ✅ STRONG: Verify generic class declaration
+    > 414 |     expect(ast.body.length).toBeGreaterThanOrEqual(3);
+          |                             ^
+      415 |     const cls = ast.body[0] as AST.ClassDecl;
+      416 |     expect(cls.kind).toBe('ClassDecl');
+      417 |     expect(cls.name.name).toBe('Store');
+
+      at Object.<anonymous> (test/parser-polyglot-showcase-updated.test.ts:414:29)
+
+FAIL test/angle-bracket-verification.test.ts
+  ● Angle Bracket Disambiguation Verification › Complex Mixed Cases › handles all angle bracket types in one expression
+
+    expect(received).toHaveLength(expected)
+
+    Expected length: 2
+    Received length: 1
+    Received array:  [{"args": [{"id": {"kind": "Identifier", "name": "T", "originalSpelling": "T", "span": {"column": 36, "end": 38, "line": 2, "start": 37}}, "kind": "SimpleType", "span": {"column": 36, "end": 38, "line": 2, "start": 37}}], "base": {"kind": "Identifier", "name": "Stream", "originalSpelling": "Stream", "span": {"column": 29, "end": 36, "line": 2, "start": 30}}, "kind": "GenericType", "span": {"column": 29, "end": 39, "line": 2, "start": 30}}]
+
+      274 |   if (expectations.generics) {
+      275 |     const genericTypes = findAllInAST(ast, n => n.kind === 'GenericType');
+    > 276 |     expect(genericTypes).toHaveLength(expectations.generics.length);
+          |                          ^
+      277 |     
+      278 |     expectations.generics.forEach((expected, i) => {
+      279 |       verifyGenericType(genericTypes[i], expected.base, expected.argCount);
+
+      at verifyAngleBrackets (test/helpers/ast-verifiers.ts:276:26)
+      at Object.<anonymous> (test/angle-bracket-verification.test.ts:158:26)
+
+FAIL test/parser-polyglot-showcase.test.ts
+  ● Polyglot Parser Showcase Tests › parses multi-paradigm web server
+
+    expect(received).toBeGreaterThanOrEqual(expected)
+
+    Expected: >= 2
+    Received:    0
+
+      138 |
+      139 |     const ast = parseCode(code);
+    > 140 |     expect(ast.body.length).toBeGreaterThanOrEqual(2);
+          |                             ^
+      141 |     const cls = ast.body[0] as AST.ClassDecl;
+      142 |     expect(cls.kind).toBe('ClassDecl');
+      143 |   });
+
+      at Object.<anonymous> (test/parser-polyglot-showcase.test.ts:140:29)
+
+FAIL test/parser-polyglot-advanced.test.ts
+  ● Advanced Polyglot Parser Tests › parses mixed type systems and generics
+
+    expect(received).toBeGreaterThanOrEqual(expected)
+
+    Expected: >= 5
+    Received:    4
+
+      312 |
+      313 |     const ast = parseCode(code);
+    > 314 |     expect(ast.body.length).toBeGreaterThanOrEqual(5);
+          |                             ^
+      315 |   });
+      316 |
+      317 |   test('parses mixed comprehensions and generators', () => {
+
+      at Object.<anonymous> (test/parser-polyglot-advanced.test.ts:314:29)
+
+FAIL test/parser-polyglot-advanced-updated.test.ts
+  ● Parser - Advanced Polyglot Patterns (UPDATED) › parses extreme operator mixing and chaining
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: "<<"
+    Received: ">>>"
+
+      46 |       .filter(n => ['<<', '>>', '>>>'].includes(n.op));
+      47 |     expect(shifts.length).toBe(3);
+    > 48 |     expect(shifts[0].op).toBe('<<');
+         |                          ^
+      49 |     expect(shifts[1].op).toBe('>>');
+      50 |     expect(shifts[2].op).toBe('>>>');
+      51 |     
+
+      at Object.<anonymous> (test/parser-polyglot-advanced-updated.test.ts:48:26)
+
+  ● Parser - Advanced Polyglot Patterns (UPDATED) › parses mixed class and trait definitions
+
+    expect(received).toHaveLength(expected)
+
+    Expected length: 1
+    Received length: 3
+    Received array:  [{"decorators": [{"args": undefined, "kind": "Decorator", "name": {"kind": "Identifier", "name": "dataclass", "originalSpelling": "dataclass", "span": {"column": 1, "end": 11, "line": 2, "start": 2}}, "span": {"column": 1, "end": 11, "line": 2, "start": 2}}], "extends": {"id": {"kind": "Identifier", "name": "Base", "originalSpelling": "Base", "span": {"column": 27, "end": 43, "line": 3, "start": 39}}, "kind": "SimpleType", "span": {"column": 27, "end": 43, "line": 3, "start": 39}}, "genericParams": [{"kind": "Identifier", "name": "T", "originalSpelling": "T", "span": {"column": 16, "end": 29, "line": 3, "start": 28}}], "implements": [{"args": [{"id": {"kind": "Identifier", "name": "T", "originalSpelling": "T", "span": {"column": 54, "end": 67, "line": 3, "start": 66}}, "kind": "SimpleType", "span": {"column": 54, "end": 67, "line": 3, "start": 66}}], "base": {"kind": "Identifier", "name": "IContainer", "originalSpelling": "IContainer", "span": {"column": 43, "end": 65, "line": 3, "start": 55}}, "kind": "GenericType", "span": {"column": 43, "end": 68, "line": 3, "start": 55}}, {"id": {"kind": "Identifier", "name": "Sortable", "originalSpelling": "Sortable", "span": {"column": 62, "end": 82, "line": 3, "start": 74}}, "kind": "SimpleType", "span": {"column": 62, "end": 82, "line": 3, "start": 74}}], "kind": "ClassDecl", "members": [{"kind": "Field", "name": {"kind": "Identifier", "name": "items", "span": {"column": 10, "end": 100, "line": 4, "start": 95}}, "span": {"column": 2, "end": 113, "line": 4, "start": 87}, "type": {"args": [{"id": {"kind": "Identifier", "name": "T", "originalSpelling": "T", "span": {"column": 21, "end": 107, "line": 4, "start": 106}}, "kind": "SimpleType", "span": {"column": 21, "end": 107, "line": 4, "start": 106}}], "base": {"kind": "Identifier", "name": "Vec", "originalSpelling": "Vec", "span": {"column": 17, "end": 105, "line": 4, "start": 102}}, "kind": "GenericType", "span": {"column": 17, "end": 108, "line": 4, "start": 102}}, "value": {"elements": [], "kind": "ArrayLiteral", "span": {"column": 26, "end": 113, "line": 4, "start": 111}}}, {"kind": "Field", "name": {"kind": "Identifier", "name": "capacity", "span": {"column": 11, "end": 133, "line": 5, "start": 125}}, "span": {"column": 2, "end": 138, "line": 5, "start": 116}, "type": {"id": {"kind": "Identifier", "name": "int", "originalSpelling": "int", "span": {"column": 21, "end": 138, "line": 5, "start": 135}}, "kind": "SimpleType", "span": {"column": 21, "end": 138, "line": 5, "start": 135}}, "value": undefined}, {"body": {"kind": "Block", "span": {"column": 38, "end": 221, "line": 7, "start": 179}, "statements": [{"expr": {"args": [], "callee": {"kind": "Identifier", "name": "super", "span": {"column": 4, "end": 190, "line": 8, "start": 185}}, "kind": "Call", "span": {"column": 4, "end": 192, "line": 8, "start": 185}}, "kind": "ExprStmt", "span": {"column": 4, "end": 192, "line": 8, "start": 185}}, {"expr": {"kind": "Assign", "left": {"kind": "Member", "object": {"kind": "Identifier", "name": "this", "span": [Object]}, "optional": false, "property": {"kind": "Identifier", "name": "capacity", "originalSpelling": "capacity", "span": [Object]}, "span": {"column": 4, "end": 210, "line": 9, "start": 197}}, "op": "=", "right": {"kind": "Identifier", "name": "size", "originalSpelling": "size", "span": {"column": 20, "end": 217, "line": 9, "start": 213}}, "span": {"column": 4, "end": 217, "line": 9, "start": 197}}, "kind": "ExprStmt", "span": {"column": 4, "end": 217, "line": 9, "start": 197}}]}, "kind": "Constructor", "params": [{"blockParam": false, "defaultValue": {"base": "decimal", "kind": "NumericLiteral", "raw": "10", "span": {"column": 34, "end": 177, "line": 7, "start": 175}, "suffix": undefined}, "name": {"kind": "Identifier", "name": "size", "originalSpelling": "size", "span": {"column": 22, "end": 167, "line": 7, "start": 163}}, "readonly": false, "span": {"column": 15, "end": 177, "line": 7, "start": 156}, "spread": false, "type": {"id": {"kind": "Identifier", "name": "int", "originalSpelling": "int", "span": {"column": 28, "end": 172, "line": 7, "start": 169}}, "kind": "SimpleType", "span": {"column": 28, "end": 172, "line": 7, "start": 169}}, "visibility": "public"}], "span": {"column": 3, "end": 221, "line": 7, "start": 144}}, {"kind": "Field", "name": {"kind": "Identifier", "name": "operator", "span": {"column": 3, "end": 235, "line": 12, "start": 227}}, "span": {"column": 3, "end": 235, "line": 12, "start": 227}}, {"kind": "Field", "name": {"kind": "Identifier", "name": "override", "span": {"column": 3, "end": 293, "line": 14, "start": 285}}, "span": {"column": 3, "end": 293, "line": 14, "start": 285}}, {"async": false, "body": {"kind": "Block", "span": {"column": 38, "end": 433, "line": 14, "start": 320}, "statements": [{"expr": {"kind": "Identifier", "name": "guard", "originalSpelling": "guard", "span": {"column": 4, "end": 331, "line": 15, "start": 326}}, "kind": "ExprStmt", "span": {"column": 4, "end": 331, "line": 15, "start": 326}}, {"expr": {"kind": "Binary", "left": {"kind": "Member", "object": {"kind": "Member", "object": [Object], "optional": false, "property": [Object], "span": [Object]}, "optional": false, "property": {"kind": "Identifier", "name": "length", "originalSpelling": "length", "span": [Object]}, "span": {"column": 10, "end": 349, "line": 15, "start": 332}}, "op": "<", "right": {"kind": "Member", "object": {"kind": "Identifier", "name": "this", "span": [Object]}, "optional": false, "property": {"kind": "Identifier", "name": "capacity", "originalSpelling": "capacity", "span": [Object]}, "span": {"column": 30, "end": 365, "line": 15, "start": 352}}, "span": {"column": 10, "end": 365, "line": 15, "start": 332}}, "kind": "ExprStmt", "span": {"column": 10, "end": 365, "line": 15, "start": 332}}, {"expr": {"kind": "Identifier", "name": "else", "span": {"column": 44, "end": 370, "line": 15, "start": 366}}, "kind": "ExprStmt", "span": {"column": 44, "end": 370, "line": 15, "start": 366}}, {"kind": "Block", "span": {"column": 49, "end": 387, "line": 15, "start": 371}, "statements": [{"kind": "Return", "span": {"column": 51, "end": 385, "line": 15, "start": 373}, "values": [[Object]]}]}, {"expr": {"args": [{"kind": "Identifier", "name": "item", "originalSpelling": "item", "span": [Object]}], "callee": {"kind": "Member", "object": {"kind": "Member", "object": [Object], "optional": false, "property": [Object], "span": [Object]}, "optional": false, "property": {"kind": "Identifier", "name": "push", "originalSpelling": "push", "span": [Object]}, "span": {"column": 4, "end": 407, "line": 16, "start": 392}}, "kind": "Call", "span": {"column": 4, "end": 413, "line": 16, "start": 392}}, "kind": "ExprStmt", "span": {"column": 4, "end": 413, "line": 16, "start": 392}}, {"kind": "Return", "span": {"column": 4, "end": 429, "line": 17, "start": 418}, "values": [{"kind": "BooleanLiteral", "span": {"column": 11, "end": 429, "line": 17, "start": 425}, "value": true}]}]}, "generator": false, "genericParams": undefined, "kind": "FuncDecl", "name": {"kind": "Identifier", "name": "add", "originalSpelling": "add", "span": {"column": 17, "end": 302, "line": 14, "start": 299}}, "params": [{"blockParam": false, "defaultValue": undefined, "name": {"kind": "Identifier", "name": "item", "originalSpelling": "item", "span": {"column": 21, "end": 307, "line": 14, "start": 303}}, "readonly": false, "span": {"column": 21, "end": 310, "line": 14, "start": 303}, "spread": false, "type": {"id": {"kind": "Identifier", "name": "T", "originalSpelling": "T", "span": {"column": 27, "end": 310, "line": 14, "start": 309}}, "kind": "SimpleType", "span": {"column": 27, "end": 310, "line": 14, "start": 309}}, "visibility": undefined}], "returnType": {"id": {"kind": "Identifier", "name": "bool", "originalSpelling": "bool", "span": {"column": 33, "end": 319, "line": 14, "start": 315}}, "kind": "SimpleType", "span": {"column": 33, "end": 319, "line": 14, "start": 315}}, "span": {"column": 12, "end": 433, "line": 14, "start": 294}, "unsafe": false}, {"kind": "Field", "name": {"kind": "Identifier", "name": "trait", "span": {"column": 3, "end": 444, "line": 20, "start": 439}}, "span": {"column": 3, "end": 444, "line": 20, "start": 439}}, {"kind": "Field", "name": {"kind": "Identifier", "name": "Sortable", "span": {"column": 9, "end": 453, "line": 20, "start": 445}}, "span": {"column": 9, "end": 453, "line": 20, "start": 445}}], "name": {"kind": "Identifier", "name": "Container", "originalSpelling": "Container", "span": {"column": 6, "end": 27, "line": 3, "start": 18}}, "span": {"column": 0, "end": 481, "line": 3, "start": 12}, "typeParams": [{"kind": "Identifier", "name": "T", "originalSpelling": "T", "span": {"column": 16, "end": 29, "line": 3, "start": 28}}]}, {"expr": {"kind": "Identifier", "name": "impl", "originalSpelling": "impl", "span": {"column": 3, "end": 491, "line": 24, "start": 487}}, "kind": "ExprStmt", "span": {"column": 3, "end": 491, "line": 24, "start": 487}}, {"expr": {"kind": "Identifier", "name": "Display", "originalSpelling": "Display", "span": {"column": 8, "end": 499, "line": 24, "start": 492}}, "kind": "ExprStmt", "span": {"column": 8, "end": 499, "line": 24, "start": 492}}]
+
+      261 |     
+      262 |     // ✅ STRONG: Verify class structure
+    > 263 |     expect(ast.body).toHaveLength(1);
+          |                      ^
+      264 |     const classDecl = ast.body[0] as AST.ClassDecl;
+      265 |     expect(classDecl.kind).toBe('ClassDecl');
+      266 |     expect(classDecl.name.name).toBe('Container');
+
+      at Object.<anonymous> (test/parser-polyglot-advanced-updated.test.ts:263:22)
+
+  ● Parser - Advanced Polyglot Patterns (UPDATED) › parses extreme nesting with mixed syntax
+
+    TypeError: Cannot read properties of null (reading 'kind')
+
+      119 |   rightKind?: string
+      120 | ) {
+    > 121 |   expect(node.kind).toBe('Binary');
+          |               ^
+      122 |   expect(node.op).toBe(op);
+      123 |   
+      124 |   if (leftKind) {
+
+      at verifyBinaryOp (test/helpers/ast-verifiers.ts:121:15)
+      at verifyComparison (test/helpers/ast-verifiers.ts:141:3)
+      at Object.<anonymous> (test/parser-polyglot-advanced-updated.test.ts:342:21)
+
+
+Test Suites: 6 failed, 18 passed, 24 total
+Tests:       11 failed, 343 passed, 354 total
+Snapshots:   0 total
+Time:        3.069 s
+Ran all test suites.

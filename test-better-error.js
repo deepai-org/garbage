@@ -1,0 +1,1 @@
+const { Lexer } = require('./dist/lexer'); const { Parser } = require('./dist/parser'); const code = `<Result<Vec<T>,Error>>{ok: true}`; const lexer = new Lexer(code); const tokens = lexer.tokenize(); const parser = new Parser(tokens); try { const ast = parser.parse(); console.log('Success'); } catch (e) { console.log('Error:', e.message); }

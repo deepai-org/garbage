@@ -412,7 +412,7 @@ export class ContextTracker {
   }
   
   /**
-   * Check if < can start JSX
+   * Check if < can start JSX based on spec 10.6
    */
   canBeJSX(): boolean {
     // Can't be JSX in type contexts
@@ -422,14 +422,16 @@ export class ContextTracker {
     
     const pos = this.context.position;
     
-    // Can be JSX after these tokens
+    // Can be JSX after these tokens (expression contexts)
     return pos.afterReturn || 
            pos.afterEquals || 
            pos.afterArrow ||
            pos.afterOpenParen ||
            pos.afterOpenBrace ||
            pos.afterComma ||
-           pos.lineStart;
+           pos.lineStart ||
+           pos.afterColon ||      // After : in ternary
+           pos.afterOperator;     // After operators like &&, ||
   }
   
   /**

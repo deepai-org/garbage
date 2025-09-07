@@ -1,0 +1,1 @@
+const { Lexer } = require('./dist/lexer'); const code = `, Error`; const lexer = new Lexer(code); const tokens = lexer.tokenize(); tokens.forEach(t => console.log(`${t.type}:${t.value}:${t.value.length}`));

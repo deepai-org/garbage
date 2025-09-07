@@ -1,0 +1,1 @@
+const { Lexer } = require('./dist/lexer'); const code = `<Result<Vec<T>,Error>>{ok: true}`; const lexer = new Lexer(code); const tokens = lexer.tokenize(); tokens.forEach((t, i) => console.log(`${i}: ${t.type}:${t.value}`));

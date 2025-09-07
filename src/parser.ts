@@ -1462,7 +1462,8 @@ export class Parser {
     }
     
     // Handle JSX elements and fragments (spec 10.6)
-    if (this.peek().value === "<") {
+    const token = this.peek();
+    if (token.type === TokenType.JSXTagStart || token.value === "<") {
       // Check if we're in a valid JSX expression context
       if (this.isInJSXExpressionContext()) {
         const next = this.peekNext();
@@ -1493,14 +1494,11 @@ export class Parser {
         
         // Try type assertion <Type>expr
         const checkpoint = this.current;
-        const DEBUG_TYPE_ASSERTION = false;
-        if (DEBUG_TYPE_ASSERTION) console.log('Trying type assertion at position', this.current);
         this.advance(); // consume '<'
         
         // Try to parse a type (which could be a complex generic type)
         try {
           const type = this.parseType();
-          if (DEBUG_TYPE_ASSERTION) console.log('Parsed type:', type.kind, 'now at token:', this.peek().value);
           
           // Look for closing '>' - for generic types, this is already consumed
           // For simple types, we need to consume it
@@ -1530,7 +1528,6 @@ export class Parser {
             span: this.createSpan(checkpoint, this.current - 1)
           };
         } catch (e) {
-          if (DEBUG_TYPE_ASSERTION) console.log('Type assertion failed:', e instanceof Error ? e.message : e);
           // Not a valid type assertion, restore position
           this.current = checkpoint;
           // Re-throw if it's not a parsing error we can recover from
@@ -6967,11 +6964,13 @@ export class Parser {
     const DEBUG = false; // Set to true for debugging
     
     try {
-      // Skip <
-      if (!this.match("<")) {
-        if (DEBUG) console.log('isJSXElement: no < found');
+      // Check for JSXTagStart or < token
+      const token = this.peek();
+      if (token.type !== TokenType.JSXTagStart && token.value !== "<") {
+        if (DEBUG) console.log('isJSXElement: no JSXTagStart or < found');
         return false;
       }
+      this.advance(); // consume JSXTagStart or <
       
       // Check what follows < to apply JSX recognition patterns (spec 10.6.2)
       const next = this.peek();
@@ -7155,6 +7154,22 @@ export class Parser {
       this.advance(); // consume <
       this.advance(); // consume identifier
       
+      // Handle generic type parameters for JSX components
+      if (this.peek().value === "<") {
+        this.advance(); // consume <
+        let depth = 1;
+        while (!this.isAtEnd() && depth > 0) {
+          const token = this.peek();
+          if (token.value === "<") {
+            depth++;
+          } else if (token.value === ">") {
+            depth--;
+          }
+          this.advance();
+        }
+        // After consuming generics, continue checking
+      }
+      
       while (!this.isAtEnd()) {
         const token = this.peek();
         
@@ -7177,8 +7192,9 @@ export class Parser {
           return false;
         }
         
-        // Space is ok - keep looking
-        if (token.type === TokenType.Whitespace) {
+        // Space is ok - keep looking (whitespace may be StringLiteral in JSX)
+        if (token.type === TokenType.Whitespace || 
+            (token.type === TokenType.StringLiteral && /^\s+$/.test(token.value))) {
           this.advance();
           continue;
         }

@@ -1,0 +1,1 @@
+const { Lexer } = require('./dist/lexer'); const { Parser } = require('./dist/parser'); const code = `function process<T, U>(data: Stream<T>) { return <Result<Vec<T>, Error>>{ ok: true }; }`; const lexer = new Lexer(code); const tokens = lexer.tokenize(); const parser = new Parser(tokens); const ast = parser.parse(); console.log('AST:', JSON.stringify(ast, null, 2));

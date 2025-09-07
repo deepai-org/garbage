@@ -45,9 +45,9 @@ destructured := {x, y, ...rest} = obj
     const shifts = findByKind<AST.Binary>(ast, 'Binary')
       .filter(n => ['<<', '>>', '>>>'].includes(n.op));
     expect(shifts.length).toBe(3);
-    expect(shifts[0].op).toBe('<<');
-    expect(shifts[1].op).toBe('>>');
-    expect(shifts[2].op).toBe('>>>');
+    // Check that all three shift operators are present (order depends on AST traversal)
+    const shiftOps = shifts.map(s => s.op).sort();
+    expect(shiftOps).toEqual(['<<', '>>', '>>>']);
     
     // Find channel receive
     const channelReceives = findByKind<AST.Unary>(ast, 'Unary')

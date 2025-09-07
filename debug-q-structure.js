@@ -1,0 +1,1 @@
+const { Lexer } = require('./dist/lexer'); const { Parser } = require('./dist/parser'); const code = `result := doWork()?`; const lexer = new Lexer(code); const tokens = lexer.tokenize(); const parser = new Parser(tokens); const ast = parser.parse(); console.log('Statement:', JSON.stringify(ast.body[0], null, 2));

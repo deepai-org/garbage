@@ -403,15 +403,57 @@ JSXComment ::= "{/*" (any except "*/")* "*/}" ;
 
 ### 10.6 JSX Disambiguation
 
-1. **Generic vs JSX**: When `<` could start either:
-   - If followed by capital letter or lowercase HTML tag name → JSX
-   - If followed by `>` (empty) → JSX Fragment
-   - If followed by `/` → JSX closing tag
-   - Otherwise apply generic rules (§5)
+JSX elements are recognized by **pattern-based disambiguation** when `<` appears in **expression contexts**.
 
-2. **Type assertion vs JSX**: 
-   - `<Type>expr` is a type assertion in non-JSX contexts
-   - Use `expr as Type` in JSX contexts to avoid ambiguity
+#### 10.6.1 JSX Expression Contexts
+
+JSX is valid in these contexts:
+- Expression statements: `<Button />`
+- Assignments: `const x = <Component />`
+- Return statements: `return <div>content</div>`
+- Ternary operators: `condition ? <Success /> : <Error />`
+- Array/object literals: `[<Item />]`, `{ header: <Header /> }`
+- Function arguments: `render(<Component />)`
+- JSX children: `<div>{<Child />}</div>`
+- Logical expressions: `show && <Content />`
+- Arrow function bodies: `() => <Component />`
+- Parenthesized expressions: `(<Component />)`
+
+#### 10.6.2 JSX Recognition Patterns
+
+When `<` is encountered in expression context, it starts JSX if followed by:
+1. **Capital letter**: `<Component` → JSX component
+2. **HTML tag name**: `<div`, `<span`, `<input` → JSX element
+3. **Fragment**: `<>` → JSX fragment
+4. **Closing tag**: `</` → JSX closing tag
+5. **Qualified name**: `<Form.Input`, `<ui.Button` → Namespaced JSX
+
+#### 10.6.3 Non-JSX Patterns
+
+`<` is **NOT** JSX when:
+1. **Primitive types**: `<string>`, `<number>` → Type assertion
+2. **Spaced comparison**: `x < 5` → Less-than operator
+3. **Generic calls**: `Array<T>(args)` → Generic function call
+4. **Channel operations**: `<-` → Channel receive
+5. **In type context**: After `:`, `extends`, `implements` → Generic type
+
+#### 10.6.4 Disambiguation Algorithm
+
+1. **Context Check**: Is `<` in expression context?
+2. **Pattern Match**: Does following text match JSX patterns?
+3. **Lookahead**: For ambiguous cases, check for JSX continuation (`>`, `/>`, attributes)
+4. **Fallback**: If not JSX, apply generic/comparison rules
+
+#### 10.6.5 Type Assertions in JSX
+
+In JSX contexts, use `as` syntax instead of angle brackets:
+```javascript
+// Preferred in JSX contexts
+<input ref={ref as React.RefObject<HTMLInputElement>} />
+
+// Avoid (ambiguous with JSX)
+<input ref={<React.RefObject<HTMLInputElement>>ref} />
+```
 
 ### 10.7 JSX Semantics
 
@@ -848,22 +890,33 @@ function parseExpr(p = 0): Expr {
 
 ## 9) JSX parsing
 
-* **JSX trigger**: When `<` is followed by:
-  * Capital letter → JSX Component
-  * Lowercase identifier from HTML tag list → JSX HTML element
-  * `>` → JSX Fragment (`<>`)
-  * `/` → JSX closing tag
+* **JSX disambiguation**: Pattern-based recognition in expression contexts:
+  * Check if `<` is in valid JSX context (after `=`, `return`, `=>`, `?`, `:`, etc.)
+  * Apply JSX patterns from §10.6.2: Capital letter, HTML tag, `>`, `/`, qualified names
+  * Use lookahead for ambiguous cases (check for `>`, `/>`, attributes)
+  * Fallback to comparison/generic rules if not JSX
 
-* **JSX lexer mode**: Track JSX depth, switch contexts:
-  * In JSX tag: tokenize attributes, handle `{` for expressions
-  * In JSX content: preserve text, handle `{` for expressions
-  * Exit on matching `>` or `/>`
+* **JSX expression contexts**: JSX valid after:
+  * Assignment operators: `=`, `:=`
+  * Return statements: `return`
+  * Ternary operators: `?`, `:`
+  * Logical operators: `&&`, `||`
+  * Array/object literals: `[`, `{`, `,`
+  * Function calls: `(`, `,`
+  * Parentheses: `(`
+  * Arrow functions: `=>`
 
 * **JSX AST construction**:
   * Self-closing: `<Component />` → `JSXElement` with `selfClosing:true`
   * Container: Match opening/closing tags, collect children
-  * Fragments: `<>...</>` → `JSXFragment`
+  * Fragments: `<>...</>` → `JSXFragment`  
   * Spread props: `{...expr}` in attributes or children
+  * Expression containers: `{expr}` in JSX children or attribute values
+
+* **JSX lexer integration**: Parser drives JSX detection, lexer follows:
+  * Parser determines JSX context and informs lexer
+  * Lexer switches modes based on parser signals
+  * Track JSX depth for proper nesting and virtual semicolon suppression
 
 ## 10) Directives and soft keywords
 

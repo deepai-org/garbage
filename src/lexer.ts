@@ -662,23 +662,46 @@ export class Lexer {
         }
         this.context.push({ inJSXClosingTag: true });
         this.context.enterJSX();
+        // Emit JSXTagStart for closing tags too
+        this.addTokenEx(TokenType.JSXTagStart, '<', start, this.position, startLine, startColumn);
+        return;
       } else if (nextChar === '>') {
         // JSX Fragment <> - per spec
         if (this.context.canBeJSX()) {
+          this.addTokenEx(TokenType.JSXTagStart, '<', start, this.position, startLine, startColumn);
           this.context.enterJSX();
           this.context.enterJSXText();
+          return;
         }
       } else if (nextChar && /[A-Z]/.test(nextChar)) {
         // Capital letter → JSX Component - per spec
         if (this.context.canBeJSX()) {
           // Look ahead to check if this is really JSX or a generic type
           const identifier = this.peekIdentifier();
-          const charAfterIdentifier = this.source[this.position + identifier.length];
+          const posAfterIdentifier = this.position + identifier.length;
+          const charAfterIdentifier = this.source[posAfterIdentifier];
           
-          // If followed by '<', it's likely a generic type (e.g., Result<T>)
-          // If followed by space, '>', '/', or attribute-like pattern, it's likely JSX
-          if (charAfterIdentifier !== '<') {
+          // If followed by '<', need to look past generic params to determine if JSX
+          if (charAfterIdentifier === '<') {
+            const posAfterGeneric = this.peekPastGenericParams(posAfterIdentifier);
+            const afterGeneric = this.source[posAfterGeneric];
+            
+            // Check for JSX patterns after generic params
+            // JSX: <Component<T> />, <Component<T> attr=, <Component<T>>
+            // Not JSX: Result<Vec<T>, Error> (followed by comma, semicolon, etc)
+            if (afterGeneric === ' ' || afterGeneric === '/' || afterGeneric === '>' ||
+                (afterGeneric && /[a-zA-Z_]/.test(afterGeneric))) {
+              // This is JSX! Create JSXTagStart token instead of operator
+              this.addTokenEx(TokenType.JSXTagStart, '<', start, this.position, startLine, startColumn);
+              this.context.enterJSX();
+              return; // Don't continue with operator processing
+            }
+            // Else it's a generic type, continue with operator processing
+          } else {
+            // Not followed by '<', so it's regular JSX
+            this.addTokenEx(TokenType.JSXTagStart, '<', start, this.position, startLine, startColumn);
             this.context.enterJSX();
+            return; // Don't continue with operator processing
           }
         }
       } else if (nextChar && /[a-z]/.test(nextChar)) {
@@ -687,10 +710,25 @@ export class Lexer {
           // Look ahead to see if this is a valid HTML tag name
           const tagName = this.peekIdentifier();
           if (this.isHTMLTag(tagName)) {
-            // Additional check: if followed by '<', it's likely a generic, not JSX
-            const charAfterTag = this.source[this.position + tagName.length];
-            if (charAfterTag !== '<') {
+            // Additional check: if followed by '<', need to look past generic params
+            const posAfterTag = this.position + tagName.length;
+            const charAfterTag = this.source[posAfterTag];
+            
+            if (charAfterTag === '<') {
+              // HTML elements shouldn't have generic params, but check anyway
+              const posAfterGeneric = this.peekPastGenericParams(posAfterTag);
+              const afterGeneric = this.source[posAfterGeneric];
+              
+              if (afterGeneric === ' ' || afterGeneric === '/' || afterGeneric === '>' ||
+                  (afterGeneric && /[a-zA-Z_]/.test(afterGeneric))) {
+                this.addTokenEx(TokenType.JSXTagStart, '<', start, this.position, startLine, startColumn);
+                this.context.enterJSX();
+                return;
+              }
+            } else {
+              this.addTokenEx(TokenType.JSXTagStart, '<', start, this.position, startLine, startColumn);
               this.context.enterJSX();
+              return;
             }
           }
         }
@@ -1033,6 +1071,28 @@ export class Lexer {
       pos++;
     }
     return result;
+  }
+  
+  private peekPastGenericParams(startPos: number): number {
+    // Given a position after an identifier followed by '<', 
+    // find the position after the matching '>' of generic params
+    let pos = startPos;
+    if (this.source[pos] !== '<') return pos;
+    
+    let depth = 1;
+    pos++; // Skip initial '<'
+    
+    while (pos < this.source.length && depth > 0) {
+      const char = this.source[pos];
+      if (char === '<') {
+        depth++;
+      } else if (char === '>') {
+        depth--;
+      }
+      pos++;
+    }
+    
+    return pos; // Position after the closing '>'
   }
   
   private isHTMLTag(tagName: string): boolean {

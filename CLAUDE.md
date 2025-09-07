@@ -4,9 +4,12 @@
 PolyScript is a universal parser that handles multiple programming language syntaxes in a single file.
 
 ## Current Status
-- **342/354 tests passing (96.6% pass rate)**
+- **344/354 tests passing (97.2% pass rate)**
 - Major improvements in type parsing and multi-paradigm support
-- 12 tests failing - edge cases with specific language combinations
+- Rust-style syntax fully supported (::, async move, .await, ? try operator)
+- Match statements with multiple arms working correctly
+- Deep nested generic types and complex expressions parsing successfully
+- 10 tests failing - edge cases with specific language combinations
 
 ## Quick Debugging Commands
 ```bash
