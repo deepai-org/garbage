@@ -203,8 +203,8 @@ let v = <-c
       const code = `let d: chan<Result<Foo<Bar>, Error>>`;
       const ast = parseCode(code);
       
-      const letDecl = ast.body[0] as AST.VarDecl;
-      const chanType = (letDecl as any).decls[0].type;
+      const varDecl = ast.body[0] as AST.VarDecl;
+      const chanType = (varDecl as any).type;
       verifyGenericType(chanType, 'chan', 1);
       
       // Verify nested Result type
@@ -277,13 +277,13 @@ let y = (<number>x) * 2
       const code = `let r = foo<Bar<Baz<Qux<chan<List<Result<A, B>>>>>>>(x)`;
       const ast = parseCode(code);
       
-      const letDecl = ast.body[0] as AST.VarDecl;
-      const call = (letDecl as any).decls[0].init as AST.Call;
+      const varDecl = ast.body[0] as AST.VarDecl;
+      const call = (varDecl as any).values[0] as AST.Call;
       expect(call.kind).toBe('Call');
-      expect((call as any).typeArgs).toHaveLength(1);
+      expect((call as any).genericArgs).toHaveLength(1);
       
       // Verify deep nesting
-      let current = (call as any).typeArgs[0] as AST.GenericType;
+      let current = (call as any).genericArgs[0] as AST.GenericType;
       const expectedTypes = ['Bar', 'Baz', 'Qux', 'chan', 'List', 'Result'];
       
       for (const expectedType of expectedTypes.slice(0, -1)) {
