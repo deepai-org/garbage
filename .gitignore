@@ -14,6 +14,7 @@ test-output.txt
 test-debug*.js
 test-function-type.js
 test-object.js
+debug-tests/
 
 # IDE
 .vscode/
