@@ -1,1 +1,0 @@
-const { Lexer } = require('./dist/lexer'); const { Parser } = require('./dist/parser'); const code = `<input type="text" />`; const lexer = new Lexer(code); const tokens = lexer.tokenize(); const parser = new Parser(tokens); parser.current = 0; console.log('isInJSXExpressionContext():', parser.isInJSXExpressionContext()); console.log('isJSXElement():', parser.isJSXElement());

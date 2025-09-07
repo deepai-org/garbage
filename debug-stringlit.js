@@ -1,1 +1,0 @@
-const { Lexer } = require('./dist/lexer'); const code = `<Result<Vec<T>, Error>>`; const lexer = new Lexer(code); const tokens = lexer.tokenize(); tokens.forEach((t, i) => { if (t.type === 'StringLiteral') console.log(`Token ${i}: type=${t.type}, value='${t.value}', length=${t.value.length}, charCodes=${[...t.value].map(c => c.charCodeAt(0))}`); });

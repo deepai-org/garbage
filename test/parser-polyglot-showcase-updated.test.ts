@@ -188,18 +188,6 @@ server.start()
 
     const ast = parseCode(code);
     
-    // Debug output
-    const lexer = new Lexer(code);
-    const tokens = lexer.tokenize();
-    const parser = new Parser(tokens);
-    const ast2 = parser.parse();
-    const errors = parser.getErrors();
-    console.log('Parser errors:', errors.length);
-    if (errors.length > 0) {
-      console.log('First 3 errors:', errors.slice(0, 3).map(e => `${e.message} at "${e.token.value}"`));
-    }
-    console.log('AST body length:', ast2.body.length);
-    
     // ✅ STRONG: Verify class structure
     expect(ast.body.length).toBeGreaterThanOrEqual(2);
     const cls = ast.body[0] as AST.ClassDecl;
@@ -212,8 +200,8 @@ server.start()
     );
     expect(constructor).toBeDefined();
     
-    // Find methods in class
-    const methods = cls.members.filter((m: any) => m.kind === 'Method' || m.kind === 'Constructor');
+    // Find methods in class (including Ruby-style def which are FuncDecl)
+    const methods = cls.members.filter((m: any) => m.kind === 'Method' || m.kind === 'Constructor' || m.kind === 'FuncDecl');
     expect(methods.length).toBeGreaterThanOrEqual(3); // constructor, use, handle, start
     
     // Verify async handle method with generic

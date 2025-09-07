@@ -1,1 +1,0 @@
-const { Lexer } = require('./dist/lexer'); const { Parser } = require('./dist/parser'); const code = `try { unsafe() } rescue (e) { puts e }`; const lexer = new Lexer(code); const tokens = lexer.tokenize(); const parser = new Parser(tokens); const ast = parser.parse(); console.log('Body:', ast.body.length); console.log('Errors:', parser.errors.map(e => e.message));

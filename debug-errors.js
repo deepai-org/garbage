@@ -1,1 +1,0 @@
-const { Lexer } = require('./dist/lexer'); const { Parser } = require('./dist/parser'); const code = `<Result<Vec<T>, Error>>{ok: true}`; const lexer = new Lexer(code); const tokens = lexer.tokenize(); const parser = new Parser(tokens); parser.errors = []; const ast = parser.parse(); console.log('Parse errors:', parser.errors); console.log('Body length:', ast.body.length);

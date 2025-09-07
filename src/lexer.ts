@@ -934,6 +934,15 @@ export class Lexer {
   }
   
   private shouldSuppressVirtualSemi(current: Token, next: Token, inJSX: boolean = false): boolean {
+    // Special case: Some keywords should always have a virtual semicolon after them
+    // when they appear alone on a line (no expression following on same line)
+    // This takes precedence even over JSX context since these keywords can't appear in JSX expressions
+    const alwaysTerminateKeywords = ['return', 'break', 'continue', 'throw', 'yield'];
+    if (current.type === TokenType.Keyword && alwaysTerminateKeywords.includes(current.value)) {
+      // These keywords alone on a line always get a virtual semicolon
+      return false;
+    }
+    
     // Rule 0: Never insert virtual semicolons inside JSX content
     if (inJSX) {
       return true;
