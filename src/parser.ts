@@ -4161,6 +4161,25 @@ export class Parser {
   private parseSimpleType(): AST.TypeNode {
     const start = this.current;
     
+    // Array type prefix: []Type
+    if (this.check("[") && this.peekNext()?.value === "]") {
+      this.advance(); // consume [
+      this.advance(); // consume ]
+      const elementType = this.parseSimpleType();
+      
+      // Return as a GenericType Array<Type> for compatibility
+      return {
+        kind: "GenericType",
+        base: { 
+          kind: "Identifier", 
+          name: "Array",
+          span: this.createSpan(start, start + 1)
+        },
+        args: [elementType],
+        span: this.createSpan(start, this.current - 1)
+      };
+    }
+    
     // String literal type
     if (this.peek().type === TokenType.StringLiteral) {
       const literal = this.advance();
