@@ -4528,6 +4528,15 @@ export class Parser {
       } while (this.match(","));
     }
     
+    // Parse with clause (mixins/traits)
+    let withTypes: AST.TypeNode[] | undefined;
+    if (this.match("with")) {
+      withTypes = [];
+      do {
+        withTypes.push(this.parseType());
+      } while (this.match(","));
+    }
+    
     // Parse class body - handle both { } and Python-style :
     const members: AST.ClassMember[] = [];
     let isPythonStyle = false;
@@ -5031,6 +5040,14 @@ export class Parser {
     // Only consume closing brace for non-Python style
     if (!isPythonStyle) {
       this.consume("}", "Expected '}' after class body");
+    }
+    
+    // Merge withTypes into implementsTypes since AST doesn't have separate field
+    if (withTypes && withTypes.length > 0) {
+      if (!implementsTypes) {
+        implementsTypes = [];
+      }
+      implementsTypes.push(...withTypes);
     }
     
     const classDecl: AST.ClassDecl = {
