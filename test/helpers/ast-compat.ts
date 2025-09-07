@@ -267,16 +267,38 @@ export function normalizeTryStmt(stmt: any): any {
   return stmt;
 }
 
-// Switch statement compatibility - map discriminant to expr
+// Switch statement compatibility - map discriminant to expr and merge defaultCase
 export function normalizeSwitchStmt(stmt: any): any {
   if (!stmt) return stmt;
+  
+  let result = stmt;
+  
+  // Map discriminant to expr if needed
   if (stmt.discriminant && !stmt.expr) {
-    return {
-      ...stmt,
+    result = {
+      ...result,
       expr: stmt.discriminant
     };
   }
-  return stmt;
+  
+  // If there's a separate defaultCase, merge it into cases array
+  if (stmt.defaultCase && stmt.cases) {
+    const cases = [...stmt.cases];
+    // Add default case to the array with isDefault flag
+    // The defaultCase is already a Block, so use it as the body
+    cases.push({
+      isDefault: true,
+      value: null,
+      patterns: [],
+      body: stmt.defaultCase // defaultCase is already a Block with statements
+    });
+    result = {
+      ...result,
+      cases
+    };
+  }
+  
+  return result;
 }
 
 // Export all compatibility helpers
