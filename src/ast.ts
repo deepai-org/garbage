@@ -14,6 +14,7 @@ export type TypeNode =
   | FuncType
   | ChanType
   | ImplType
+  | DynType
   | IndexedAccessType;
 
 export interface SimpleType {
@@ -57,6 +58,12 @@ export interface ChanType {
 
 export interface ImplType {
   kind: "ImplType";
+  trait: TypeNode;
+  span: Span;
+}
+
+export interface DynType {
+  kind: "DynType";
   trait: TypeNode;
   span: Span;
 }

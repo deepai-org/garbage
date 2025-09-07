@@ -2343,10 +2343,6 @@ export class Parser {
     if (this.match("->")) {
       // Arrow notation always indicates return type
       returnType = this.parseType();
-      // After parsing return type, check for Python-style colon
-      if (!this.check(":") && !this.check("{") && !this.check("=>")) {
-        // If no block starter follows, this might be an error
-      }
     } else if (this.check(":")) {
       // Colon could be either type annotation or Python-style block
       // Check if next token after colon indicates an indent block
@@ -4269,11 +4265,45 @@ export class Parser {
           span: this.createSpan(start, this.current - 1)
         };
       } else {
-        // Not a function type - it's a parenthesized type expression
+        // Not a function type - it's a parenthesized type or tuple type
         this.advance(); // consume '('
-        const type = this.parseType();
-        this.consume(")", "Expected ')' after parenthesized type");
-        return type;
+        
+        // Check for empty tuple
+        if (this.check(")")) {
+          this.advance();
+          // Return empty tuple as a simple type
+          return {
+            kind: "SimpleType",
+            id: { kind: "Identifier", name: "()", span: this.createSpan(start, this.current - 1) },
+            span: this.createSpan(start, this.current - 1)
+          };
+        }
+        
+        const firstType = this.parseType();
+        
+        // Check if this is a tuple type (has comma)
+        if (this.match(",")) {
+          const elements: AST.TypeNode[] = [firstType];
+          do {
+            elements.push(this.parseType());
+          } while (this.match(","));
+          
+          this.consume(")", "Expected ')' after tuple type");
+          
+          // Create a string representation of the tuple for compatibility
+          // Since we don't have a TupleType in AST, represent as SimpleType
+          const tupleStr = `(${elements.map(e => this.typeNodeToString(e)).join(", ")})`;
+          
+          return {
+            kind: "SimpleType",
+            id: { kind: "Identifier", name: tupleStr, span: this.createSpan(start, this.current - 1) },
+            span: this.createSpan(start, this.current - 1)
+          };
+        } else {
+          // Single parenthesized type
+          this.consume(")", "Expected ')' after parenthesized type");
+          return firstType;
+        }
       }
     }
     
@@ -4319,6 +4349,16 @@ export class Parser {
       };
     }
     
+    // Handle "dyn Trait" pattern (Rust-style trait objects)
+    if (qualifiedId.name === "dyn" && this.peek().type === TokenType.Identifier) {
+      const traitType = this.parseSimpleType();
+      return {
+        kind: "DynType",
+        trait: traitType,
+        span: this.createSpan(start, this.current - 1)
+      };
+    }
+    
     // Special handling for chan<T> syntax
     if (qualifiedId.name === "chan") {
       if (this.check("<")) {
@@ -4358,7 +4398,21 @@ export class Parser {
       
       if (!this.check(closeBracket)) {
         do {
-          args.push(this.parseType());
+          // Check for associated type constraint (e.g., Item = V in Rust)
+          const checkpoint = this.current;
+          const firstType = this.parseType();
+          
+          // Check if this is an associated type constraint
+          if (this.check("=") && firstType.kind === "SimpleType") {
+            // This is an associated type constraint like "Item = V"
+            this.advance(); // consume '='
+            const constraintType = this.parseType();
+            // For now, treat the whole constraint as a special type
+            // We'll just use the constraint type since we don't have full support
+            args.push(constraintType);
+          } else {
+            args.push(firstType);
+          }
         } while (this.match(","));
       }
       
@@ -6233,6 +6287,10 @@ export class Parser {
         return `${type.base.name}<${type.args.map(a => this.typeNodeToString(a)).join(", ")}>`;
       case "FuncType":
         return `(${type.params.map(p => this.typeNodeToString(p)).join(", ")}) => ${this.typeNodeToString(type.ret)}`;
+      case "ImplType":
+        return `impl ${this.typeNodeToString(type.trait)}`;
+      case "DynType":
+        return `dyn ${this.typeNodeToString(type.trait)}`;
       default:
         return "unknown";
     }
