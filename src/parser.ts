@@ -1493,33 +1493,51 @@ export class Parser {
         
         // Try type assertion <Type>expr
         const checkpoint = this.current;
+        const DEBUG_TYPE_ASSERTION = false;
+        if (DEBUG_TYPE_ASSERTION) console.log('Trying type assertion at position', this.current);
         this.advance(); // consume '<'
         
-        // Try to parse the type
-        const typeStart = this.current;
-        if (this.match("Identifier")) {
-          const typeName = this.tokens[this.current - 1].value;
+        // Try to parse a type (which could be a complex generic type)
+        try {
+          const type = this.parseType();
+          if (DEBUG_TYPE_ASSERTION) console.log('Parsed type:', type.kind, 'now at token:', this.peek().value);
           
-          // Look for closing '>'
-          if (this.match(">")) {
-            // Parse the expression after the type assertion
-            const expr = this.parsePrimary();
-            const type: AST.SimpleType = {
-              kind: "SimpleType",
-              id: { kind: "Identifier", name: typeName, span: this.createSpan(typeStart, typeStart) },
-              span: this.createSpan(typeStart, this.current - 1)
-            };
-            return {
-              kind: "TypeAssertion",
-              expr,
-              type,
-              span: this.createSpan(checkpoint, this.current - 1)
-            };
+          // Look for closing '>' - for generic types, this is already consumed
+          // For simple types, we need to consume it
+          // Also handle >> token that might remain after generic parsing
+          if (this.peek().value === ">") {
+            this.advance();
+          } else if (this.peek().value === ">>") {
+            // Split >> into two > tokens for proper handling
+            this.advance(); // consume >>
+            // Inject a synthetic > token back
+            const syntheticToken = { ...this.tokens[this.current - 1] };
+            syntheticToken.value = ">";
+            this.tokens.splice(this.current, 0, syntheticToken);
+          }
+          
+          // Now we should have a complete type, parse the expression
+          // But first check we're at a valid position for an expression
+          if (this.isAtEnd() || this.peek().type === TokenType.EOF) {
+            throw new Error("Expected expression after type assertion");
+          }
+          const expr = this.parsePrimary();
+          
+          return {
+            kind: "TypeAssertion",
+            expr,
+            type,
+            span: this.createSpan(checkpoint, this.current - 1)
+          };
+        } catch (e) {
+          if (DEBUG_TYPE_ASSERTION) console.log('Type assertion failed:', e instanceof Error ? e.message : e);
+          // Not a valid type assertion, restore position
+          this.current = checkpoint;
+          // Re-throw if it's not a parsing error we can recover from
+          if (e instanceof Error && e.message && !e.message.includes("Unexpected")) {
+            throw e;
           }
         }
-        
-        // Not a type assertion, restore position
-        this.current = checkpoint;
       }
     }
     
@@ -4605,6 +4623,11 @@ export class Parser {
           syntheticToken.value = ">>";
           this.tokens.splice(this.current, 0, syntheticToken);
         } else {
+          // Debug: log what token we actually have
+          const actualToken = this.peek();
+          if (actualToken.value !== ">") {
+            throw this.error(actualToken, `Expected '>' but got '${actualToken.value}'`);
+          }
           this.consume(">", "Expected '>'");
         }
       } else {

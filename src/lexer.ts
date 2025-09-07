@@ -67,6 +67,19 @@ export class Lexer {
   private jsxDepth = 0;  // Track JSX nesting depth for virtual semicolon suppression
   private context: ContextTracker;  // New context tracker
   
+  // HTML tag names for JSX detection per spec
+  private readonly htmlTags = new Set([
+    'div', 'span', 'p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'li',
+    'a', 'img', 'input', 'button', 'form', 'section', 'article', 'header', 'footer',
+    'nav', 'main', 'aside', 'table', 'tr', 'td', 'th', 'tbody', 'thead', 'tfoot',
+    'select', 'option', 'textarea', 'label', 'fieldset', 'legend', 'canvas', 'video',
+    'audio', 'source', 'track', 'embed', 'object', 'iframe', 'script', 'style',
+    'meta', 'link', 'title', 'head', 'body', 'html', 'strong', 'em', 'b', 'i',
+    'small', 'mark', 'del', 'ins', 'sub', 'sup', 'code', 'pre', 'kbd', 'samp',
+    'var', 'time', 'data', 'address', 'cite', 'q', 'abbr', 'dfn', 'ruby', 'rt',
+    'rp', 'bdi', 'bdo', 'wbr', 'details', 'summary', 'dialog', 'menu'
+  ]);
+  
   constructor(source: string) {
     this.source = source;
     this.context = new ContextTracker();  // Initialize context tracker
@@ -638,37 +651,48 @@ export class Lexer {
     const startColumn = this.column - 1;
     let value = this.source[start];
     
-    // Handle JSX context detection for '<' and '>'
+    // Handle JSX context detection for '<' and '>' per spec 10.6
     if (value === '<') {
       const nextChar = this.peek();
+      
       if (nextChar === '/') {
-        // This is closing tag </tagname> - exit JSX text and mark as closing
+        // JSX closing tag </tagname> - per spec
         if (this.context.isInJSXText()) {
           this.context.exitJSXText();
         }
-        // Set flag to indicate we're in a closing tag
         this.context.push({ inJSXClosingTag: true });
-      } else if (nextChar && (/[a-zA-Z_]/.test(nextChar) || nextChar === '>')) {
-        // Check if this should be JSX or generic based on context
-        if (this.context.canBeJSX() && !this.context.canBeGeneric()) {
-          // Strong JSX context, weak generic context
+        this.context.enterJSX();
+      } else if (nextChar === '>') {
+        // JSX Fragment <> - per spec
+        if (this.context.canBeJSX()) {
           this.context.enterJSX();
-          if (nextChar === '>') {
-            this.context.enterJSXText();
-          }
-        } else if (this.context.canBeGeneric() && !this.context.canBeJSX()) {
-          // Strong generic context, weak JSX context
-          // Generic will be handled in updateTypeContext
-        } else {
-          // Ambiguous context - use heuristics
-          // JSX elements typically have lowercase names or fragments
-          if (nextChar === '>' || (nextChar >= 'a' && nextChar <= 'z')) {
+          this.context.enterJSXText();
+        }
+      } else if (nextChar && /[A-Z]/.test(nextChar)) {
+        // Capital letter → JSX Component - per spec
+        if (this.context.canBeJSX()) {
+          // Look ahead to check if this is really JSX or a generic type
+          const identifier = this.peekIdentifier();
+          const charAfterIdentifier = this.source[this.position + identifier.length];
+          
+          // If followed by '<', it's likely a generic type (e.g., Result<T>)
+          // If followed by space, '>', '/', or attribute-like pattern, it's likely JSX
+          if (charAfterIdentifier !== '<') {
             this.context.enterJSX();
-            if (nextChar === '>') {
-              this.context.enterJSXText();
+          }
+        }
+      } else if (nextChar && /[a-z]/.test(nextChar)) {
+        // Lowercase identifier → potential HTML element - per spec
+        if (this.context.canBeJSX()) {
+          // Look ahead to see if this is a valid HTML tag name
+          const tagName = this.peekIdentifier();
+          if (this.isHTMLTag(tagName)) {
+            // Additional check: if followed by '<', it's likely a generic, not JSX
+            const charAfterTag = this.source[this.position + tagName.length];
+            if (charAfterTag !== '<') {
+              this.context.enterJSX();
             }
           }
-          // Otherwise assume generic and let updateTypeContext handle it
         }
       }
     } else if (value === '>' && this.context.isInJSX()) {
@@ -995,6 +1019,24 @@ export class Lexer {
   private peekAt(offset: number): string {
     if (this.position + offset >= this.source.length) return '\0';
     return this.source[this.position + offset];
+  }
+  
+  private peekIdentifier(): string {
+    let pos = this.position;
+    if (!this.source[pos] || !/[a-zA-Z_]/.test(this.source[pos])) {
+      return '';
+    }
+    
+    let result = '';
+    while (pos < this.source.length && /[a-zA-Z0-9_]/.test(this.source[pos])) {
+      result += this.source[pos];
+      pos++;
+    }
+    return result;
+  }
+  
+  private isHTMLTag(tagName: string): boolean {
+    return this.htmlTags.has(tagName.toLowerCase());
   }
   
   private isAtEnd(): boolean {
