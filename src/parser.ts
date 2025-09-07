@@ -580,6 +580,17 @@ export class Parser {
       return this.parseBeginBlock();
     }
     
+    // Check for short declarations (Go-style :=)
+    if (this.peek().type === TokenType.Identifier) {
+      const checkpoint = this.current;
+      this.advance();
+      if (this.check(":=")) {
+        this.current = checkpoint;
+        return this.parseShortDecl() as any; // ShortDecl can be used as a statement
+      }
+      this.current = checkpoint;
+    }
+    
     // Block statements - but could also be object destructuring
     if (this.check("{")) {
       // Look ahead to see if this is object destructuring
