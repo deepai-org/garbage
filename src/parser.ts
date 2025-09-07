@@ -638,6 +638,7 @@ export class Parser {
     if (this.match("{")) {
       this.braceDepth++;
       const statements: (AST.Decl | AST.Stmt)[] = [];
+      const debugBlockParsing = false; // Debug flag for entire block
       
       let loopCount = 0;
       while (!this.check("}") && !this.isAtEnd()) {
@@ -659,16 +660,36 @@ export class Parser {
           // but we should use parseStatement/parseDeclaration directly
           // rather than parseTopLevel which has module-level specific behavior
           let stmt: AST.Decl | AST.Stmt | null = null;
+          if (debugBlockParsing && (this.peek().value === "using" || this.peek().value === "defer")) {
+            console.log(`[DEBUG] Block parsing at ${this.current}: "${this.peek().value}"`);
+            console.log(`[DEBUG] isDeclStart: ${this.isDeclStart()}`);
+          }
           
           if (this.isDeclStart()) {
             stmt = this.parseDeclaration();
           } else if (!this.check("}")) {
+            if (debugBlockParsing) {
+              console.log(`[DEBUG] Calling parseStatement() for "${this.peek().value}"`);
+            }
             stmt = this.parseStatement();
+            if (debugBlockParsing) {
+              console.log(`[DEBUG] parseStatement() returned:`, stmt ? stmt.kind : 'null');
+            }
           }
           
-          if (stmt) statements.push(stmt);
+          if (stmt) {
+            statements.push(stmt);
+            if (debugBlockParsing && stmt.kind) {
+              console.log(`[DEBUG] Added statement: ${stmt.kind}`);
+            }
+          } else if (debugBlockParsing) {
+            console.log(`[DEBUG] No statement returned for "${this.tokens[beforePos]?.value}"`);
+          }
         } catch (error) {
           if (error instanceof ParseError) {
+            if (debugBlockParsing) {
+              console.log(`[DEBUG] ParseError caught in block: ${error.message}`);
+            }
             this.errors.push(error);
             this.synchronize();
           } else {
@@ -1559,7 +1580,9 @@ export class Parser {
             next.type === TokenType.Identifier) {
           const genericArgs = this.tryParseGenericArgs();
           if (genericArgs) {
-            // This would be handled in type context
+            // Store generic arguments for potential call expression
+            // This will be picked up by parsePostfix if followed by ()
+            (id as any)._genericArgs = genericArgs;
           }
         }
       }
@@ -1648,20 +1671,8 @@ export class Parser {
   }
   
   private parsePostfix(expr: AST.Expr): AST.Expr {
-    // First check for generic arguments before entering the loop
-    // This handles cases like forwardRef<T>() where the identifier is immediately followed by generics
-    if (this.check("<") && !this.check("<-") && !this.check("<<") && !this.check("<=")) {
-      const checkpoint = this.current;
-      const genericArgs = this.tryParseGenericArgs();
-      
-      if (genericArgs) {
-        // Store generic arguments for the next call expression
-        (expr as any)._genericArgs = genericArgs;
-      } else {
-        // Not generic arguments, restore position
-        this.current = checkpoint;
-      }
-    }
+    // Note: Generic arguments are now parsed in parsePrimary and attached to the identifier
+    // They will be in expr._genericArgs if present
     
     while (true) {
       // Check for generic arguments after member access (e.g., React.forwardRef<T1, T2>)
@@ -1755,6 +1766,91 @@ export class Parser {
           // Clean up the temporary storage
           delete (expr as any)._genericArgs;
         }
+        
+        expr = callExpr;
+        
+        // Check for Ruby block after function call
+        if (this.check("do")) {
+          const blockStart = this.current;
+          this.advance(); // consume 'do'
+          
+          // Parse block parameters if present |x, y|
+          let blockParams: AST.Identifier[] = [];
+          if (this.match("|")) {
+            do {
+              blockParams.push(this.parseIdentifier());
+            } while (this.match(","));
+            this.consume("|", "Expected '|' after block parameters");
+          }
+          
+          // Parse block body until 'end'
+          const blockStatements: (AST.Stmt | AST.Decl)[] = [];
+          while (!this.isAtEnd() && this.peek().value !== "end") {
+            if (this.peek().virtualSemi) {
+              this.advance();
+              continue;
+            }
+            
+            const stmt = this.parseStatement();
+            if (stmt) blockStatements.push(stmt);
+          }
+          
+          this.consume("end", "Expected 'end' to close Ruby block");
+          
+          // Add block as a special property on the call (not in standard AST)
+          (callExpr as any).rubyBlock = {
+            params: blockParams,
+            body: blockStatements,
+            span: this.createSpan(blockStart, this.current - 1)
+          };
+        }
+        
+        continue;
+      }
+      
+      // Check for Ruby block after member access (Ruby method calls without parens)
+      // e.g., items.each do |item| ... end
+      if (this.check("do") && expr.kind === "Member") {
+        // Convert the member access to a call with no arguments
+        const callExpr: AST.Call = {
+          kind: "Call",
+          callee: expr,
+          args: [],
+          span: expr.span
+        };
+        
+        const blockStart = this.current;
+        this.advance(); // consume 'do'
+        
+        // Parse block parameters if present |x, y|
+        let blockParams: AST.Identifier[] = [];
+        if (this.match("|")) {
+          do {
+            blockParams.push(this.parseIdentifier());
+          } while (this.match(","));
+          this.consume("|", "Expected '|' after block parameters");
+        }
+        
+        // Parse block body until 'end'
+        const blockStatements: (AST.Stmt | AST.Decl)[] = [];
+        while (!this.isAtEnd() && this.peek().value !== "end") {
+          if (this.peek().virtualSemi) {
+            this.advance();
+            continue;
+          }
+          
+          const stmt = this.parseStatement();
+          if (stmt) blockStatements.push(stmt);
+        }
+        
+        this.consume("end", "Expected 'end' to close Ruby block");
+        
+        // Add block as a special property on the call
+        (callExpr as any).rubyBlock = {
+          params: blockParams,
+          body: blockStatements,
+          span: this.createSpan(blockStart, this.current - 1)
+        };
         
         expr = callExpr;
         continue;
@@ -2213,6 +2309,9 @@ export class Parser {
   private parseFuncDecl(async = false, unsafe = false, generator = false): AST.FuncDecl {
     const start = this.current - 1;
     
+    // Check if this is a Ruby-style def
+    const isRubyDef = this.tokens[start]?.value === "def";
+    
     const name = this.parseIdentifier();
     
     // Parse generic parameters if present
@@ -2225,7 +2324,18 @@ export class Parser {
       this.consume(">", "Expected '>' after generic parameters");
     }
     
-    const params = this.parseParameterList();
+    // For Ruby def, parameters are optional (can be without parentheses)
+    let params: AST.Param[] = [];
+    if (this.check("(")) {
+      params = this.parseParameterList();
+    } else if (isRubyDef && !this.check(":") && !this.check("{") && 
+               !this.check("=>") && !this.peek().virtualSemi) {
+      // Ruby allows parameters without parentheses: def foo bar, baz
+      // Parse parameters until we hit a delimiter
+      do {
+        params.push(this.parseParameter());
+      } while (this.match(","));
+    }
     
     let returnType: AST.TypeNode | undefined;
     
@@ -2286,13 +2396,21 @@ export class Parser {
       }
     } else if (this.check("{")) {
       body = this.parseBlock();
-    } else {
-      // Ruby-style def without braces - parse until 'end'
+    } else if (isRubyDef) {
+      // Ruby-style def without braces - parse until matching 'end'
       const statements: (AST.Decl | AST.Stmt)[] = [];
-      while (!this.check("end") && !this.isAtEnd()) {
+      
+      while (!this.isAtEnd()) {
         if (this.peek().virtualSemi) {
           this.advance();
           continue;
+        }
+        
+        // Check if we've reached the function's closing 'end'
+        if (this.peek().value === "end") {
+          // This should be the function's end since Ruby blocks are now parsed
+          // as part of expressions (e.g., items.each do...end)
+          break;
         }
         
         try {
@@ -2315,6 +2433,24 @@ export class Parser {
         statements,
         span: this.createSpan(start, this.current - 1)
       };
+    } else {
+      // Default: try to parse a block or single statement
+      if (this.peek().virtualSemi || this.isAtEnd()) {
+        // No body provided
+        body = {
+          kind: "Block",
+          statements: [],
+          span: this.createSpanFrom(this.previous() || { span: { start: 0, end: 0, line: 0, column: 0 } })
+        };
+      } else {
+        // Try to parse as a single expression or statement
+        const stmt = this.parseStatement();
+        body = {
+          kind: "Block",
+          statements: stmt ? [stmt] : [],
+          span: this.createSpanFrom(stmt || this.previous())
+        };
+      }
     }
     
     return {
@@ -3524,8 +3660,8 @@ export class Parser {
       resource = expr;
     }
     
-    // Parse body - check for Python-style colon
-    let body: AST.Block;
+    // Parse body - check for Python-style colon or explicit block
+    let body: AST.Block | undefined;
     if (this.match(":")) {
       if (this.checkIndentBlock()) {
         body = this.parseIndentBlock();
@@ -3538,8 +3674,17 @@ export class Parser {
           span: stmt.span
         };
       }
-    } else {
+    } else if (this.check("{")) {
+      // Explicit block
       body = this.parseBlock();
+    } else {
+      // C#-style using without explicit body - applies to rest of scope
+      // Create an empty block placeholder
+      body = {
+        kind: "Block",
+        statements: [],
+        span: this.createSpan(this.current, this.current)
+      };
     }
     
     return {
@@ -4484,9 +4629,78 @@ export class Parser {
         // Handle property declarations and methods
         // Allow keywords as method names (e.g., 'match' can be a method name)
         if (this.peek().type === TokenType.Identifier || this.peek().type === TokenType.Keyword) {
+          // Check if this might be a C# property with type first: public Type Name { get; set; }
+          // We need to look ahead to distinguish between:
+          // - public string Title { get; set; }  (C# property)
+          // - public Title { ... }  (field/method named Title)
+          
+          let fieldType: AST.TypeNode | undefined;
+          let name: AST.Identifier;
+          
+          // Save position for potential backtracking
+          const checkpoint = this.current;
+          
+          // Try to parse as type + name pattern
+          if (visibility) {
+            // After visibility modifier, check if next two tokens could be type + name
+            const firstToken = this.peek();
+            const secondToken = this.peekNext();
+            
+            if (firstToken && secondToken && 
+                (firstToken.type === TokenType.Identifier || firstToken.type === TokenType.Keyword) &&
+                secondToken.type === TokenType.Identifier &&
+                this.peekAt(2)?.value === "{") {
+              // Check if the third token is { and fourth is "get" or "set"
+              const thirdToken = this.peekAt(2);
+              const fourthToken = this.peekAt(3);
+              
+              if (thirdToken?.value === "{" && 
+                  (fourthToken?.value === "get" || fourthToken?.value === "set")) {
+                // This looks like a C# property: type name { get/set; }
+                // Parse the type
+                fieldType = this.parseType();
+                // Parse the name
+                name = this.parseIdentifier();
+                
+                // Now handle the { get; set; } part
+                if (this.match("{")) {
+                  // Parse property accessors
+                  while (!this.check("}") && !this.isAtEnd()) {
+                    if (this.match("get", "set")) {
+                      // Consume the accessor keyword
+                      // Check for semicolon or block
+                      if (this.match(";")) {
+                        // Auto-property
+                      } else if (this.check("{")) {
+                        // Property with body - skip it
+                        this.parseBlock();
+                      }
+                    } else {
+                      // Skip unexpected tokens
+                      this.advance();
+                    }
+                  }
+                  this.consume("}", "Expected '}' after property accessors");
+                  
+                  // Create a property field
+                  members.push({
+                    kind: "Field",
+                    name,
+                    type: fieldType,
+                    span: this.createSpan(memberStart, this.current - 1)
+                  } as any);
+                  continue;
+                }
+              } else {
+                // Not a C# property, parse normally
+                this.current = checkpoint;
+              }
+            }
+          }
+          
           // Parse method/field name - allow keywords as identifiers in this context
           const nameToken = this.advance();
-          const name: AST.Identifier = {
+          name = {
             kind: "Identifier",
             name: nameToken.value,
             span: this.createSpanFrom(nameToken)
