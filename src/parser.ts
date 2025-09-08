@@ -5344,7 +5344,9 @@ export class Parser {
         
         // Handle property declarations and methods
         // Allow keywords as method names (e.g., 'match' can be a method name)
-        if (this.peek().type === TokenType.Identifier || this.peek().type === TokenType.Keyword) {
+        // Also handle cases where we have decorators but no other modifiers
+        if ((visibility || isStatic || isReadonly || memberDecorators.length > 0) && 
+            (this.peek().type === TokenType.Identifier || this.peek().type === TokenType.Keyword)) {
           // Check if this might be a C# property with type first: public Type Name { get; set; }
           // We need to look ahead to distinguish between:
           // - public string Title { get; set; }  (C# property)
@@ -5470,28 +5472,35 @@ export class Parser {
               }
             }
             
-            // Method body - handle both block and arrow function
-            let body: AST.Block;
-            try {
-              if (this.match("=>")) {
-                // Arrow function body
-                const expr = this.parseExpression();
-                body = {
-                  kind: "Block",
-                  statements: [{
-                    kind: "Return",
-                    values: [expr],
+            // Method body - handle both block and arrow function  
+            // But first check if this is just a signature (ends with semicolon)
+            let body: AST.Block | undefined;
+            
+            if (this.check(";") || (this.checkSemicolon() && !this.check("{"))) {
+              // Method signature without implementation
+              this.consumeSemicolon();
+              body = undefined;
+            } else {
+              try {
+                if (this.match("=>")) {
+                  // Arrow function body
+                  const expr = this.parseExpression();
+                  body = {
+                    kind: "Block",
+                    statements: [{
+                      kind: "Return",
+                      values: [expr],
+                      span: expr.span
+                    }],
                     span: expr.span
-                  }],
-                  span: expr.span
-                };
-              } else {
-                body = this.parseBlock();
-              }
-            } catch (error) {
-              // If parsing the method body fails, create an empty block
-              // and try to skip to the closing brace
-              if (error instanceof ParseError) {
+                  };
+                } else {
+                  body = this.parseBlock();
+                }
+              } catch (error) {
+                // If parsing the method body fails, create an empty block
+                // and try to skip to the closing brace
+                if (error instanceof ParseError) {
                 this.errors.push(error);
                 
                 // Skip to the matching closing brace
@@ -5519,7 +5528,8 @@ export class Parser {
                   span: this.createSpan(memberStart, this.current - 1)
                 };
               } else {
-                throw error;
+                  throw error;
+                }
               }
             }
             
@@ -5565,23 +5575,24 @@ export class Parser {
             
             // Check if this might be a method signature without implementation
             if (this.check("(")) {
-              // It's actually a method: name: ReturnType(params) - skip for now
-              while (!this.isAtEnd() && !this.checkSemicolon() && !this.check("}")) {
-                this.advance();
-              }
-            } else {
-              const member: any = {
-                kind: "Field",
-                name,
-                type,
-                value,
-                span: this.createSpan(memberStart, this.current - 1)
-              };
-              if (memberDecorators.length > 0) {
-                member.decorators = memberDecorators;
-              }
-              members.push(member);
+              // It's actually a method signature like: methodName: ReturnType(params)
+              // But this is an unusual syntax - normally it would be methodName(params): ReturnType
+              // For now, treat it as a field with a function type
+              // Note: This might need adjustment based on language spec
             }
+            
+            // Create the field member
+            const member: any = {
+              kind: "Field",
+              name,
+              type,
+              value,
+              span: this.createSpan(memberStart, this.current - 1)
+            };
+            if (memberDecorators.length > 0) {
+              member.decorators = memberDecorators;
+            }
+            members.push(member);
             continue;
           }
           
