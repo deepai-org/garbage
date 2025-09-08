@@ -102,6 +102,72 @@ The lexer has 5 modes that change tokenization behavior:
 ## Achievement: 100% Test Pass Rate
 All 391 tests are now passing. The parser is fully compliant with the PolyScript specification.
 
+## Missing AST Data Storage - Implementation Plan
+
+### Problem
+The parser currently consumes but doesn't store many syntax elements, often with "for now" comments. This means valid code is parsed but critical information is lost.
+
+### Critical Issues to Fix
+
+#### Phase 1: Import/Export Data
+1. **Destructured Imports** - Store import specifiers
+   - `import { foo, bar as baz } from 'module'`
+   - Need to store each imported name and alias
+   
+2. **Default Exports** - Store the exported value
+   - `export default class MyClass {}`
+   - Need to store what's being exported
+   
+3. **Destructured Exports** - Store export specifiers  
+   - `export { foo, bar } from 'module'`
+   - Need to store each exported name
+
+#### Phase 2: Decorators
+4. **Function Decorators** - Add decorator field to FuncDecl
+   - `@decorator function foo() {}`
+   
+5. **Parameter Decorators** - Add decorators to Param
+   - `function foo(@NotNull param: string)`
+   
+6. **Class Member Decorators** - Add decorators to ClassMember
+   - `class Foo { @Input prop: string }`
+
+#### Phase 3: Type System
+7. **Where Clauses** - Store type constraints
+   - `impl<T> MyTrait for T where T: Clone {}`
+   
+8. **Object Type Literals** - Parse full structure
+   - `type Obj = { x: number, y: string }`
+   
+9. **Method Types in Interfaces** - Store method signatures
+   - `interface I { method(param: string): number }`
+
+#### Phase 4: Advanced Expressions
+10. **Computed Object Properties** - Store computed keys properly
+    - `{ [key]: value }`
+    
+11. **List Comprehensions** - Create proper AST node
+    - `[x * 2 for x in range(10)]`
+
+### Testing Strategy
+
+1. **Create failing tests first** - Write tests that verify the data is stored
+2. **Test-driven fixes** - Fix parser only after test is written
+3. **Verify no regressions** - Ensure all 391 existing tests still pass
+
+### Implementation Order
+
+1. Start with import/export (most fundamental)
+2. Add decorator support (widely used)
+3. Enhance type system (important for TypeScript)
+4. Handle advanced expressions (less common)
+
+Each fix should:
+- Remove the "for now" comment
+- Store the parsed data in appropriate AST field
+- Pass the new test
+- Not break existing tests
+
 ## Detailed Implementation Plans
 
 See these documents for comprehensive implementation details:
