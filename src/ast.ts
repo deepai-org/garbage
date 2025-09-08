@@ -108,6 +108,7 @@ export type Expr =
   | ArrayLiteral
   | SetLiteral
   | ObjectLiteral
+  | ListComprehension
   | Spread
   | Yield
   | TypeAssertion
@@ -255,6 +256,15 @@ export interface ObjectProperty {
   value: Expr;
   shorthand?: boolean;
   computed?: boolean;
+  span: Span;
+}
+
+export interface ListComprehension {
+  kind: "ListComprehension";
+  expression: Expr;
+  target: Identifier;
+  iterable: Expr;
+  filter?: Expr;
   span: Span;
 }
 

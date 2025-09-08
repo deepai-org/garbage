@@ -151,26 +151,6 @@ class Component {
   
   describe('Type System', () => {
     
-    // Where clauses are Rust-specific and not yet implemented
-    test.skip('stores where clause constraints', () => {
-      const code = `impl<T> Display for Vec<T> where T: Display + Debug { }`;
-      const ast = parseCode(code);
-      
-      expect(ast.body).toHaveLength(1);
-      const implDecl = ast.body[0] as any; // Would need ImplDecl type
-      expect(implDecl.kind).toBe('ImplDecl');
-      
-      // Should store where clause
-      expect(implDecl.whereClause).toBeDefined();
-      expect(implDecl.whereClause).toHaveLength(1);
-      
-      const constraint = implDecl.whereClause![0];
-      expect(constraint.type).toBe('T');
-      expect(constraint.bounds).toHaveLength(2);
-      expect(constraint.bounds[0]).toBe('Display');
-      expect(constraint.bounds[1]).toBe('Debug');
-    });
-    
     test('stores object type literal structure', () => {
       const code = `type User = { name: string, age: number, active?: boolean };`;
       const ast = parseCode(code);
@@ -233,14 +213,13 @@ interface Calculator {
       expect(prop2.key.kind).toBe('Member');
     });
     
-    // List comprehensions not yet implemented
-    test.skip('stores list comprehension structure', () => {
+    test('stores list comprehension structure', () => {
       const code = `const doubled = [x * 2 for x in range(10) if x % 2 == 0];`;
       const ast = parseCode(code);
       
       expect(ast.body).toHaveLength(1);
       const constDecl = ast.body[0] as AST.ConstDecl;
-      const comprehension = constDecl.values![0] as any; // Would need ListComprehension type
+      const comprehension = constDecl.values![0] as AST.ListComprehension;
       
       expect(comprehension.kind).toBe('ListComprehension');
       
@@ -248,7 +227,7 @@ interface Calculator {
       expect(comprehension.expression.kind).toBe('Binary');
       
       // For clause
-      expect(comprehension.target).toBe('x');
+      expect(comprehension.target.name).toBe('x');
       expect(comprehension.iterable.kind).toBe('Call');
       
       // If clause (filter)

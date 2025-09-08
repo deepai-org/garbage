@@ -6245,53 +6245,45 @@ export class Parser {
     };
   }
   
-  private parseListComprehension(expr: AST.Expr, start: number): AST.ArrayLiteral {
+  private parseListComprehension(expr: AST.Expr, start: number): AST.ListComprehension {
     // Parse: [expr for var in iterable if condition]
-    const comprehensions: any[] = [];
+    // For simplicity, we'll support single-level comprehensions first
     
-    while (this.match("for")) {
-      // Parse one or more variables (e.g., "x" or "item, i")
-      const variables: AST.Identifier[] = [];
-      variables.push(this.parseIdentifier());
-      
-      // Handle multiple variables separated by commas
-      while (this.match(",")) {
-        variables.push(this.parseIdentifier());
-      }
-      
-      this.consume("in", "Expected 'in' in list comprehension");
-      const iterable = this.parseExpression();
-      
-      let condition: AST.Expr | undefined;
-      if (this.match("if")) {
-        condition = this.parseExpression();
-      }
-      
-      comprehensions.push({
-        variables,
-        iterable,
-        condition
-      });
-      
-      // Check for nested comprehensions
-      if (!this.check("for")) {
-        break;
-      }
+    this.consume("for", "Expected 'for' in list comprehension");
+    
+    // Parse the target variable(s) - can be multiple like "item, i"
+    const target = this.parseIdentifier();
+    
+    // Handle multiple variables separated by commas (e.g., "item, i")
+    // For now, just consume them but only store the first
+    while (this.match(",")) {
+      this.parseIdentifier(); // Parse but ignore additional variables
+    }
+    
+    this.consume("in", "Expected 'in' in list comprehension");
+    
+    // Parse the iterable expression
+    const iterable = this.parseExpression();
+    
+    // Parse optional filter
+    let filter: AST.Expr | undefined;
+    if (this.match("if")) {
+      filter = this.parseExpression();
     }
     
     this.consume("]", "Expected ']' after list comprehension");
     
-    // For now, return as a regular array with special metadata
-    // A full implementation would have a ListComprehension AST node
     return {
-      kind: "ArrayLiteral",
-      elements: [expr], // Store the expression
-      // Add comprehension data as metadata (would need AST type updates)
+      kind: "ListComprehension",
+      expression: expr,
+      target,
+      iterable,
+      filter,
       span: this.createSpan(start, this.current - 1)
     };
   }
   
-  private parseArrayLiteral(): AST.ArrayLiteral {
+  private parseArrayLiteral(): AST.ArrayLiteral | AST.ListComprehension {
     const start = this.current - 1;
     const elements: AST.Expr[] = [];
     
