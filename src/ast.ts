@@ -262,7 +262,7 @@ export interface ObjectProperty {
 export interface ListComprehension {
   kind: "ListComprehension";
   expression: Expr;
-  target: Identifier;
+  targets: Identifier[];  // Changed from single target to array of targets
   iterable: Expr;
   filter?: Expr;
   span: Span;

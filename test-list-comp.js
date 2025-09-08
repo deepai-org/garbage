@@ -23,7 +23,7 @@ function testListComp(code, description) {
                       comp.expression.op, 
                       comp.expression.right.value || comp.expression.right.name);
         }
-        console.log('  Target:', comp.target.name);
+        console.log('  Targets:', comp.targets.map(t => t.name).join(', '));
         console.log('  Iterable:', comp.iterable.kind);
         if (comp.filter) {
           console.log('  Filter:', comp.filter.kind);
@@ -47,3 +47,4 @@ function testListComp(code, description) {
 testListComp(`const doubled = [x * 2 for x in range(10)];`, 'Simple comprehension');
 testListComp(`const evens = [x for x in numbers if x % 2 == 0];`, 'Comprehension with filter');
 testListComp(`const pairs = [x + y for x in range(3) if x > 0];`, 'Complex expression');
+testListComp(`const indexed = [[item, i] for item, i in enumerate(items)];`, 'Multiple targets');

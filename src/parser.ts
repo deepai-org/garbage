@@ -6252,12 +6252,12 @@ export class Parser {
     this.consume("for", "Expected 'for' in list comprehension");
     
     // Parse the target variable(s) - can be multiple like "item, i"
-    const target = this.parseIdentifier();
+    const targets: AST.Identifier[] = [];
+    targets.push(this.parseIdentifier());
     
     // Handle multiple variables separated by commas (e.g., "item, i")
-    // For now, just consume them but only store the first
     while (this.match(",")) {
-      this.parseIdentifier(); // Parse but ignore additional variables
+      targets.push(this.parseIdentifier());
     }
     
     this.consume("in", "Expected 'in' in list comprehension");
@@ -6276,7 +6276,7 @@ export class Parser {
     return {
       kind: "ListComprehension",
       expression: expr,
-      target,
+      targets,
       iterable,
       filter,
       span: this.createSpan(start, this.current - 1)

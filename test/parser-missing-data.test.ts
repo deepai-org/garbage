@@ -226,13 +226,33 @@ interface Calculator {
       // Expression part
       expect(comprehension.expression.kind).toBe('Binary');
       
-      // For clause
-      expect(comprehension.target.name).toBe('x');
+      // For clause - single target
+      expect(comprehension.targets).toHaveLength(1);
+      expect(comprehension.targets[0].name).toBe('x');
       expect(comprehension.iterable.kind).toBe('Call');
       
       // If clause (filter)
       expect(comprehension.filter).toBeDefined();
       expect(comprehension.filter!.kind).toBe('Binary');
+    });
+    
+    test('stores multiple targets in list comprehension', () => {
+      const code = `const pairs = [[item, idx] for item, idx in enumerate(items)];`;
+      const ast = parseCode(code);
+      
+      expect(ast.body).toHaveLength(1);
+      const constDecl = ast.body[0] as AST.ConstDecl;
+      const comprehension = constDecl.values![0] as AST.ListComprehension;
+      
+      expect(comprehension.kind).toBe('ListComprehension');
+      
+      // Should store both target variables
+      expect(comprehension.targets).toHaveLength(2);
+      expect(comprehension.targets[0].name).toBe('item');
+      expect(comprehension.targets[1].name).toBe('idx');
+      
+      // Iterable
+      expect(comprehension.iterable.kind).toBe('Call');
     });
   });
 });
