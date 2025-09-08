@@ -7370,6 +7370,7 @@ export class Parser {
 
   private couldBeTypeAssertion(): boolean {
     // Check if <Identifier>expr pattern matches type assertion
+    // Be conservative - only return true if we're confident it's a type assertion
     // We're at position before <, need to look ahead
     const saved = this.current;
     
@@ -7388,59 +7389,109 @@ export class Parser {
       // Now check what follows - for type assertion, it should be an expression
       const next = this.peek();
       
-      // IMPORTANT: Check for JSX closing tag pattern
-      // If we see text followed by </Identifier>, it's JSX not type assertion
-      if (next.type === TokenType.Identifier || next.type === TokenType.JSXText) {
+      // IMPORTANT: Check for JSX closing tag pattern first
+      // If we see text/whitespace followed by </Identifier>, it's definitely JSX
+      if (next.type === TokenType.Identifier || 
+          next.type === TokenType.JSXText || 
+          next.type === TokenType.StringLiteral) {
         // Look ahead for closing tag
-        let checkPos = this.current + 1;
-        while (checkPos < this.tokens.length) {
+        let checkPos = this.current;
+        let foundNonWhitespace = false;
+        
+        while (checkPos < this.tokens.length && checkPos < this.current + 10) {
           const tok = this.tokens[checkPos];
+          
+          // Skip whitespace and newlines
+          if (tok.type === TokenType.StringLiteral && /^\s+$/.test(tok.value)) {
+            checkPos++;
+            continue;
+          }
+          
+          // If we find a closing tag, it's definitely JSX
           if (tok.value === "<" && 
               checkPos + 1 < this.tokens.length && 
               this.tokens[checkPos + 1].value === "/") {
-            // Found closing tag, this is JSX
             this.current = saved;
-            return false;
+            return false; // Definitely JSX
           }
-          // Stop at statement boundaries
-          if (tok.value === ";" || tok.value === "\n" || tok.newline) {
+          
+          // If we find non-whitespace that's not a closing tag, stop checking
+          if (tok.value && tok.value.trim()) {
+            foundNonWhitespace = true;
             break;
           }
+          
           checkPos++;
         }
       }
       
-      // Type assertion patterns: <Type>identifier, <Type>(expr), <Type>123, etc.
-      // These start expressions
-      if (next.type === TokenType.Identifier ||
-          next.type === TokenType.NumericLiteral ||
-          next.type === TokenType.StringLiteral ||
-          next.value === "(" ||
-          next.value === "[" ||
-          next.value === "{" ||
-          next.value === "!" ||
-          next.value === "-" ||
-          next.value === "+" ||
-          next.value === "~" ||
-          next.value === "typeof" ||
-          next.value === "new" ||
-          next.value === "await" ||
-          next.value === "yield" ||
-          next.value === "function" ||
-          next.value === "class") {
-        this.current = saved;
-        return true;
-      }
-      
-      // JSX patterns: <Component></Component>, <Component>{expr}, <Component>text
-      // If we see < it could be another JSX element
-      if (next.value === "<") {
-        // Could be nested JSX, but also could be comparison
-        // For now, assume JSX
+      // Only consider it a type assertion if followed by clear expression starters
+      // Be more restrictive here to avoid false positives
+      if (next.type === TokenType.Identifier) {
+        // Check if the identifier is followed by something that confirms it's an expression
+        const afterIdent = this.tokens[this.current + 1];
+        if (afterIdent && (
+            afterIdent.value === "." ||   // member access
+            afterIdent.value === "(" ||   // function call
+            afterIdent.value === "[" ||   // array access
+            afterIdent.value === ";" ||   // statement end
+            afterIdent.value === "," ||   // in sequence
+            afterIdent.value === ")" ||   // in parens
+            afterIdent.type === TokenType.Operator)) {  // binary op
+          this.current = saved;
+          return true;
+        }
+        // Just an identifier alone - could be JSX text content
         this.current = saved;
         return false;
       }
       
+      // Clear type assertion patterns
+      if (next.value === "(" ||  // <Type>(expr)
+          next.value === "[" ||  // <Type>[...]
+          next.type === TokenType.NumericLiteral) {  // <Type>123
+        this.current = saved;
+        return true;
+      }
+      
+      // Special case: { could be object literal OR JSX expression
+      // Need more context to decide
+      if (next.value === "{") {
+        // Look for closing tag to determine if it's JSX
+        let checkPos = this.current;
+        let braceDepth = 0;
+        
+        while (checkPos < this.tokens.length && checkPos < this.current + 20) {
+          const tok = this.tokens[checkPos];
+          
+          if (tok.value === "{") braceDepth++;
+          else if (tok.value === "}") {
+            braceDepth--;
+            if (braceDepth === 0) {
+              // Found matching close brace, check what's after
+              if (checkPos + 1 < this.tokens.length) {
+                const after = this.tokens[checkPos + 1];
+                // If we see </ after }, it's JSX not type assertion
+                if (after.value === "<" && 
+                    checkPos + 2 < this.tokens.length &&
+                    this.tokens[checkPos + 2].value === "/") {
+                  this.current = saved;
+                  return false; // It's JSX
+                }
+              }
+              break;
+            }
+          }
+          
+          checkPos++;
+        }
+        
+        // If we couldn't determine, default to JSX (more common)
+        this.current = saved;
+        return false;
+      }
+      
+      // Default to JSX interpretation for ambiguous cases
       this.current = saved;
       return false;
     } catch {
