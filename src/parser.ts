@@ -7757,6 +7757,49 @@ export class Parser {
     // We're already at '<', so advance past it
     this.advance(); // consume '<'
     const name = this.parseJSXElementName();
+    
+    // Check for generic type arguments (per spec: JSXGenericElement)
+    // <ComponentName<TypeArg1, TypeArg2> ...>
+    // NOTE: Check for generics BEFORE skipping whitespace, as generics come immediately after the name
+    let typeArguments: AST.TypeNode[] | undefined;
+    
+    if (this.peek().value === "<") {
+      // Save position in case this isn't actually generics
+      const checkpoint = this.current;
+      try {
+        this.advance(); // consume '<'
+        typeArguments = [];
+        
+        // Parse type arguments
+        do {
+          typeArguments.push(this.parseType());
+        } while (this.match(","));
+        
+        // Handle >> and >>> tokens that might remain after generic parsing
+        if (this.peek().value === ">") {
+          this.advance();
+        } else if (this.peek().value === ">>") {
+          // Split >> into two > tokens
+          const originalToken = this.tokens[this.current];
+          this.tokens[this.current] = { ...originalToken, value: ">" };
+          this.advance();
+        } else if (this.peek().value === ">>>") {
+          // Split >>> into three > tokens  
+          const originalToken = this.tokens[this.current];
+          this.tokens[this.current] = { ...originalToken, value: ">" };
+          this.advance();
+        } else {
+          // Not valid generics, restore position
+          this.current = checkpoint;
+          typeArguments = undefined;
+        }
+      } catch {
+        // Failed to parse as generics, restore position
+        this.current = checkpoint;
+        typeArguments = undefined;
+      }
+    }
+    
     const attributes = this.parseJSXAttributes();
     
     // Skip whitespace tokens before checking for self-closing
@@ -7765,13 +7808,20 @@ export class Parser {
     const selfClosing = this.match("/");
     this.consume(">", "Expected '>'");
     
-    return {
+    const result: any = {
       kind: "JSXOpeningElement",
       name,
       attributes,
       selfClosing,
       span: this.createSpan(start, this.current - 1)
     };
+    
+    // Add typeArguments if present
+    if (typeArguments) {
+      result.typeArguments = typeArguments;
+    }
+    
+    return result;
   }
 
   private parseJSXClosingElement(): AST.JSXClosingElement {
@@ -7824,27 +7874,8 @@ export class Parser {
       };
     }
     
-    // Handle generic type parameters like <Component<Props>>
-    // Note: We parse but don't store the generics in the AST yet
-    // This is just to consume the tokens correctly
-    if (this.check("<")) {
-      const genericStart = this.current;
-      this.advance(); // consume '<'
-      
-      let depth = 1;
-      while (!this.isAtEnd() && depth > 0) {
-        const token = this.peek();
-        if (token.value === "<") {
-          depth++;
-        } else if (token.value === ">") {
-          depth--;
-        }
-        this.advance();
-      }
-      
-      // Note: In a full implementation, we would parse and store the generic types
-      // For now, we just consume them to allow the JSX to parse correctly
-    }
+    // NOTE: Generic type parameters are now handled in parseJSXOpeningElement
+    // so we don't consume them here
     
     return name;
   }
