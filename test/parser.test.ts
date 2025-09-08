@@ -33,7 +33,7 @@ describe('Parser', () => {
       expect(ast.body).toHaveLength(1);
       const decl = ast.body[0] as AST.ShortDecl;
       expect(decl.kind).toBe('ShortDecl');
-      expect(decl.pairs[0].name.name).toBe('x');
+      expect(decl.pairs![0].name.name).toBe('x');
     });
 
     test('parses function declarations', () => {

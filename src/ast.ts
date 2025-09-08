@@ -577,7 +577,8 @@ export type Decl =
   | InterfaceDecl
   | EnumDecl
   | PackageDecl
-  | ExportDecl;
+  | ExportDecl
+  | ImplDecl;
 
 export interface Import {
   kind: "Import";
@@ -604,7 +605,9 @@ export interface ConstDecl {
 
 export interface ShortDecl {
   kind: "ShortDecl";
-  pairs: ShortDeclPair[];
+  targets?: (Identifier | ArrayPattern | ObjectPattern)[];  // For destructuring
+  value?: Expr;  // For destructuring
+  pairs?: ShortDeclPair[];  // For traditional short decls
   span: Span;
 }
 
@@ -780,6 +783,40 @@ export interface ExportDecl {
 export interface ExportSpecifier {
   local: Identifier;
   exported?: Identifier;
+  span: Span;
+}
+
+export interface ImplDecl {
+  kind: "ImplDecl";
+  type: TypeNode;  // The type being implemented for (e.g., Container<T>)
+  trait?: TypeNode;  // The trait being implemented (if any)
+  typeParams?: Identifier[];  // Generic parameters
+  whereClause?: WhereClause;  // Where constraints
+  members: ImplMember[];
+  span: Span;
+}
+
+export interface WhereClause {
+  constraints: WhereConstraint[];
+  span: Span;
+}
+
+export interface WhereConstraint {
+  type: TypeNode;  // The type being constrained (e.g., T)
+  bounds: TypeNode[];  // The bounds (e.g., [Clone, Send])
+  span: Span;
+}
+
+export interface ImplMember {
+  kind: "Method" | "AssociatedType" | "AssociatedConst" | "Field" | "Unknown";
+  name?: Identifier;
+  params?: Param[];
+  type?: TypeNode;
+  body?: Block;
+  value?: Expr;
+  visibility?: "public" | "private" | "protected";
+  isConst?: boolean;
+  tokens?: any[]; // For unknown members
   span: Span;
 }
 

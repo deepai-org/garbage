@@ -294,6 +294,11 @@ export class Parser {
       return true;
     }
     
+    // Check for impl blocks (Rust-style)
+    if (value === "impl" && type === TokenType.Identifier) {
+      return true;
+    }
+    
     // Special check for using - it's only a declaration if it's an import
     if (value === "using") {
       const next = this.peekNext();
@@ -2494,7 +2499,7 @@ export class Parser {
     const start = this.current;
     
     // Parse the destructuring pattern
-    const pattern = this.parseExpression(); // This will parse {x, y, ...rest} or [a, b, c]
+    const pattern = this.parseDestructuringPattern();
     
     this.consume(":=", "Expected ':=' in destructuring declaration");
     
@@ -2502,57 +2507,52 @@ export class Parser {
     
     this.consumeSemicolon();
     
-    // For now, treat it as a single short declaration with a complex pattern
-    // In a real implementation, we'd extract the individual bindings
     return {
       kind: "ShortDecl",
-      pairs: [{
-        name: {
-          kind: "Identifier",
-          name: "__destructured",
-          span: pattern.span
-        },
-        expr: {
-          kind: "Assign",
-          left: pattern,
-          right: value,
-          op: "=",
-          span: this.createSpan(start, this.current - 1)
-        }
-      }],
+      targets: [pattern],
+      value,
       span: this.createSpan(start, this.current - 1)
     };
   }
   
   private parseShortDecl(): AST.ShortDecl {
     const start = this.current;
-    const pairs: AST.ShortDeclPair[] = [];
+    const targets: (AST.Identifier | AST.ArrayPattern | AST.ObjectPattern)[] = [];
     
-    // Check if this might be a destructuring pattern
-    const checkpoint = this.current;
-    const firstToken = this.peek();
-    
-    if (firstToken.type === TokenType.Identifier) {
-      const name = this.parseIdentifier();
-      this.consume(":=", "Expected ':=' in short declaration");
-      const expr = this.parseExpression();
-      
-      // For single identifier short declarations
-      pairs.push({ name, expr });
-      
-      while (this.match(",")) {
-        const nextName = this.parseIdentifier();
-        this.consume(":=", "Expected ':=' in short declaration");
-        const nextExpr = this.parseExpression();
-        pairs.push({ name: nextName, expr: nextExpr });
+    // Parse targets (can be identifiers or destructuring patterns)
+    do {
+      if (this.check("[") || this.check("{")) {
+        // Destructuring pattern
+        targets.push(this.parseDestructuringPattern());
+      } else if (this.peek().type === TokenType.Identifier) {
+        // Simple identifier
+        targets.push(this.parseIdentifier());
+      } else {
+        throw this.error(this.peek(), "Expected identifier or destructuring pattern");
       }
-    }
+    } while (this.match(","));
+    
+    this.consume(":=", "Expected ':=' in short declaration");
+    
+    // Parse the value expression
+    const value = this.parseExpression();
     
     this.consumeSemicolon();
     
+    // If it's a simple single-identifier case, use the old format for compatibility
+    if (targets.length === 1 && targets[0].kind === "Identifier") {
+      return {
+        kind: "ShortDecl",
+        pairs: [{ name: targets[0], expr: value }],
+        span: this.createSpan(start, this.current - 1)
+      };
+    }
+    
+    // For destructuring or multiple targets
     return {
       kind: "ShortDecl",
-      pairs,
+      targets,
+      value,
       span: this.createSpan(start, this.current - 1)
     };
   }
@@ -5918,90 +5918,252 @@ export class Parser {
     };
   }
   
-  private parseImplBlock(): AST.ClassDecl {
-    // Parse Rust-style impl blocks as a ClassDecl with special handling
-    // impl Display for Container<T> where T: Display { ... }
+  private parseImplBlock(): AST.ImplDecl {
+    // Parse Rust-style impl blocks
+    // impl<T> Container<T> where T: Display { ... }
+    // impl<T> Display for Container<T> where T: Display { ... }
     const start = this.current;
     this.advance(); // consume 'impl'
     
-    // Parse the trait being implemented (e.g., Display)
-    const traitName = this.parseIdentifier();
-    
-    // Consume 'for'
-    if (!this.match("for")) {
-      throw this.error(this.peek(), "Expected 'for' in impl block");
-    }
-    
-    // Parse the type being implemented for (e.g., Container<T>)
-    const name = this.parseIdentifier();
-    
     // Parse generic parameters if present
-    let genericParams: AST.Identifier[] | undefined;
+    let typeParams: AST.Identifier[] | undefined;
     if (this.match("<")) {
-      genericParams = [];
+      typeParams = [];
       do {
-        genericParams.push(this.parseIdentifier());
+        typeParams.push(this.parseIdentifier());
       } while (this.match(","));
       this.consume(">", "Expected '>' after generic parameters");
     }
     
+    // Parse either "Type" or "Trait for Type"
+    let trait: AST.TypeNode | undefined;
+    let type: AST.TypeNode;
+    
+    // Parse the first type/identifier
+    const firstType = this.parseType();
+    
+    // Check if this is "Trait for Type" pattern
+    if (this.match("for")) {
+      trait = firstType;
+      type = this.parseType();
+    } else {
+      // Just "Type" without trait
+      type = firstType;
+    }
+    
     // Parse where clause if present
+    let whereClause: AST.WhereClause | undefined;
     if (this.peek().value === "where") {
-      this.advance(); // consume 'where'
-      // Skip the where clause for now
-      while (!this.check("{") && !this.isAtEnd()) {
-        this.advance();
-      }
+      whereClause = this.parseWhereClause();
     }
     
     // Parse impl body
     this.consume("{", "Expected '{' before impl body");
-    const members: AST.ClassMember[] = [];
+    const members: AST.ImplMember[] = [];
     
     while (!this.check("}") && !this.isAtEnd()) {
-      // Skip virtual semicolons
-      while (this.peek().virtualSemi) {
+      // Skip semicolons and virtual semicolons
+      while (this.check(";") || this.peek().virtualSemi) {
         this.advance();
       }
       
       if (this.check("}")) break;
       
-      // Parse impl members (usually functions)
-      if (this.match("fn", "fun", "func", "function")) {
+      const memberStart = this.current;
+      
+      // Parse visibility modifiers
+      let visibility: "public" | "private" | "protected" | undefined;
+      if (this.match("pub", "public")) {
+        visibility = "public";
+      } else if (this.match("private", "priv")) {
+        visibility = "private";
+      } else if (this.match("protected")) {
+        visibility = "protected";
+      }
+      
+      // Parse impl members (methods, associated types, associated constants)
+      if (this.match("const")) {
+        // Check if this is "const fn" (const function)
+        if (this.peek().value === "fn") {
+          this.advance(); // consume 'fn'
+          const func = this.parseFuncDecl(false, false, false);
+          members.push({
+            kind: "Method",
+            name: func.name!,
+            params: func.params,
+            type: func.returnType,
+            body: func.body,
+            isConst: true,
+            visibility,
+            span: func.span
+          });
+        } else {
+          // Associated constant: const SIZE: usize = 10;
+          const name = this.parseIdentifier();
+          let type: AST.TypeNode | undefined;
+          if (this.match(":")) {
+            type = this.parseType();
+          }
+          let value: AST.Expr | undefined;
+          if (this.match("=")) {
+            value = this.parseExpression();
+          }
+          this.consumeSemicolon();
+          members.push({
+            kind: "AssociatedConst",
+            name,
+            type,
+            value,
+            visibility,
+            span: this.createSpan(memberStart, this.current - 1)
+          });
+        }
+      } else if (this.match("fn", "fun", "func", "function")) {
         const isGenerator = this.previous()?.value === "function" && this.match("*");
         const func = this.parseFuncDecl(false, false, isGenerator);
-        // Convert FuncDecl to Method for ClassMember
         members.push({
           kind: "Method",
-          name: func.name,
+          name: func.name!,
           params: func.params,
           type: func.returnType,
           body: func.body,
-          async: func.async,
-          static: false,
-          visibility: "public",
+          visibility,
           span: func.span
-        } as any);
+        });
+      } else if (this.match("type")) {
+        // Associated type: type Item = T;
+        const name = this.parseIdentifier();
+        let type: AST.TypeNode | undefined;
+        if (this.match("=")) {
+          type = this.parseType();
+        }
+        this.consumeSemicolon();
+        members.push({
+          kind: "AssociatedType",
+          name,
+          type,
+          visibility,
+          span: this.createSpan(memberStart, this.current - 1)
+        });
+      } else if (this.peek().type === TokenType.Identifier) {
+        // Try to parse as a method without fn keyword or as a field
+        const name = this.parseIdentifier();
+        if (this.check("(")) {
+          // Method without fn keyword
+          const params = this.parseParameterList();
+          let returnType: AST.TypeNode | undefined;
+          if (this.match("->", ":")) {
+            returnType = this.parseType();
+          }
+          const body = this.parseBlock();
+          members.push({
+            kind: "Method",
+            name,
+            params,
+            type: returnType,
+            body,
+            visibility,
+            span: this.createSpan(memberStart, this.current - 1)
+          });
+        } else if (this.match(":")) {
+          // Field with type annotation: field: Type = value
+          const type = this.parseType();
+          let value: AST.Expr | undefined;
+          if (this.match("=")) {
+            value = this.parseExpression();
+          }
+          this.consumeSemicolon();
+          members.push({
+            kind: "Field",
+            name,
+            type,
+            value,
+            visibility,
+            span: this.createSpan(memberStart, this.current - 1)
+          });
+        } else {
+          // Unknown member - store as unknown to preserve data
+          // This could be macro invocations or other language features
+          const tokens: Token[] = [];
+          while (!this.checkSemicolon() && !this.check("}") && !this.isAtEnd()) {
+            tokens.push(this.advance());
+          }
+          this.consumeSemicolon();
+          members.push({
+            kind: "Unknown",
+            name,
+            tokens,
+            visibility,
+            span: this.createSpan(memberStart, this.current - 1)
+          });
+        }
       } else {
-        // Skip unknown members for now
-        this.advance();
+        // Store unknown tokens as unknown member
+        const tokens: Token[] = [];
+        const unknownStart = this.current;
+        while (!this.checkSemicolon() && !this.check("}") && !this.isAtEnd()) {
+          tokens.push(this.advance());
+        }
+        this.consumeSemicolon();
+        if (tokens.length > 0) {
+          members.push({
+            kind: "Unknown",
+            tokens,
+            visibility,
+            span: this.createSpan(unknownStart, this.current - 1)
+          });
+        }
       }
     }
     
     this.consume("}", "Expected '}' after impl body");
     
-    // Return as a ClassDecl with the trait as an implemented interface
+    // Return as an ImplDecl
     return {
-      kind: "ClassDecl",
-      name,
-      genericParams,
-      extends: undefined,
-      implements: [{
-        kind: "SimpleType",
-        id: traitName,
-        span: this.createSpanFrom(traitName)
-      }],
+      kind: "ImplDecl",
+      type,
+      trait,
+      typeParams,
+      whereClause,
       members,
+      span: this.createSpan(start, this.current - 1)
+    };
+  }
+  
+  private parseWhereClause(): AST.WhereClause {
+    const start = this.current;
+    this.advance(); // consume 'where'
+    
+    const constraints: AST.WhereConstraint[] = [];
+    
+    // Parse comma-separated constraints
+    do {
+      const constraintStart = this.current;
+      
+      // Parse the type being constrained (e.g., T or T::Item)
+      const type = this.parseType();
+      
+      // Parse the bounds (e.g., : Display + Debug)
+      const bounds: AST.TypeNode[] = [];
+      if (this.match(":")) {
+        // Parse first bound
+        bounds.push(this.parseType());
+        
+        // Parse additional bounds separated by +
+        while (this.match("+")) {
+          bounds.push(this.parseType());
+        }
+      }
+      
+      constraints.push({
+        type,
+        bounds,
+        span: this.createSpan(constraintStart, this.current - 1)
+      });
+    } while (this.match(","));
+    
+    return {
+      constraints,
       span: this.createSpan(start, this.current - 1)
     };
   }

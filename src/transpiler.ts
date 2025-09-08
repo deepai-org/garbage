@@ -249,12 +249,48 @@ export class Transpiler {
 
   private visitShortDecl(node: AST.ShortDecl) {
     // Convert PolyScript's := to TypeScript const
-    for (let i = 0; i < node.pairs.length; i++) {
-      if (i > 0) this.emitLine(';');
+    if (node.pairs) {
+      // Traditional short declaration
+      for (let i = 0; i < node.pairs.length; i++) {
+        if (i > 0) this.emitLine(';');
+        this.emit('const ');
+        this.emit(this.visitIdentifier(node.pairs[i].name));
+        this.emit(' = ');
+        this.emit(this.visitExpression(node.pairs[i].expr));
+      }
+    } else if (node.targets && node.value) {
+      // Destructuring short declaration
       this.emit('const ');
-      this.emit(this.visitIdentifier(node.pairs[i].name));
+      
+      if (node.targets.length === 1) {
+        // Single target
+        const target = node.targets[0];
+        if (target.kind === 'Identifier') {
+          this.emit(this.visitIdentifier(target));
+        } else if (target.kind === 'ArrayPattern') {
+          this.emit(this.visitArrayPattern(target));
+        } else if (target.kind === 'ObjectPattern') {
+          this.emit(this.visitObjectPattern(target));
+        }
+      } else {
+        // Multiple targets - need to handle specially
+        this.emit('[');
+        for (let i = 0; i < node.targets.length; i++) {
+          if (i > 0) this.emit(', ');
+          const target = node.targets[i];
+          if (target.kind === 'Identifier') {
+            this.emit(this.visitIdentifier(target));
+          } else if (target.kind === 'ArrayPattern') {
+            this.emit(this.visitArrayPattern(target));
+          } else if (target.kind === 'ObjectPattern') {
+            this.emit(this.visitObjectPattern(target));
+          }
+        }
+        this.emit(']');
+      }
+      
       this.emit(' = ');
-      this.emit(this.visitExpression(node.pairs[i].expr));
+      this.emit(this.visitExpression(node.value));
     }
     this.emitLine(';');
   }

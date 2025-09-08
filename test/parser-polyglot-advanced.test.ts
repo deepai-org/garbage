@@ -48,7 +48,7 @@ destructured := {x, y, ...rest} = obj
     // Verify first statement is short declaration
     const stmt1 = ast.body[0] as AST.ShortDecl;
     expect(stmt1.kind).toBe('ShortDecl');
-    expect(stmt1.pairs[0].name.name).toBe('result');
+    expect(stmt1.pairs![0].name.name).toBe('result');
     
     // Find and verify shift operators in the expression tree
     const allBinary = findAllInAST(ast, n => n && n.kind === 'Binary') as AST.Binary[];

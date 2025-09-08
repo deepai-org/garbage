@@ -49,6 +49,18 @@ All previously discarded syntax elements are now properly stored:
 - ✅ Property accessor visibility modifiers
 - ✅ Auto-properties and properties with bodies
 
+#### Rust-style Impl Blocks
+- ✅ Where clauses in impl blocks fully parsed and stored
+- ✅ Associated types and constants in impl blocks
+- ✅ Const functions (const fn) properly recognized
+- ✅ Unknown impl members preserved as Unknown type
+- ✅ Visibility modifiers for all impl members
+
+#### Short Declarations
+- ✅ Destructuring patterns in short declarations (:=)
+- ✅ Mixed destructuring (identifiers + patterns)
+- ✅ Multiple targets with single value
+
 ### Remaining Data Discard Issues (Found on deeper inspection)
 
 While the major data discard issues have been resolved, some remain:
