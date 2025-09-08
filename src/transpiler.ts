@@ -957,9 +957,47 @@ export class Transpiler {
 
   private visitInterfaceMember(member: AST.InterfaceMember) {
     this.emit(this.visitIdentifier(member.name));
-    if (member.optional) this.emit('?');
-    this.emit(': ');
-    this.emit(this.visitType(member.type));
+    
+    // Handle method signatures
+    if (member.kind === "Method") {
+      // Add generic parameters if present
+      if (member.genericParams && member.genericParams.length > 0) {
+        this.emit('<');
+        member.genericParams.forEach((param, i) => {
+          if (i > 0) this.emit(', ');
+          this.emit(this.visitIdentifier(param));
+        });
+        this.emit('>');
+      }
+      
+      // Add parameters
+      this.emit('(');
+      if (member.params) {
+        member.params.forEach((param, i) => {
+          if (i > 0) this.emit(', ');
+          this.emit(this.visitIdentifier(param.name));
+          if (param.type) {
+            this.emit(': ');
+            this.emit(this.visitType(param.type));
+          }
+        });
+      }
+      this.emit(')');
+      
+      // Add return type
+      if (member.returnType) {
+        this.emit(': ');
+        this.emit(this.visitType(member.returnType));
+      }
+    } else {
+      // Handle property signatures
+      if (member.optional) this.emit('?');
+      if (member.type) {
+        this.emit(': ');
+        this.emit(this.visitType(member.type));
+      }
+    }
+    
     this.emitLine(';');
   }
 }

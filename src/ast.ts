@@ -251,7 +251,7 @@ export interface ObjectLiteral {
 }
 
 export interface ObjectProperty {
-  key: Identifier | StringLiteral | NumericLiteral;
+  key: Identifier | StringLiteral | NumericLiteral | Expr;
   value: Expr;
   shorthand?: boolean;
   computed?: boolean;
@@ -680,8 +680,12 @@ export interface InterfaceDecl {
 
 export interface InterfaceMember {
   name: Identifier;
-  type: TypeNode;
+  type?: TypeNode;
   optional?: boolean;
+  kind?: "Property" | "Method";
+  params?: Param[];
+  returnType?: TypeNode;
+  genericParams?: Identifier[];
   span: Span;
 }
 

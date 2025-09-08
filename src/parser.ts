@@ -5662,25 +5662,13 @@ export class Parser {
           returnType = this.parseType();
         }
         
-        // Create a function type for the method
-        const methodType: AST.FuncType = {
-          kind: "FuncType",
-          params: params.map(p => p.type || {
-            kind: "SimpleType",
-            id: { kind: "Identifier", name: "any", span: p.span },
-            span: p.span
-          }),
-          ret: returnType || {
-            kind: "SimpleType",
-            id: { kind: "Identifier", name: "void", span: this.createSpan(this.current, this.current) },
-            span: this.createSpan(this.current, this.current)
-          },
-          span: this.createSpan(memberStart, this.current - 1)
-        };
-        
+        // Store as a method member with full signature
         members.push({
           name: memberName,
-          type: methodType,
+          kind: "Method",
+          params,
+          returnType,
+          genericParams,
           optional: false,
           span: this.createSpan(memberStart, this.current - 1)
         });
@@ -5696,6 +5684,7 @@ export class Parser {
         
         members.push({
           name: memberName,
+          kind: "Property",
           type: memberType,
           optional,
           span: this.createSpan(memberStart, this.current - 1)
@@ -6449,21 +6438,14 @@ export class Parser {
         } else {
           // Parse regular property (not spread)
           // Parse property key
-        let key: AST.Identifier | AST.StringLiteral | AST.NumericLiteral;
+        let key: AST.Identifier | AST.StringLiteral | AST.NumericLiteral | AST.Expr;
         let computed = false;
         
         if (this.match("[")) {
           // Computed property
           computed = true;
-          const expr = this.parseExpression();
+          key = this.parseExpression();
           this.consume("]", "Expected ']' after computed property");
-          
-          // For now, treat computed properties as identifiers
-          key = {
-            kind: "Identifier",
-            name: "[computed]",
-            span: expr.span
-          };
         } else if (this.peek().type === TokenType.StringLiteral) {
           key = this.parseStringLiteral();
         } else if (this.peek().type === TokenType.NumericLiteral) {

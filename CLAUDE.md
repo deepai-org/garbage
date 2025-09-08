@@ -11,9 +11,15 @@ PolyScript is a universal parser that handles multiple programming language synt
 - Deep nested generic types (15+ levels tested) parsing successfully
 - JSX with generic type arguments fully implemented per spec
 - Type assertions (`<Type>expr`) correctly disambiguated from JSX
-- ImportDecl AST type added with full destructured import support
-- Export default parsing now stores the exported declaration
 - All tests passing - no known failures
+
+### Recent AST Improvements (Missing Data Recovery)
+- ✅ ImportDecl AST type with full destructured import support
+- ✅ Export default declarations properly stored with isDefault flag
+- ✅ Decorator support for functions, parameters, and class members
+- ✅ ObjectType for object type literals with modifiers
+- ✅ Interface method signatures with full parameter info
+- ✅ Computed object properties storing actual expressions
 
 ## Quick Debugging Commands
 ```bash
@@ -150,8 +156,10 @@ The parser currently consumes but doesn't store many syntax elements, often with
    - `impl<T> MyTrait for T where T: Clone {}`
 
 #### Phase 4: Advanced Expressions
-10. **Computed Object Properties** - Store computed keys properly
+10. **Computed Object Properties** ✅ - Store computed keys properly
     - `{ [key]: value }`
+    - Computed properties now store the full expression as the key
+    - Computed flag properly set on ObjectProperty
     
 11. **List Comprehensions** - Create proper AST node
     - `[x * 2 for x in range(10)]`
