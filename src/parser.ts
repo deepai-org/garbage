@@ -5419,7 +5419,7 @@ export class Parser {
               }
             }
             
-            members.push({
+            const methodMember: any = {
               kind: "Method",
               name,
               params,
@@ -5427,19 +5427,27 @@ export class Parser {
               body,
               genericParams,
               span: this.createSpan(memberStart, this.current - 1)
-            } as any);
+            };
+            if (memberDecorators.length > 0) {
+              methodMember.decorators = memberDecorators;
+            }
+            members.push(methodMember);
             continue;
           }
           
           // Short declaration: name := value
           if (this.match(":=")) {
             const value = this.parseExpression();
-            members.push({
+            const member: any = {
               kind: "Field",
               name,
               value,
               span: this.createSpan(memberStart, this.current - 1)
-            } as any);
+            };
+            if (memberDecorators.length > 0) {
+              member.decorators = memberDecorators;
+            }
+            members.push(member);
             continue;
           }
           
@@ -5458,13 +5466,17 @@ export class Parser {
                 this.advance();
               }
             } else {
-              members.push({
+              const member: any = {
                 kind: "Field",
                 name,
                 type,
                 value,
                 span: this.createSpan(memberStart, this.current - 1)
-              } as any);
+              };
+              if (memberDecorators.length > 0) {
+                member.decorators = memberDecorators;
+              }
+              members.push(member);
             }
             continue;
           }
@@ -5472,21 +5484,29 @@ export class Parser {
           // Simple assignment: name = value
           if (this.match("=")) {
             const value = this.parseExpression();
-            members.push({
+            const member: any = {
               kind: "Field",
               name,
               value,
               span: this.createSpan(memberStart, this.current - 1)
-            } as any);
+            };
+            if (memberDecorators.length > 0) {
+              member.decorators = memberDecorators;
+            }
+            members.push(member);
             continue;
           }
           
           // Field without value
-          members.push({
+          const fieldMember: any = {
             kind: "Field",
             name,
             span: this.createSpan(memberStart, this.current - 1)
-          } as any);
+          };
+          if (memberDecorators.length > 0) {
+            fieldMember.decorators = memberDecorators;
+          }
+          members.push(fieldMember);
           
           // Consume semicolon if present
           this.consumeSemicolon();
