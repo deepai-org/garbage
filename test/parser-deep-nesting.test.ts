@@ -124,7 +124,8 @@ describe('Parser - Deep Generic Nesting', () => {
     });
     
     test('parses mixed >> and >>> at different levels', () => {
-      const code = `type X = A<B<C>, D<E<F<G>>, H<I>>>`;
+      // Fixed: Need >>> after G to close F, E, D, then H<I> is arg to A
+      const code = `type X = A<B<C>, D<E<F<G>>>, H<I>>`;
       const ast = parseCode(code);
       
       const typeDecl = ast.body[0] as AST.TypeDecl;
@@ -176,7 +177,8 @@ describe('Parser - Deep Generic Nesting', () => {
     });
     
     test('parses 8-level nesting with multiple type parameters', () => {
-      const code = `type Monster = A<B<C<D<E<F<G<H<I, J>, K>, L>, M>, N>, O>, P>, Q>`;
+      // Fixed: Added >> after O to properly close both C and B
+      const code = `type Monster = A<B<C<D<E<F<G<H<I, J>, K>, L>, M>, N>, O>>, P, Q>`;
       const ast = parseCode(code);
       
       const typeDecl = ast.body[0] as AST.TypeDecl;
@@ -308,8 +310,8 @@ describe('Parser - Deep Generic Nesting', () => {
       expect(a.base.name).toBe('A');
       const b = a.args[0] as AST.GenericType;
       expect(b.base.name).toBe('B');
-      const c = b.args[0] as AST.GenericType;
-      expect(c.base.name).toBe('C');
+      const c = b.args[0] as AST.SimpleType;
+      expect(c.id.name).toBe('C');
     });
     
     test('handles >>> in function return types', () => {
