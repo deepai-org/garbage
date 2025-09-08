@@ -709,6 +709,8 @@ export interface ClassMember {
   // For properties with accessors
   getter?: PropertyAccessor;
   setter?: PropertyAccessor;
+  // For preserving unknown modifiers like 'volatile', 'synchronized', etc.
+  unknownModifiers?: string[];
   span: Span;
 }
 

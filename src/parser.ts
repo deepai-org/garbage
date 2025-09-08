@@ -5363,22 +5363,52 @@ export class Parser {
           continue;
         }
         
-        // Handle visibility modifiers for fields/methods
+        // Collect all modifiers (known and unknown)
         let visibility: "public" | "private" | "protected" | undefined;
-        if (this.match("public", "private", "protected")) {
-          visibility = this.previous()!.value as any;
-        }
-        
-        // Handle static modifier
         let isStatic = false;
-        if (this.match("static")) {
-          isStatic = true;
-        }
-        
-        // Handle readonly modifier
         let isReadonly = false;
-        if (this.match("readonly")) {
-          isReadonly = true;
+        let unknownModifiers: string[] = [];
+        
+        // Keep collecting modifiers until we hit something that's definitely not a modifier
+        while (this.peek().type === TokenType.Identifier || this.peek().type === TokenType.Keyword) {
+          const token = this.peek();
+          const value = token.value;
+          
+          // Check for known modifiers
+          if (value === "public" || value === "private" || value === "protected") {
+            visibility = value as any;
+            this.advance();
+          } else if (value === "static") {
+            isStatic = true;
+            this.advance();
+          } else if (value === "readonly") {
+            isReadonly = true;
+            this.advance();
+          } else if (value === "async" || value === "const" || value === "final") {
+            // These are handled elsewhere, stop collecting modifiers
+            break;
+          } else {
+            // Check if this looks like it could be a modifier or a member name
+            // If the next token is another identifier or a known type starter, it might be a modifier
+            const next = this.peekNext();
+            if (next && (next.type === TokenType.Identifier || 
+                        next.value === ":" || next.value === "(" || next.value === "{" ||
+                        next.value === "<" || next.value === "[")) {
+              // Could be a modifier if followed by another identifier/type
+              // or could be the member name if followed by : ( { < [
+              if (next.type === TokenType.Identifier) {
+                // Likely a modifier (e.g., "volatile x")
+                unknownModifiers.push(value);
+                this.advance();
+              } else {
+                // Likely the member name, stop collecting modifiers
+                break;
+              }
+            } else {
+              // Probably the member name, stop collecting
+              break;
+            }
+          }
         }
         
         // Handle property declarations and methods
@@ -5618,8 +5648,14 @@ export class Parser {
               genericParams,
               span: this.createSpan(memberStart, this.current - 1)
             };
+            if (visibility) methodMember.visibility = visibility;
+            if (isStatic) methodMember.static = isStatic;
+            if (isReadonly) methodMember.readonly = isReadonly;
             if (memberDecorators.length > 0) {
               methodMember.decorators = memberDecorators;
+            }
+            if (unknownModifiers.length > 0) {
+              methodMember.unknownModifiers = unknownModifiers;
             }
             members.push(methodMember);
             continue;
@@ -5636,6 +5672,9 @@ export class Parser {
             };
             if (memberDecorators.length > 0) {
               member.decorators = memberDecorators;
+            }
+            if (unknownModifiers.length > 0) {
+              member.unknownModifiers = unknownModifiers;
             }
             members.push(member);
             continue;
@@ -5665,8 +5704,14 @@ export class Parser {
               value,
               span: this.createSpan(memberStart, this.current - 1)
             };
+            if (visibility) member.visibility = visibility;
+            if (isStatic) member.static = isStatic;
+            if (isReadonly) member.readonly = isReadonly;
             if (memberDecorators.length > 0) {
               member.decorators = memberDecorators;
+            }
+            if (unknownModifiers.length > 0) {
+              member.unknownModifiers = unknownModifiers;
             }
             members.push(member);
             continue;
@@ -5683,6 +5728,9 @@ export class Parser {
             };
             if (memberDecorators.length > 0) {
               member.decorators = memberDecorators;
+            }
+            if (unknownModifiers.length > 0) {
+              member.unknownModifiers = unknownModifiers;
             }
             members.push(member);
             continue;
