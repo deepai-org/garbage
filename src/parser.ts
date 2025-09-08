@@ -4493,7 +4493,24 @@ export class Parser {
           args.push(this.parseType());
         }
         
-        this.consume(">", "Expected '>' after channel element type");
+        // Handle >> and >>> as closing brackets
+        if (this.check(">>")) {
+          // Treat >> as a single > and leave the second > for the next parse
+          this.advance(); // consume >>
+          // Inject a synthetic > token back for the next level
+          const syntheticToken = { ...this.tokens[this.current - 1] };
+          syntheticToken.value = ">";
+          this.tokens.splice(this.current, 0, syntheticToken);
+        } else if (this.check(">>>")) {
+          // Treat >>> as a single > and leave >> for the next parse
+          this.advance(); // consume >>>
+          // Inject a synthetic >> token back for the next level
+          const syntheticToken = { ...this.tokens[this.current - 1] };
+          syntheticToken.value = ">>";
+          this.tokens.splice(this.current, 0, syntheticToken);
+        } else {
+          this.consume(">", "Expected '>' after channel element type");
+        }
         
         // Return as GenericType instead of ChanType for test compatibility
         return {
@@ -4700,7 +4717,24 @@ export class Parser {
           args.push(this.parseType());
         }
         
-        this.consume(">", "Expected '>' after channel element type");
+        // Handle >> and >>> as closing brackets
+        if (this.check(">>")) {
+          // Treat >> as a single > and leave the second > for the next parse
+          this.advance(); // consume >>
+          // Inject a synthetic > token back for the next level
+          const syntheticToken = { ...this.tokens[this.current - 1] };
+          syntheticToken.value = ">";
+          this.tokens.splice(this.current, 0, syntheticToken);
+        } else if (this.check(">>>")) {
+          // Treat >>> as a single > and leave >> for the next parse
+          this.advance(); // consume >>>
+          // Inject a synthetic >> token back for the next level
+          const syntheticToken = { ...this.tokens[this.current - 1] };
+          syntheticToken.value = ">>";
+          this.tokens.splice(this.current, 0, syntheticToken);
+        } else {
+          this.consume(">", "Expected '>' after channel element type");
+        }
         
         // Return GenericType instead of ChanType for compatibility
         return {
