@@ -15,7 +15,8 @@ export type TypeNode =
   | ChanType
   | ImplType
   | DynType
-  | IndexedAccessType;
+  | IndexedAccessType
+  | ObjectType;
 
 export interface SimpleType {
   kind: "SimpleType";
@@ -73,6 +74,19 @@ export interface IndexedAccessType {
   object: TypeNode;
   index: string;
   span: Span;
+}
+
+export interface ObjectType {
+  kind: "ObjectType";
+  properties: ObjectTypeProperty[];
+  span: Span;
+}
+
+export interface ObjectTypeProperty {
+  name: string;
+  type: TypeNode;
+  optional?: boolean;
+  readonly?: boolean;
 }
 
 // Expression nodes
@@ -535,6 +549,7 @@ export interface Pass {
 // Declaration nodes
 export type Decl =
   | Import
+  | ImportDecl
   | VarDecl
   | ConstDecl
   | ShortDecl
@@ -597,6 +612,7 @@ export interface FuncDecl {
   async?: boolean;
   unsafe?: boolean;
   generator?: boolean;
+  decorators?: Decorator[];
   body: Block;
   span: Span;
 }
@@ -609,6 +625,7 @@ export interface Param {
   readonly?: boolean;
   spread?: boolean;
   blockParam?: boolean;
+  decorators?: Decorator[];
   span: Span;
 }
 
@@ -648,6 +665,7 @@ export interface ClassMember {
   type?: TypeNode;
   params?: Param[];
   body?: Block;
+  decorators?: Decorator[];
   span: Span;
 }
 
@@ -686,11 +704,26 @@ export interface PackageDecl {
   span: Span;
 }
 
+export interface ImportDecl {
+  kind: "ImportDecl";
+  specifiers?: ImportSpecifier[];
+  defaultImport?: Identifier;
+  namespaceImport?: Identifier;
+  path: string;
+  span: Span;
+}
+
+export interface ImportSpecifier {
+  imported: string;
+  local: string;
+}
+
 export interface ExportDecl {
   kind: "ExportDecl";
   declaration?: Decl;
   specifiers?: ExportSpecifier[];
   source?: string;
+  isDefault?: boolean;
   span: Span;
 }
 

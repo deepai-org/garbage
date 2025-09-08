@@ -239,14 +239,12 @@ export class Parser {
         
         if (this.match("def", "fun", "fn", "func", "function")) {
           const isGenerator = this.previous()?.value === "function" && this.match("*");
-          const func = this.parseFuncDecl(isAsync, isUnsafe, isGenerator);
-          // Note: We're ignoring decorators for now since AST doesn't have a field for them
+          const func = this.parseFuncDecl(isAsync, isUnsafe, isGenerator, decorators);
           return func;
         }
       } else if (this.match("def", "fun", "fn", "func", "function")) {
         const isGenerator = this.previous()?.value === "function" && this.match("*");
-        const func = this.parseFuncDecl(false, false, isGenerator);
-        // Note: We're ignoring decorators for now since AST doesn't have a field for them
+        const func = this.parseFuncDecl(false, false, isGenerator, decorators);
         return func;
       }
       
@@ -2226,7 +2224,7 @@ export class Parser {
   }
   
   // Helper methods for specific constructs
-  private parseImport(): AST.Import {
+  private parseImport(): AST.Import | AST.ImportDecl {
     const start = this.current - 1;
     
     // Handle TypeScript-style imports: import { ... } from '...' or import * as ... from '...'
@@ -2236,13 +2234,25 @@ export class Parser {
     // Check for destructured imports: import { Token, TokenType } from './lexer'
     if (this.check("{")) {
       this.advance();
-      // Skip the destructured imports for now - just consume until }
-      while (!this.check("}") && !this.isAtEnd()) {
-        this.advance();
+      
+      // Parse import specifiers
+      const specifiers: AST.ImportSpecifier[] = [];
+      
+      if (!this.check("}")) {
+        do {
+          const imported = this.parseIdentifier().name;
+          let local = imported;
+          
+          // Check for "as" alias
+          if (this.match("as")) {
+            local = this.parseIdentifier().name;
+          }
+          
+          specifiers.push({ imported, local });
+        } while (this.match(",") && !this.check("}"));
       }
-      if (this.check("}")) {
-        this.advance();
-      }
+      
+      this.consume("}", "Expected '}' after import specifiers");
       
       // Expect 'from'
       if (this.match("from")) {
@@ -2256,12 +2266,22 @@ export class Parser {
       } else {
         throw this.error(this.peek(), "Expected 'from' after import specifiers");
       }
+      
+      this.consumeSemicolon();
+      
+      return {
+        kind: "ImportDecl",
+        specifiers,
+        path,
+        span: this.createSpan(start, this.current - 1)
+      };
     }
     // Check for namespace import: import * as AST from './ast'
     else if (this.check("*")) {
       this.advance();
+      let namespaceImport: AST.Identifier | undefined;
       if (this.match("as")) {
-        alias = this.parseIdentifier();
+        namespaceImport = this.parseIdentifier();
       }
       
       // Expect 'from'
@@ -2276,6 +2296,15 @@ export class Parser {
       } else {
         throw this.error(this.peek(), "Expected 'from' after namespace import");
       }
+      
+      this.consumeSemicolon();
+      
+      return {
+        kind: "ImportDecl",
+        namespaceImport,
+        path,
+        span: this.createSpan(start, this.current - 1)
+      };
     }
     // Check for default import with destructured: import React, { Component } from 'react'
     else if (this.peek().type === TokenType.Identifier) {
@@ -2284,18 +2313,29 @@ export class Parser {
       
       if (nextToken && nextToken.value === ",") {
         // Default import with destructured
-        alias = this.parseIdentifier();
+        const defaultImport = this.parseIdentifier();
         this.consume(",", "Expected ','");
         
-        // Skip destructured part
+        // Parse destructured imports
+        const specifiers: AST.ImportSpecifier[] = [];
         if (this.check("{")) {
           this.advance();
-          while (!this.check("}") && !this.isAtEnd()) {
-            this.advance();
+          
+          if (!this.check("}")) {
+            do {
+              const imported = this.parseIdentifier().name;
+              let local = imported;
+              
+              // Check for "as" alias
+              if (this.match("as")) {
+                local = this.parseIdentifier().name;
+              }
+              
+              specifiers.push({ imported, local });
+            } while (this.match(",") && !this.check("}"));
           }
-          if (this.check("}")) {
-            this.advance();
-          }
+          
+          this.consume("}", "Expected '}' after import specifiers");
         }
         
         // Expect 'from'
@@ -2310,11 +2350,21 @@ export class Parser {
         } else {
           throw this.error(this.peek(), "Expected 'from' after import specifiers");
         }
+        
+        this.consumeSemicolon();
+        
+        return {
+          kind: "ImportDecl",
+          defaultImport,
+          specifiers: specifiers.length > 0 ? specifiers : undefined,
+          path,
+          span: this.createSpan(start, this.current - 1)
+        };
       }
       // Simple import: import 'module' or import module
       else if (nextToken && nextToken.value === "from") {
         // Default import: import Parser from './parser'
-        alias = this.parseIdentifier();
+        const defaultImport = this.parseIdentifier();
         this.consume("from", "Expected 'from'");
         
         if (this.peek().type === TokenType.StringLiteral) {
@@ -2323,6 +2373,15 @@ export class Parser {
         } else {
           throw this.error(this.peek(), "Expected import path after 'from'");
         }
+        
+        this.consumeSemicolon();
+        
+        return {
+          kind: "ImportDecl",
+          defaultImport,
+          path,
+          span: this.createSpan(start, this.current - 1)
+        };
       }
       // Old-style simple import
       else {
@@ -2498,7 +2557,7 @@ export class Parser {
     };
   }
   
-  private parseFuncDecl(async = false, unsafe = false, generator = false): AST.FuncDecl {
+  private parseFuncDecl(async = false, unsafe = false, generator = false, decorators?: AST.Expr[]): AST.FuncDecl {
     const start = this.current - 1;
     
     // Check if this is a Ruby-style def
@@ -2712,7 +2771,7 @@ export class Parser {
       }
     }
     
-    return {
+    const funcDecl: AST.FuncDecl = {
       kind: "FuncDecl",
       name,
       genericParams,
@@ -2724,6 +2783,20 @@ export class Parser {
       body: body as AST.Block,
       span: this.createSpan(start, this.current - 1)
     };
+    
+    // Add decorators if provided
+    if (decorators && decorators.length > 0) {
+      funcDecl.decorators = decorators.map(expr => ({
+        kind: "Decorator" as const,
+        name: expr.kind === "Identifier" ? expr : 
+              expr.kind === "Call" && expr.callee.kind === "Identifier" ? expr.callee :
+              { kind: "Identifier" as const, name: "unknown", span: expr.span },
+        args: expr.kind === "Call" ? expr.args : undefined,
+        span: expr.span
+      }));
+    }
+    
+    return funcDecl;
   }
   
   private parseFuncDeclWithReturnTypeBefore(): AST.FuncDecl {
@@ -2781,28 +2854,36 @@ export class Parser {
   private parseParameter(): AST.Param {
     const start = this.current;
     
-    // Skip parameter decorators (e.g., @NotNull, @Range(...))
-    // These aren't part of the spec but we need to handle them gracefully
+    // Parse parameter decorators (e.g., @NotNull, @Range(...))
+    const decorators: AST.Decorator[] = [];
     while (this.check("@")) {
       this.advance(); // consume @
       
-      // Skip the decorator name
+      // Parse the decorator name
       if (this.peek().type === TokenType.Identifier) {
-        this.advance();
+        const name = this.parseIdentifier();
+        let args: AST.Expr[] | undefined;
         
-        // Skip decorator arguments if present
+        // Parse decorator arguments if present
         if (this.check("(")) {
           this.advance(); // consume (
-          let depth = 1;
-          while (depth > 0 && !this.isAtEnd()) {
-            if (this.check("(")) {
-              depth++;
-            } else if (this.check(")")) {
-              depth--;
-            }
-            this.advance();
+          args = [];
+          
+          if (!this.check(")")) {
+            do {
+              args.push(this.parseExpression());
+            } while (this.match(","));
           }
+          
+          this.consume(")", "Expected ')' after decorator arguments");
         }
+        
+        decorators.push({
+          kind: "Decorator",
+          name,
+          args,
+          span: this.createSpan(start, this.current - 1)
+        });
       }
     }
     
@@ -2892,7 +2973,7 @@ export class Parser {
       defaultValue = this.parseExpression();
     }
     
-    return {
+    const param: AST.Param = {
       name,
       type,
       defaultValue,
@@ -2902,6 +2983,13 @@ export class Parser {
       blockParam: isBlockParam,
       span: this.createSpan(start, this.current - 1)
     };
+    
+    // Add decorators if present
+    if (decorators.length > 0) {
+      param.decorators = decorators;
+    }
+    
+    return param;
   }
   
   private parseExpressionBody(): AST.Block {
@@ -4549,24 +4637,60 @@ export class Parser {
     if (this.check("{")) {
       this.advance(); // consume {
       
-      // For now, parse object type literals as opaque types
-      // Skip to the matching closing brace
-      let depth = 1;
-      while (depth > 0 && !this.isAtEnd()) {
-        if (this.check("{")) depth++;
-        else if (this.check("}")) {
-          depth--;
-          if (depth === 0) break;
+      const properties: AST.ObjectTypeProperty[] = [];
+      
+      while (!this.check("}") && !this.isAtEnd()) {
+        // Skip virtual semicolons
+        while (this.peek().virtualSemi) {
+          this.advance();
         }
-        this.advance();
+        
+        if (this.check("}")) break;
+        
+        // Parse readonly modifier
+        let readonly = false;
+        if (this.match("readonly")) {
+          readonly = true;
+        }
+        
+        // Parse property name
+        const name = this.parseIdentifier().name;
+        
+        // Parse optional marker
+        let optional = false;
+        if (this.match("?")) {
+          optional = true;
+        }
+        
+        // Expect colon
+        this.consume(":", "Expected ':' after property name in object type");
+        
+        // Parse property type
+        const type = this.parseType();
+        
+        properties.push({
+          name,
+          type,
+          optional,
+          readonly
+        });
+        
+        // Skip comma or semicolon separators
+        if (this.match(",", ";")) {
+          // consumed
+        }
+        
+        // Skip virtual semicolons
+        while (this.peek().virtualSemi) {
+          this.advance();
+        }
       }
       
       this.consume("}", "Expected '}' in object type literal");
       
-      // Return a simple type representing the object literal
       return {
-        kind: "SimpleType",
-        id: { kind: "Identifier", name: "object", span: this.createSpan(start, start) },
+        kind: "ObjectType",
+        properties,
         span: this.createSpan(start, this.current - 1)
       };
     }
@@ -4965,28 +5089,37 @@ export class Parser {
         // Parse class member
         const memberStart = this.current;
         
-        // Skip member decorators (e.g., @Input, @Output, @HostListener)
-        // These aren't part of the spec but we need to handle them gracefully
+        // Parse member decorators (e.g., @Input, @Output, @HostListener)
+        const memberDecorators: AST.Decorator[] = [];
         while (this.check("@")) {
+          const decoratorStart = this.current;
           this.advance(); // consume @
           
-          // Skip the decorator name
+          // Parse the decorator name
           if (this.peek().type === TokenType.Identifier) {
-            this.advance();
+            const name = this.parseIdentifier();
+            let args: AST.Expr[] | undefined;
             
-            // Skip decorator arguments if present
+            // Parse decorator arguments if present
             if (this.check("(")) {
               this.advance(); // consume (
-              let depth = 1;
-              while (depth > 0 && !this.isAtEnd()) {
-                if (this.check("(")) {
-                  depth++;
-                } else if (this.check(")")) {
-                  depth--;
-                }
-                this.advance();
+              args = [];
+              
+              if (!this.check(")")) {
+                do {
+                  args.push(this.parseExpression());
+                } while (this.match(","));
               }
+              
+              this.consume(")", "Expected ')' after decorator arguments");
             }
+            
+            memberDecorators.push({
+              kind: "Decorator",
+              name,
+              args,
+              span: this.createSpan(decoratorStart, this.current - 1)
+            });
           }
           
           // Skip virtual semicolons after decorators
@@ -5045,7 +5178,7 @@ export class Parser {
             // Parse method body
             const body = this.parseBlock();
             
-            members.push({
+            const member: any = {
               kind: "Method",
               name: methodName,
               params,
@@ -5054,7 +5187,11 @@ export class Parser {
               async: true,
               genericParams,
               span: this.createSpan(memberStart, this.current - 1)
-            } as any);
+            };
+            if (memberDecorators.length > 0) {
+              member.decorators = memberDecorators;
+            }
+            members.push(member);
             continue;
           }
           
@@ -5695,15 +5832,22 @@ export class Parser {
     
     // Handle 'export default'
     if (this.match("default")) {
-      // For now, just consume the default export
-      // Skip until semicolon or newline
-      while (!this.check(";") && !this.check("\n") && !this.isAtEnd()) {
-        this.advance();
+      let declaration: AST.Decl | undefined;
+      
+      // Check if it's a declaration (class, function, etc.)
+      if (this.isDeclStart()) {
+        declaration = this.parseDeclaration();
+      } else {
+        // It's an expression - wrap it in an ExprStmt for now
+        const expr = this.parseExpression();
+        this.consumeSemicolon();
+        // We'll store the expression as-is - could extend AST later
       }
-      this.consumeSemicolon();
       
       return {
         kind: "ExportDecl",
+        declaration,
+        isDefault: true,
         span: this.createSpan(start, this.current - 1)
       };
     }

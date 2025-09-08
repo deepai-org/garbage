@@ -11,6 +11,8 @@ PolyScript is a universal parser that handles multiple programming language synt
 - Deep nested generic types (15+ levels tested) parsing successfully
 - JSX with generic type arguments fully implemented per spec
 - Type assertions (`<Type>expr`) correctly disambiguated from JSX
+- ImportDecl AST type added with full destructured import support
+- Export default parsing now stores the exported declaration
 - All tests passing - no known failures
 
 ## Quick Debugging Commands
@@ -109,38 +111,43 @@ The parser currently consumes but doesn't store many syntax elements, often with
 
 ### Critical Issues to Fix
 
-#### Phase 1: Import/Export Data
-1. **Destructured Imports** - Store import specifiers
+#### Phase 1: Import/Export Data ✅ COMPLETED
+1. **Destructured Imports** ✅ - Store import specifiers
    - `import { foo, bar as baz } from 'module'`
-   - Need to store each imported name and alias
+   - Added ImportDecl AST type with specifiers array
    
-2. **Default Exports** - Store the exported value
+2. **Default Exports** ✅ - Store the exported value
    - `export default class MyClass {}`
-   - Need to store what's being exported
+   - Added isDefault flag and stores declaration
    
-3. **Destructured Exports** - Store export specifiers  
+3. **Destructured Exports** ✅ - Store export specifiers  
    - `export { foo, bar } from 'module'`
-   - Need to store each exported name
+   - Already working - ExportSpecifier array stores names
 
-#### Phase 2: Decorators
-4. **Function Decorators** - Add decorator field to FuncDecl
+#### Phase 2: Decorators ✅ COMPLETED
+4. **Function Decorators** ✅ - Add decorator field to FuncDecl
    - `@decorator function foo() {}`
+   - Decorators array added to FuncDecl AST
    
-5. **Parameter Decorators** - Add decorators to Param
+5. **Parameter Decorators** ✅ - Add decorators to Param
    - `function foo(@NotNull param: string)`
+   - Decorators array added to Param AST
    
-6. **Class Member Decorators** - Add decorators to ClassMember
+6. **Class Member Decorators** ✅ - Add decorators to ClassMember
    - `class Foo { @Input prop: string }`
+   - Decorators array added to ClassMember AST
 
-#### Phase 3: Type System
-7. **Where Clauses** - Store type constraints
-   - `impl<T> MyTrait for T where T: Clone {}`
-   
-8. **Object Type Literals** - Parse full structure
+#### Phase 3: Type System  
+8. **Object Type Literals** ✅ - Parse full structure
    - `type Obj = { x: number, y: string }`
+   - Added ObjectType and ObjectTypeProperty to AST
+   - Supports optional and readonly modifiers
    
-9. **Method Types in Interfaces** - Store method signatures
+9. **Method Types in Interfaces** - Store method signatures (IN PROGRESS)
    - `interface I { method(param: string): number }`
+   
+7. **Where Clauses** - Store type constraints (DEFERRED - Rust-specific)
+   - `impl<T> MyTrait for T where T: Clone {}`
 
 #### Phase 4: Advanced Expressions
 10. **Computed Object Properties** - Store computed keys properly
