@@ -7312,10 +7312,19 @@ export class Parser {
       
       const elementName = next.value;
       
-      // Pattern 3: Capital letter → JSX Component
+      // Pattern 3: Capital letter → JSX Component (but check for type assertion)
       if (/^[A-Z]/.test(elementName)) {
         if (DEBUG) console.log('isJSXElement: found capital letter component');
         this.current = saved;
+        
+        // Check if this could be a type assertion <Type>expr
+        // Type assertions have the pattern <Identifier>expression
+        // JSX has patterns like <Identifier attr=... or <Identifier>...content...</Identifier>
+        if (this.couldBeTypeAssertion()) {
+          if (DEBUG) console.log('isJSXElement: looks like type assertion, not JSX');
+          return false;
+        }
+        
         return this.isValidJSXContinuation();
       }
       
@@ -7357,6 +7366,87 @@ export class Parser {
       'bigint', 'symbol', 'any', 'unknown', 'never', 'void'
     ]);
     return primitiveTypes.has(name);
+  }
+
+  private couldBeTypeAssertion(): boolean {
+    // Check if <Identifier>expr pattern matches type assertion
+    // We're at position before <, need to look ahead
+    const saved = this.current;
+    
+    try {
+      this.advance(); // consume <
+      const identifier = this.advance(); // consume identifier
+      
+      // Check if we have a simple > (not >> or >>>)
+      if (this.peek().value !== ">") {
+        this.current = saved;
+        return false;
+      }
+      
+      this.advance(); // consume >
+      
+      // Now check what follows - for type assertion, it should be an expression
+      const next = this.peek();
+      
+      // IMPORTANT: Check for JSX closing tag pattern
+      // If we see text followed by </Identifier>, it's JSX not type assertion
+      if (next.type === TokenType.Identifier || next.type === TokenType.JSXText) {
+        // Look ahead for closing tag
+        let checkPos = this.current + 1;
+        while (checkPos < this.tokens.length) {
+          const tok = this.tokens[checkPos];
+          if (tok.value === "<" && 
+              checkPos + 1 < this.tokens.length && 
+              this.tokens[checkPos + 1].value === "/") {
+            // Found closing tag, this is JSX
+            this.current = saved;
+            return false;
+          }
+          // Stop at statement boundaries
+          if (tok.value === ";" || tok.value === "\n" || tok.newline) {
+            break;
+          }
+          checkPos++;
+        }
+      }
+      
+      // Type assertion patterns: <Type>identifier, <Type>(expr), <Type>123, etc.
+      // These start expressions
+      if (next.type === TokenType.Identifier ||
+          next.type === TokenType.NumericLiteral ||
+          next.type === TokenType.StringLiteral ||
+          next.value === "(" ||
+          next.value === "[" ||
+          next.value === "{" ||
+          next.value === "!" ||
+          next.value === "-" ||
+          next.value === "+" ||
+          next.value === "~" ||
+          next.value === "typeof" ||
+          next.value === "new" ||
+          next.value === "await" ||
+          next.value === "yield" ||
+          next.value === "function" ||
+          next.value === "class") {
+        this.current = saved;
+        return true;
+      }
+      
+      // JSX patterns: <Component></Component>, <Component>{expr}, <Component>text
+      // If we see < it could be another JSX element
+      if (next.value === "<") {
+        // Could be nested JSX, but also could be comparison
+        // For now, assume JSX
+        this.current = saved;
+        return false;
+      }
+      
+      this.current = saved;
+      return false;
+    } catch {
+      this.current = saved;
+      return false;
+    }
   }
 
   private isInJSXExpressionContext(): boolean {
