@@ -942,7 +942,12 @@ export class Transpiler {
         let fnType = '(';
         for (let i = 0; i < type.params.length; i++) {
           if (i > 0) fnType += ', ';
-          fnType += `arg${i}: ` + this.visitType(type.params[i]);
+          const param = type.params[i];
+          // Use parameter name if available, otherwise generate one
+          const paramName = param.name ? this.visitIdentifier(param.name) : `arg${i}`;
+          fnType += paramName;
+          if (param.optional) fnType += '?';
+          fnType += ': ' + this.visitType(param.type);
         }
         fnType += ') => ' + this.visitType(type.ret);
         return fnType;

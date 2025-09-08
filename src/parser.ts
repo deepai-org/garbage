@@ -4559,7 +4559,10 @@ export class Parser {
       const ret = this.parseType(); // recursive call for right-associativity
       type = {
         kind: "FuncType",
-        params: [type],
+        params: [{
+          type: type,
+          span: type.span
+        }],
         ret,
         span: this.createSpanFrom(type)
       };
@@ -4789,17 +4792,45 @@ export class Parser {
       
       if (isFuncType) {
         this.advance(); // (
-        const params: AST.TypeNode[] = [];
+        const params: AST.FuncTypeParam[] = [];
         
         if (!this.check(")")) {
-          // Parse parameter types - for now just skip the names
+          // Parse parameter types with optional names
           do {
-            // Skip parameter name if present
-            if (this.peek().type === TokenType.Identifier && this.peekNext()?.value === ":") {
-              this.advance(); // name
-              this.advance(); // :
+            const paramStart = this.current;
+            let name: AST.Identifier | undefined;
+            let optional = false;
+            
+            // Check if parameter has a name
+            if (this.peek().type === TokenType.Identifier) {
+              const next = this.peekNext();
+              if (next?.value === ":" || next?.value === "?") {
+                name = this.parseIdentifier();
+                
+                // Check for optional marker (?) before the colon
+                if (this.match("?")) {
+                  optional = true;
+                }
+                
+                // Now consume the colon
+                if (this.match(":")) {
+                  // Type annotation follows
+                } else if (!optional) {
+                  // Error: expected : after parameter name (unless it was optional)
+                  throw this.error(this.peek(), "Expected ':' after parameter name");
+                }
+              }
             }
-            params.push(this.parseType());
+            
+            // Parse the type
+            const type = this.parseType();
+            
+            params.push({
+              name,
+              type,
+              optional,
+              span: this.createSpan(paramStart, this.current - 1)
+            });
           } while (this.match(","));
         }
         
@@ -6999,7 +7030,10 @@ export class Parser {
       case "GenericType":
         return `${type.base.name}<${type.args.map(a => this.typeNodeToString(a)).join(", ")}>`;
       case "FuncType":
-        return `(${type.params.map(p => this.typeNodeToString(p)).join(", ")}) => ${this.typeNodeToString(type.ret)}`;
+        return `(${type.params.map(p => {
+          const name = p.name ? p.name.name + ": " : "";
+          return name + this.typeNodeToString(p.type);
+        }).join(", ")}) => ${this.typeNodeToString(type.ret)}`;
       case "ImplType":
         return `impl ${this.typeNodeToString(type.trait)}`;
       case "DynType":

@@ -45,8 +45,15 @@ export interface GenericType {
 
 export interface FuncType {
   kind: "FuncType";
-  params: TypeNode[];
+  params: FuncTypeParam[];  // Changed to store names with types
   ret: TypeNode;
+  span: Span;
+}
+
+export interface FuncTypeParam {
+  name?: Identifier;  // Optional parameter name
+  type: TypeNode;
+  optional?: boolean;
   span: Span;
 }
 
