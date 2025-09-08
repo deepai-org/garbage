@@ -34,7 +34,7 @@ const frag = <>{x < 5 ? <div>{x}</div> : <span>{x*2}</span>}</>
       
       // Verify JSX fragment
       const fragDecl = ast.body[1] as AST.ConstDecl;
-      const fragInit = (fragDecl as any).decls[0].init as AST.JSXFragment;
+      const fragInit = (fragDecl as any).values[0] as AST.JSXFragment;
       expect(fragInit.kind).toBe('JSXFragment');
       
       // Verify comparison inside JSX
@@ -42,7 +42,7 @@ const frag = <>{x < 5 ? <div>{x}</div> : <span>{x*2}</span>}</>
         .filter(n => n.op === '<');
       expect(comparisons.length).toBeGreaterThan(0);
       expect((comparisons[0].left as any).name).toBe('x');
-      expect((comparisons[0].right as any).value).toBe(5);
+      expect((comparisons[0].right as any).raw).toBe('5');
     });
     
     test('distinguishes type assertion from JSX', () => {
@@ -54,7 +54,7 @@ const el = <MyComponent x={a < 5} />
       
       // Verify type assertion
       const letDecl = ast.body[0] as AST.VarDecl;
-      const binary = (letDecl as any).decls[0].init as AST.Binary;
+      const binary = (letDecl as any).values[0] as AST.Binary;
       expect(binary.kind).toBe('Binary');
       expect(binary.op).toBe('+');
       const typeAssertion = binary.left as AST.TypeAssertion;
@@ -63,38 +63,38 @@ const el = <MyComponent x={a < 5} />
       
       // Verify JSX element with comparison prop
       const constDecl = ast.body[1] as AST.ConstDecl;
-      const jsx = (constDecl as any).decls[0].init as AST.JSXElement;
+      const jsx = (constDecl as any).values[0] as AST.JSXElement;
       verifyJSXElement(jsx, 'MyComponent', { selfClosing: true });
       
       // Verify comparison in JSX prop
-      const prop = (jsx as any).attrs[0];
+      const prop = (jsx as any).openingElement.attributes[0];
       expect(prop.name.name).toBe('x');
-      const propValue = prop.value as AST.Binary;
+      const propValue = prop.value.expression as AST.Binary;
       verifyComparison(propValue, '<', 'a', 5);
     });
     
     test('distinguishes generic call from JSX', () => {
       const code = `
-let z = map<string, int>(["1","2","3"], parseInt)
+let z = map<string, int>(["1","2","3"], parseInt);
 <MyComponent value={foo<string>("hi")} />
 `;
       const ast = parseCode(code);
       
       // Verify generic call
       const letDecl = ast.body[0] as AST.VarDecl;
-      const call = (letDecl as any).decls[0].init as AST.Call;
+      const call = (letDecl as any).values[0] as AST.Call;
       expect(call.kind).toBe('Call');
       const callee = (call as any).func || call.callee;
       expect((callee as any).name).toBe('map');
-      expect((call as any).typeArgs).toHaveLength(2);
+      expect((call as any).genericArgs).toHaveLength(2);
       
       // Verify JSX with generic call in prop
       const jsx = (ast.body[1] as AST.ExprStmt).expr as AST.JSXElement;
       verifyJSXElement(jsx, 'MyComponent', { selfClosing: true });
-      const prop = (jsx as any).attrs[0];
-      const propCall = prop.value as AST.Call;
+      const prop = (jsx as any).openingElement.attributes[0];
+      const propCall = prop.value.expression as AST.Call;
       expect(propCall.kind).toBe('Call');
-      expect((propCall as any).typeArgs).toHaveLength(1);
+      expect((propCall as any).genericArgs).toHaveLength(1);
     });
     
     test('parses generic channel type correctly', () => {
@@ -102,7 +102,7 @@ let z = map<string, int>(["1","2","3"], parseInt)
       const ast = parseCode(code);
       
       const letDecl = ast.body[0] as AST.VarDecl;
-      const type = (letDecl as any).decls[0].type;
+      const type = (letDecl as any).type;
       verifyGenericType(type, 'chan', 1);
     });
   });
@@ -118,13 +118,13 @@ const z = foo < Bar > (baz)
       
       // First: generic call
       const decl1 = ast.body[0] as AST.ConstDecl;
-      const call1 = (decl1 as any).decls[0].init as AST.Call;
+      const call1 = (decl1 as any).values[0] as AST.Call;
       expect(call1.kind).toBe('Call');
-      expect((call1 as any).typeArgs).toHaveLength(1);
+      expect((call1 as any).genericArgs).toHaveLength(1);
       
-      // Second: comparison operators
+      // Second: comparison operators (currently fails due to parser bug)
       const decl2 = ast.body[1] as AST.ConstDecl;
-      const expr2 = (decl2 as any).decls[0].init;
+      const expr2 = (decl2 as any).values[0];
       // Should be parsed as (foo < Bar) > (baz)
       const outer = expr2 as AST.Binary;
       expect(outer.op).toBe('>');
@@ -145,11 +145,11 @@ let r = foo<Bar>(x) << 2
       
       // Second: generic call then shift
       const letDecl = ast.body[1] as AST.VarDecl;
-      const shift2 = (letDecl as any).decls[0].init as AST.Binary;
+      const shift2 = (letDecl as any).values[0] as AST.Binary;
       expect(shift2.op).toBe('<<');
       const call = shift2.left as AST.Call;
       expect(call.kind).toBe('Call');
-      expect((call as any).typeArgs).toHaveLength(1);
+      expect((call as any).genericArgs).toHaveLength(1);
     });
     
     test('parses JSX fragment with conditionals', () => {
@@ -161,7 +161,7 @@ const f = <>
       const ast = parseCode(code);
       
       const constDecl = ast.body[0] as AST.ConstDecl;
-      const frag = (constDecl as any).decls[0].init as AST.JSXFragment;
+      const frag = (constDecl as any).values[0] as AST.JSXFragment;
       expect(frag.kind).toBe('JSXFragment');
       
       // Find comparison in conditional
@@ -187,7 +187,7 @@ let v = <-c
       
       // Verify channel type
       const letDecl1 = ast.body[0] as AST.VarDecl;
-      verifyGenericType((letDecl1 as any).decls[0].type, 'chan', 1);
+      verifyGenericType((letDecl1 as any).type, 'chan', 1);
       
       // Verify channel send
       const send = (ast.body[1] as AST.ExprStmt).expr as AST.Binary;
@@ -195,7 +195,7 @@ let v = <-c
       
       // Verify channel receive
       const letDecl2 = ast.body[2] as AST.VarDecl;
-      const receive = (letDecl2 as any).decls[0].init as AST.Unary;
+      const receive = (letDecl2 as any).values[0] as AST.Unary;
       verifyChannelReceive(receive, 'c');
     });
     
@@ -222,9 +222,9 @@ let v = <-c
       
       const jsx = (ast.body[0] as AST.ExprStmt).expr as AST.JSXElement;
       verifyJSXElement(jsx, 'Worker', { selfClosing: true });
-      const prop = (jsx as any).attrs[0];
+      const prop = (jsx as any).openingElement.attributes[0];
       expect(prop.name.name).toBe('channel');
-      expect((prop.value as any).name).toBe('c');
+      expect(prop.value.expression.name).toBe('c');
     });
     
     test('parses channel receive in ternary inside JSX', () => {
@@ -258,13 +258,13 @@ let y = (<number>x) * 2
       
       // First: simple type assertion
       const letDecl1 = ast.body[0] as AST.VarDecl;
-      const assertion1 = (letDecl1 as any).decls[0].init as AST.TypeAssertion;
+      const assertion1 = (letDecl1 as any).values[0] as AST.TypeAssertion;
       expect(assertion1.kind).toBe('TypeAssertion');
       expect((assertion1.type as any).name || (assertion1.type as any).id?.name).toBe('number');
       
       // Second: type assertion in expression
       const letDecl2 = ast.body[1] as AST.VarDecl;
-      const binary = (letDecl2 as any).decls[0].init as AST.Binary;
+      const binary = (letDecl2 as any).values[0] as AST.Binary;
       expect(binary.op).toBe('*');
       const assertion2 = binary.left as AST.TypeAssertion;
       expect(assertion2.kind).toBe('TypeAssertion');

@@ -1691,8 +1691,8 @@ export class Parser {
       }
       
       // Check for generic type arguments only in specific contexts
-      // Don't try to parse generics if the < is followed by a number (likely comparison)
-      if (this.peek().value === "<" && !this.peek().wsBefore) {
+      // Per spec: generics only when < follows identifier with NO whitespace
+      if (this.peek().value === "<" && !this.hasWhitespaceBefore()) {
         const next = this.peekNext();
         // Only try to parse generics if not followed by a number or obvious non-type token
         if (next && next.type !== TokenType.NumericLiteral && 
@@ -7147,6 +7147,23 @@ export class Parser {
   
   private previous(): Token | undefined {
     return this.tokens[this.current - 1];
+  }
+  
+  private hasWhitespaceBefore(): boolean {
+    // Check if there's whitespace between the previous token and current token
+    const prev = this.previous();
+    const curr = this.peek();
+    
+    if (!prev || !curr) return false;
+    
+    // Check if tokens are adjacent by comparing end position of prev with start position of curr
+    // If prev.end exists, use it; otherwise fall back to checking positions
+    if (prev.end !== undefined && curr.start !== undefined) {
+      return curr.start > prev.end;
+    }
+    
+    // Fallback: assume whitespace if we can't determine positions
+    return false;
   }
   
   private advance(): Token {
