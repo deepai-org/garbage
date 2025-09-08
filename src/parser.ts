@@ -5324,6 +5324,45 @@ export class Parser {
           }
         }
         
+        // Handle TypeScript-style getters and setters
+        // But only if get/set is not followed immediately by ( (then it's a method name)
+        if ((this.peek().value === "get" || this.peek().value === "set") && 
+            this.peekNext()?.value !== "(") {
+          const isGetter = this.peek().value === "get";
+          this.advance(); // consume get/set
+          
+          // Parse the accessor name
+          const accessorName = this.parseIdentifier();
+          
+          // Parse parameters (setters have one parameter)
+          const params = this.parseParameterList();
+          
+          // Parse return type if present
+          let returnType: AST.TypeNode | undefined;
+          if (this.match(":")) {
+            returnType = this.parseType();
+          }
+          
+          // Parse the body
+          const body = this.parseBlock();
+          
+          const accessorMember: any = {
+            kind: isGetter ? "Getter" : "Setter",
+            name: accessorName,
+            params,
+            type: returnType,
+            body,
+            span: this.createSpan(memberStart, this.current - 1)
+          };
+          
+          if (memberDecorators.length > 0) {
+            accessorMember.decorators = memberDecorators;
+          }
+          
+          members.push(accessorMember);
+          continue;
+        }
+        
         // Handle visibility modifiers for fields/methods
         let visibility: "public" | "private" | "protected" | undefined;
         if (this.match("public", "private", "protected")) {
@@ -5344,9 +5383,8 @@ export class Parser {
         
         // Handle property declarations and methods
         // Allow keywords as method names (e.g., 'match' can be a method name)
-        // Also handle cases where we have decorators but no other modifiers
-        if ((visibility || isStatic || isReadonly || memberDecorators.length > 0) && 
-            (this.peek().type === TokenType.Identifier || this.peek().type === TokenType.Keyword)) {
+        // Process any identifier or keyword as a potential field/method name
+        if (this.peek().type === TokenType.Identifier || this.peek().type === TokenType.Keyword) {
           // Check if this might be a C# property with type first: public Type Name { get; set; }
           // We need to look ahead to distinguish between:
           // - public string Title { get; set; }  (C# property)
@@ -5383,28 +5421,66 @@ export class Parser {
                 // Now handle the { get; set; } part
                 if (this.match("{")) {
                   // Parse property accessors
+                  let getter: AST.PropertyAccessor | undefined;
+                  let setter: AST.PropertyAccessor | undefined;
+                  
                   while (!this.check("}") && !this.isAtEnd()) {
-                    if (this.match("get", "set")) {
-                      // Consume the accessor keyword
-                      // Check for semicolon or block
+                    const accessorStart = this.current;
+                    let accessorVisibility: "public" | "private" | "protected" | undefined;
+                    
+                    // Check for visibility modifier on accessor
+                    if (this.match("public", "private", "protected")) {
+                      accessorVisibility = this.previous()!.value as any;
+                    }
+                    
+                    if (this.match("get")) {
+                      // Parse getter
                       if (this.match(";")) {
-                        // Auto-property
+                        // Auto-property getter
+                        getter = {
+                          visibility: accessorVisibility,
+                          span: this.createSpan(accessorStart, this.current - 1)
+                        };
                       } else if (this.check("{")) {
-                        // Property with body - skip it
-                        this.parseBlock();
+                        // Getter with body
+                        const body = this.parseBlock();
+                        getter = {
+                          visibility: accessorVisibility,
+                          body,
+                          span: this.createSpan(accessorStart, this.current - 1)
+                        };
                       }
-                    } else {
-                      // Skip unexpected tokens
+                    } else if (this.match("set")) {
+                      // Parse setter
+                      if (this.match(";")) {
+                        // Auto-property setter
+                        setter = {
+                          visibility: accessorVisibility,
+                          span: this.createSpan(accessorStart, this.current - 1)
+                        };
+                      } else if (this.check("{")) {
+                        // Setter with body
+                        const body = this.parseBlock();
+                        setter = {
+                          visibility: accessorVisibility,
+                          body,
+                          span: this.createSpan(accessorStart, this.current - 1)
+                        };
+                      }
+                    } else if (!accessorVisibility) {
+                      // Skip unexpected tokens (but we already consumed visibility)
                       this.advance();
                     }
                   }
                   this.consume("}", "Expected '}' after property accessors");
                   
-                  // Create a property field
+                  // Create a property with accessors
                   members.push({
-                    kind: "Field",
+                    kind: "Property",
                     name,
                     type: fieldType,
+                    getter,
+                    setter,
                     span: this.createSpan(memberStart, this.current - 1)
                   } as any);
                   continue;

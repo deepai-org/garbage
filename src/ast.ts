@@ -694,7 +694,7 @@ export interface ClassDecl {
 }
 
 export interface ClassMember {
-  kind: "Field" | "Method" | "Constructor";
+  kind: "Field" | "Method" | "Constructor" | "Getter" | "Setter" | "Property";
   name?: Identifier;
   visibility?: "public" | "private" | "protected";
   static?: boolean;
@@ -703,6 +703,15 @@ export interface ClassMember {
   params?: Param[];
   body?: Block;
   decorators?: Decorator[];
+  // For properties with accessors
+  getter?: PropertyAccessor;
+  setter?: PropertyAccessor;
+  span: Span;
+}
+
+export interface PropertyAccessor {
+  visibility?: "public" | "private" | "protected";
+  body?: Block;
   span: Span;
 }
 
