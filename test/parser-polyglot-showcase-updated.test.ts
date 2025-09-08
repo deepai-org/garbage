@@ -93,7 +93,8 @@ async function processDataStream(source: DataSource) {
     
     // Verify parameter has type annotation
     const param = func.params[0];
-    expect(param.name.name).toBe('source');
+    expect(param.name.kind).toBe('Identifier');
+    expect((param.name as AST.Identifier).name).toBe('source');
     expect(param.type).toBeDefined();
     
     // Find short declarations in function body

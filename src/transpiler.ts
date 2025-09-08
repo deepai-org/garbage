@@ -746,7 +746,13 @@ export class Transpiler {
     
     // Simple parameter case
     if (node.params.length === 1 && !node.params[0].type && !node.params[0].defaultValue) {
-      result += this.visitIdentifier(node.params[0].name);
+      const param = node.params[0];
+      if (param.name.kind === 'Identifier') {
+        result += this.visitIdentifier(param.name);
+      } else {
+        // For destructuring patterns, use parentheses
+        result += '(' + this.visitParam(param, true) + ')';
+      }
     } else {
       result += '(';
       for (let i = 0; i < node.params.length; i++) {
@@ -856,13 +862,64 @@ export class Transpiler {
   // Helper methods
 
   private visitParam(param: AST.Param, inline = false): string | void {
-    const result = this.visitIdentifier(param.name) + 
-      '' +
+    let nameStr: string;
+    
+    // Handle destructuring patterns
+    if (param.name.kind === 'ArrayPattern') {
+      nameStr = this.visitArrayPattern(param.name);
+    } else if (param.name.kind === 'ObjectPattern') {
+      nameStr = this.visitObjectPattern(param.name);
+    } else {
+      nameStr = this.visitIdentifier(param.name);
+    }
+    
+    const result = nameStr + 
       (param.type ? ': ' + this.visitType(param.type) : '') +
       (param.defaultValue ? ' = ' + this.visitExpression(param.defaultValue) : '');
     
     if (inline) return result;
     this.emit(result);
+  }
+  
+  private visitArrayPattern(pattern: AST.ArrayPattern): string {
+    let result = '[';
+    for (let i = 0; i < pattern.elements.length; i++) {
+      if (i > 0) result += ', ';
+      const elem = pattern.elements[i];
+      if (elem === null) {
+        // Hole in array pattern
+        continue;
+      } else if (elem.kind === 'Identifier') {
+        result += this.visitIdentifier(elem);
+      } else if (elem.kind === 'ArrayPattern') {
+        result += this.visitArrayPattern(elem);
+      } else if (elem.kind === 'ObjectPattern') {
+        result += this.visitObjectPattern(elem);
+      }
+    }
+    result += ']';
+    return result;
+  }
+  
+  private visitObjectPattern(pattern: AST.ObjectPattern): string {
+    let result = '{';
+    for (let i = 0; i < pattern.properties.length; i++) {
+      if (i > 0) result += ', ';
+      const prop = pattern.properties[i];
+      result += this.visitIdentifier(prop.key);
+      if (!prop.shorthand) {
+        result += ': ';
+        if (prop.value.kind === 'Identifier') {
+          result += this.visitIdentifier(prop.value);
+        } else if (prop.value.kind === 'ArrayPattern') {
+          result += this.visitArrayPattern(prop.value);
+        } else if (prop.value.kind === 'ObjectPattern') {
+          result += this.visitObjectPattern(prop.value);
+        }
+      }
+    }
+    result += '}';
+    return result;
   }
 
   private visitType(type: AST.TypeNode): string {
@@ -975,7 +1032,14 @@ export class Transpiler {
       if (member.params) {
         member.params.forEach((param, i) => {
           if (i > 0) this.emit(', ');
-          this.emit(this.visitIdentifier(param.name));
+          // Handle destructuring patterns in interface methods
+          if (param.name.kind === 'Identifier') {
+            this.emit(this.visitIdentifier(param.name));
+          } else if (param.name.kind === 'ArrayPattern') {
+            this.emit(this.visitArrayPattern(param.name));
+          } else if (param.name.kind === 'ObjectPattern') {
+            this.emit(this.visitObjectPattern(param.name));
+          }
           if (param.type) {
             this.emit(': ');
             this.emit(this.visitType(param.type));

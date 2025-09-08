@@ -259,8 +259,10 @@ describe('Parser Core Tests (UPDATED)', () => {
       });
       
       // Verify parameters
-      expect(func.params[0].name.name).toBe('a');
-      expect(func.params[1].name.name).toBe('b');
+      expect(func.params[0].name.kind).toBe('Identifier');
+      expect((func.params[0].name as AST.Identifier).name).toBe('a');
+      expect(func.params[1].name.kind).toBe('Identifier');
+      expect((func.params[1].name as AST.Identifier).name).toBe('b');
       
       // Verify function body
       const body = func.body as AST.Block;
@@ -287,7 +289,8 @@ describe('Parser Core Tests (UPDATED)', () => {
       const arrow = decl.values[0] as AST.Lambda;
       expect(arrow.kind).toBe('Lambda');
       expect(arrow.params).toHaveLength(1);
-      expect(arrow.params[0].name.name).toBe('x');
+      expect(arrow.params[0].name.kind).toBe('Identifier');
+      expect((arrow.params[0].name as AST.Identifier).name).toBe('x');
       
       // Verify body: x * 2
       if (arrow.body.kind === 'Binary') {

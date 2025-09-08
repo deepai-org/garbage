@@ -2912,34 +2912,12 @@ export class Parser {
     }
     
     // Parse parameter name - allow keywords as parameter names
-    let name: AST.Identifier;
+    let name: AST.Identifier | AST.ArrayPattern | AST.ObjectPattern;
     const token = this.peek();
     
     // Handle destructuring patterns { a, b } or [ a, b ]
     if (token.value === "{" || token.value === "[") {
-      const openChar = token.value;
-      const closeChar = openChar === "{" ? "}" : "]";
-      this.advance(); // consume opening bracket
-      
-      // For now, skip the destructuring pattern content
-      let depth = 1;
-      let nameStr = openChar;
-      while (depth > 0 && !this.isAtEnd()) {
-        const t = this.peek();
-        if (t.value === openChar) depth++;
-        else if (t.value === closeChar) depth--;
-        nameStr += t.value;
-        this.advance();
-        if (depth > 0 && !this.isAtEnd()) nameStr += " ";
-      }
-      
-      // Create a synthetic identifier for the destructured parameter
-      name = {
-        kind: "Identifier",
-        name: nameStr,
-        originalSpelling: nameStr,
-        span: this.createSpan(start, this.current - 1)
-      };
+      name = this.parseDestructuringPattern();
     }
     // In parameter context, allow any keyword or identifier as parameter name
     else if (token.type === TokenType.Identifier || 
@@ -2990,6 +2968,101 @@ export class Parser {
     }
     
     return param;
+  }
+  
+  private parseDestructuringPattern(): AST.ArrayPattern | AST.ObjectPattern {
+    const start = this.current;
+    const token = this.peek();
+    
+    if (token.value === "[") {
+      // Array destructuring pattern
+      this.advance(); // consume [
+      const elements: (AST.Identifier | AST.ArrayPattern | AST.ObjectPattern | null)[] = [];
+      
+      while (!this.check("]") && !this.isAtEnd()) {
+        // Skip virtual semicolons
+        while (this.peek().virtualSemi) this.advance();
+        
+        // Check for hole in array pattern (e.g., [a, , c])
+        if (this.check(",")) {
+          elements.push(null);
+          this.advance();
+          continue;
+        }
+        
+        // Parse nested pattern or identifier
+        if (this.check("[") || this.check("{")) {
+          elements.push(this.parseDestructuringPattern());
+        } else if (this.peek().type === TokenType.Identifier) {
+          const name = this.parseIdentifier();
+          elements.push(name);
+        } else {
+          break;
+        }
+        
+        // Skip virtual semicolons before comma
+        while (this.peek().virtualSemi) this.advance();
+        
+        if (!this.match(",")) {
+          break;
+        }
+      }
+      
+      this.consume("]", "Expected ']' after array pattern");
+      
+      return {
+        kind: "ArrayPattern",
+        elements,
+        span: this.createSpan(start, this.current - 1)
+      };
+    } else {
+      // Object destructuring pattern
+      this.advance(); // consume {
+      const properties: AST.ObjectPatternProperty[] = [];
+      
+      while (!this.check("}") && !this.isAtEnd()) {
+        // Skip virtual semicolons
+        while (this.peek().virtualSemi) this.advance();
+        
+        const propStart = this.current;
+        const key = this.parseIdentifier();
+        
+        let value: AST.Identifier | AST.ArrayPattern | AST.ObjectPattern = key;
+        let shorthand = true;
+        
+        if (this.match(":")) {
+          shorthand = false;
+          // Parse nested pattern or identifier
+          if (this.check("[") || this.check("{")) {
+            value = this.parseDestructuringPattern();
+          } else {
+            value = this.parseIdentifier();
+          }
+        }
+        
+        properties.push({
+          key,
+          value,
+          shorthand,
+          span: this.createSpan(propStart, this.current - 1)
+        });
+        
+        // Skip virtual semicolons before comma
+        while (this.peek().virtualSemi) this.advance();
+        
+        if (!this.match(",")) {
+          break;
+        }
+      }
+      
+      this.consume("}", "Expected '}' after object pattern");
+      
+      return {
+        kind: "ObjectPattern",
+        properties,
+        span: this.createSpan(start, this.current - 1)
+      };
+    }
   }
   
   private parseExpressionBody(): AST.Block {

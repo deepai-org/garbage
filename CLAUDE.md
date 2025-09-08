@@ -4,14 +4,14 @@
 PolyScript is a universal parser that handles multiple programming language syntaxes in a single file.
 
 ## Current Status
-- **391/391 tests passing (100% pass rate!)**
+- **402/402 tests passing (100% pass rate!)**
 - Complete type parsing and multi-paradigm support
 - Rust-style syntax fully supported (::, async move, .await, ? try operator)
 - Match statements with multiple arms working correctly
 - Deep nested generic types (15+ levels tested) parsing successfully
 - JSX with generic type arguments fully implemented per spec
 - Type assertions (`<Type>expr`) correctly disambiguated from JSX
-- All tests passing - no known failures
+- List comprehensions with multiple target variables
 
 ### Recent AST Improvements (Missing Data Recovery)
 - ✅ ImportDecl AST type with full destructured import support
@@ -20,6 +20,26 @@ PolyScript is a universal parser that handles multiple programming language synt
 - ✅ ObjectType for object type literals with modifiers
 - ✅ Interface method signatures with full parameter info
 - ✅ Computed object properties storing actual expressions
+- ✅ List comprehensions with multiple target variables
+
+### Remaining Data Discard Issues
+The parser still discards data in these areas (must be fixed):
+
+1. **Destructuring patterns in parameters** (line ~2924)
+   - Currently creates synthetic string instead of proper AST nodes
+   - Should parse and store actual destructuring pattern structure
+
+2. **Function type parameter names** (line ~4722)
+   - Parameter names are consumed but not stored
+   - Only parameter types are kept in the AST
+
+3. **Method signatures in class declarations** (line ~5464)
+   - Entire method signature is skipped when found
+   - Should parse and store method signature details
+
+4. **Property accessor bodies** (line ~5288)
+   - Get/set accessor blocks are parsed but discarded
+   - Should store accessor implementations in AST
 
 ## Quick Debugging Commands
 ```bash

@@ -386,8 +386,10 @@ function renderTemplate($title, $items) {
         verifyFunctionDecl(func, 'renderTemplate', { paramCount: 2 });
         
         // Parameters should have $ prefix
-        expect(func.params[0].name.name).toBe('$title');
-        expect(func.params[1].name.name).toBe('$items');
+        expect(func.params[0].name.kind).toBe('Identifier');
+        expect((func.params[0].name as AST.Identifier).name).toBe('$title');
+        expect(func.params[1].name.kind).toBe('Identifier');
+        expect((func.params[1].name as AST.Identifier).name).toBe('$items');
         
         // Find JSX elements
         const jsxElements = findJSXElements(ast);

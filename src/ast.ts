@@ -628,7 +628,7 @@ export interface FuncDecl {
 }
 
 export interface Param {
-  name: Identifier;
+  name: Identifier | ArrayPattern | ObjectPattern;  // Support destructuring patterns
   type?: TypeNode;
   defaultValue?: Expr;
   visibility?: "public" | "private" | "protected";
@@ -636,6 +636,26 @@ export interface Param {
   spread?: boolean;
   blockParam?: boolean;
   decorators?: Decorator[];
+  span: Span;
+}
+
+// Destructuring patterns
+export interface ArrayPattern {
+  kind: "ArrayPattern";
+  elements: (Identifier | ArrayPattern | ObjectPattern | null)[];  // null for holes like [a, , c]
+  span: Span;
+}
+
+export interface ObjectPattern {
+  kind: "ObjectPattern";
+  properties: ObjectPatternProperty[];
+  span: Span;
+}
+
+export interface ObjectPatternProperty {
+  key: Identifier;
+  value: Identifier | ArrayPattern | ObjectPattern;
+  shorthand?: boolean;
   span: Span;
 }
 
