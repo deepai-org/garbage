@@ -357,11 +357,6 @@ function StatusIcon({ status }: { status: Status }) {
         const ast = parseCode(code);
         
         // ✅ STRONG: Verify JSX element with type arguments
-        // Note: This particular syntax may not be fully supported yet
-        if (ast.body.length === 0) {
-            console.warn('Generic JSX element syntax not fully supported');
-            return;
-        }
         expect(ast.body).toHaveLength(1);
         const decl = ast.body[0] as AST.ConstDecl;
         expect(decl.names[0].name).toBe('list');

@@ -401,12 +401,7 @@ const config = {
         const ast = parseCode(code);
         
         // ✅ STRONG: Verify JSX with comments
-        // Handle edge case where parser may not parse this correctly
-        if (ast.body.length === 0) {
-            // Known issue: JSX with leading newline and comments may not parse
-            expect(ast.body.length).toBe(0); // Document the current behavior
-            return;
-        }
+        expect(ast.body.length).toBeGreaterThan(0);
         const jsx = (ast.body[0] as AST.ExprStmt).expr as AST.JSXElement;
         verifyJSXElement(jsx, 'div');
         

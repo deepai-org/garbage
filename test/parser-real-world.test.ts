@@ -520,36 +520,20 @@ docker run --rm \$TTY_FLAG \\
   myimage "\$@"
 `;
 
-    let ast: AST.Program;
-    let parseError: any = null;
+    const ast = parseCode(code);
     
-    try {
-      ast = parseCode(code);
-    } catch (error) {
-      parseError = error;
-      // For Bash scripts, we expect at least partial parsing
-      // Even if there's an error, the parser should handle some of it
-      ast = { kind: 'Program', body: [], span: { start: 0, end: 0, line: 1, column: 1 } } as AST.Program;
-    }
+    // Verify Bash script parsed successfully
+    expect(ast.body.length).toBeGreaterThan(0);
     
-    // Complex Bash scripts may not fully parse yet
-    // The parser currently has limited support for Bash-specific syntax
-    if (parseError) {
-      // Parse error is expected for complex Bash - that's okay
-      expect(parseError).toBeDefined();
-    } else if (ast.body.length === 0) {
-      // Empty AST is also acceptable for now - Bash support is partial
-      expect(ast.body).toEqual([]);
-    } else {
-      // If it did parse something, check for recognized structures
-      const hasAnyStructure = ast.body.some((node: any) => 
-        node.kind === 'VarDecl' || 
-        node.kind === 'Assign' ||
-        node.kind === 'If' ||
-        node.kind === 'ExprStmt'
-      );
-      expect(hasAnyStructure).toBe(true);
-    }
+    // Check for recognized structures
+    const hasAnyStructure = ast.body.some((node: any) => 
+      node.kind === 'VarDecl' || 
+      node.kind === 'Assign' ||
+      node.kind === 'If' ||
+      node.kind === 'ExprStmt' ||
+      node.kind === 'Echo'
+    );
+    expect(hasAnyStructure).toBe(true);
     
     // This test documents that Bash parsing is a known limitation
     // Future work should improve Bash-specific syntax support

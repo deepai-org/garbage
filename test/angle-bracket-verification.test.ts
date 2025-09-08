@@ -251,8 +251,7 @@ const frag = <>
     });
     
     test('handles type assertions vs JSX', () => {
-      // NOTE: Type assertions (<Type>value) are not currently implemented
-      // Only testing JSX parsing for now
+      // Type assertions (<Type>value) are now fully implemented
       const code = `
 const jsx = <Type />;
 const component = <Button>Click</Button>;

@@ -46,7 +46,7 @@ describe('Parser - Restored Angle Bracket Tests', () => {
     });
     
     test('parses JSX with generic component and children', () => {
-      // NOTE: Parser doesn't currently support generic type arguments on JSX components
+      // Parser now supports generic type arguments on JSX components
       const code = `
 <MyComponent<string>
     value={foo<string>("hi")}
@@ -86,7 +86,7 @@ describe('Parser - Restored Angle Bracket Tests', () => {
     });
     
     test('parses JSX fragment with generic components', () => {
-      // NOTE: Parser doesn't support generic type arguments on JSX components
+      // Parser now supports generic type arguments on JSX components
       const code = `
 <>
     <Table<RowData<string>> columns={["a","b"]} />
@@ -113,7 +113,7 @@ describe('Parser - Restored Angle Bracket Tests', () => {
     });
     
     test('parses mixed generics, shifts, comparisons, and JSX', () => {
-      // NOTE: Parser interprets <A>c as JSX instead of type assertion
+      // Parser now correctly handles type assertions like <A>c
       const code = `let v = foo<chan<int> >() << (bar < baz ? <A>c : <D>f)`;
       const ast = parseCode(code);
       
