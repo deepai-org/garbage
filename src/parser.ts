@@ -4496,18 +4496,24 @@ export class Parser {
         // Handle >> and >>> as closing brackets
         if (this.check(">>")) {
           // Treat >> as a single > and leave the second > for the next parse
-          this.advance(); // consume >>
-          // Inject a synthetic > token back for the next level
-          const syntheticToken = { ...this.tokens[this.current - 1] };
-          syntheticToken.value = ">";
-          this.tokens.splice(this.current, 0, syntheticToken);
+          const originalToken = this.tokens[this.current];
+          // Replace >> with > at current position
+          this.tokens[this.current] = { ...originalToken, value: ">" };
+          // Insert another > after it
+          const syntheticToken = { ...originalToken, value: ">" };
+          this.tokens.splice(this.current + 1, 0, syntheticToken);
+          // Now consume the first >
+          this.advance();
         } else if (this.check(">>>")) {
           // Treat >>> as a single > and leave >> for the next parse
-          this.advance(); // consume >>>
-          // Inject a synthetic >> token back for the next level
-          const syntheticToken = { ...this.tokens[this.current - 1] };
-          syntheticToken.value = ">>";
-          this.tokens.splice(this.current, 0, syntheticToken);
+          const originalToken = this.tokens[this.current];
+          // Replace >>> with > at current position
+          this.tokens[this.current] = { ...originalToken, value: ">" };
+          // Insert >> after it
+          const syntheticToken = { ...originalToken, value: ">>" };
+          this.tokens.splice(this.current + 1, 0, syntheticToken);
+          // Now consume the first >
+          this.advance();
         } else {
           this.consume(">", "Expected '>' after channel element type");
         }
@@ -4720,18 +4726,24 @@ export class Parser {
         // Handle >> and >>> as closing brackets
         if (this.check(">>")) {
           // Treat >> as a single > and leave the second > for the next parse
-          this.advance(); // consume >>
-          // Inject a synthetic > token back for the next level
-          const syntheticToken = { ...this.tokens[this.current - 1] };
-          syntheticToken.value = ">";
-          this.tokens.splice(this.current, 0, syntheticToken);
+          const originalToken = this.tokens[this.current];
+          // Replace >> with > at current position
+          this.tokens[this.current] = { ...originalToken, value: ">" };
+          // Insert another > after it
+          const syntheticToken = { ...originalToken, value: ">" };
+          this.tokens.splice(this.current + 1, 0, syntheticToken);
+          // Now consume the first >
+          this.advance();
         } else if (this.check(">>>")) {
           // Treat >>> as a single > and leave >> for the next parse
-          this.advance(); // consume >>>
-          // Inject a synthetic >> token back for the next level
-          const syntheticToken = { ...this.tokens[this.current - 1] };
-          syntheticToken.value = ">>";
-          this.tokens.splice(this.current, 0, syntheticToken);
+          const originalToken = this.tokens[this.current];
+          // Replace >>> with > at current position
+          this.tokens[this.current] = { ...originalToken, value: ">" };
+          // Insert >> after it
+          const syntheticToken = { ...originalToken, value: ">>" };
+          this.tokens.splice(this.current + 1, 0, syntheticToken);
+          // Now consume the first >
+          this.advance();
         } else {
           this.consume(">", "Expected '>' after channel element type");
         }
@@ -4783,18 +4795,24 @@ export class Parser {
       if (closeBracket === ">") {
         if (this.check(">>")) {
           // Treat >> as a single > and leave the second > for the next parse
-          this.advance(); // consume >>
-          // Inject a synthetic > token back for the next level
-          const syntheticToken = { ...this.tokens[this.current - 1] };
-          syntheticToken.value = ">";
-          this.tokens.splice(this.current, 0, syntheticToken);
+          const originalToken = this.tokens[this.current];
+          // Replace >> with > at current position
+          this.tokens[this.current] = { ...originalToken, value: ">" };
+          // Insert another > after it
+          const syntheticToken = { ...originalToken, value: ">" };
+          this.tokens.splice(this.current + 1, 0, syntheticToken);
+          // Now consume the first >
+          this.advance();
         } else if (this.check(">>>")) {
           // Treat >>> as a single > and leave >> for the next parse
-          this.advance(); // consume >>>
-          // Inject a synthetic >> token back for the next level
-          const syntheticToken = { ...this.tokens[this.current - 1] };
-          syntheticToken.value = ">>";
-          this.tokens.splice(this.current, 0, syntheticToken);
+          const originalToken = this.tokens[this.current];
+          // Replace >>> with > at current position
+          this.tokens[this.current] = { ...originalToken, value: ">" };
+          // Insert >> after it
+          const syntheticToken = { ...originalToken, value: ">>" };
+          this.tokens.splice(this.current + 1, 0, syntheticToken);
+          // Now consume the first >
+          this.advance();
         } else {
           // Debug: log what token we actually have
           const actualToken = this.peek();
@@ -6977,18 +6995,24 @@ export class Parser {
       // Handle >> and >>> as closing brackets
       if (this.check(">>")) {
         // Treat >> as a single > and leave the second > for the next parse
-        this.advance(); // consume >>
-        // Inject a synthetic > token back for the next level
-        const syntheticToken = { ...this.tokens[this.current - 1] };
-        syntheticToken.value = ">";
-        this.tokens.splice(this.current, 0, syntheticToken);
+        const originalToken = this.tokens[this.current];
+        // Replace >> with > at current position
+        this.tokens[this.current] = { ...originalToken, value: ">" };
+        // Insert another > after it
+        const syntheticToken = { ...originalToken, value: ">" };
+        this.tokens.splice(this.current + 1, 0, syntheticToken);
+        // Now consume the first >
+        this.advance();
       } else if (this.check(">>>")) {
         // Treat >>> as a single > and leave >> for the next parse
-        this.advance(); // consume >>>
-        // Inject a synthetic >> token back for the next level
-        const syntheticToken = { ...this.tokens[this.current - 1] };
-        syntheticToken.value = ">>";
-        this.tokens.splice(this.current, 0, syntheticToken);
+        const originalToken = this.tokens[this.current];
+        // Replace >>> with > at current position
+        this.tokens[this.current] = { ...originalToken, value: ">" };
+        // Insert >> after it
+        const syntheticToken = { ...originalToken, value: ">>" };
+        this.tokens.splice(this.current + 1, 0, syntheticToken);
+        // Now consume the first >
+        this.advance();
       } else {
         this.consume(">", "Expected '>' after generic arguments");
       }
