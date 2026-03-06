@@ -853,7 +853,7 @@ export class Lexer {
     const keywords = [
       'await', 'break', 'case', 'catch', 'class', 'const', 'continue',
       'default', 'defer', 'def', 'do', 'done', 'elif', 'else', 'end',
-      'enum', 'export', 'extends', 'false', 'fi', 'final', 'for', 'fun',
+      'enum', 'export', 'extends', 'false', 'fi', 'final', 'for', 'fun', 'func',
       'function', 'go', 'if', 'import', 'in', 'interface', 'let', 'loop',
       'match', 'new', 'null', 'nil', 'of', 'package', 'return', 'struct', 'switch',
       'then', 'this', 'throw', 'trait', 'true', 'try', 'type', 'until',

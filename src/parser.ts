@@ -30,10 +30,18 @@ export class Parser {
   
   // Directives
   private nextStmtGenericMode: "on" | "off" | "auto" = "auto";
-  
-  constructor(tokens: Token[]) {
-    this.tokens = tokens.filter(t => 
-      t.type !== TokenType.Comment && 
+  private fileRuntimeDirective?: string;
+
+  constructor(tokens: Token[], source?: string) {
+    // Scan raw source text for runtime directive (comments are skipped by lexer)
+    if (source) {
+      const match = source.match(/\/\/\s*@runtime\s+(\S+)/);
+      if (match) {
+        this.fileRuntimeDirective = match[1];
+      }
+    }
+    this.tokens = tokens.filter(t =>
+      t.type !== TokenType.Comment &&
       t.type !== TokenType.Whitespace
     );
   }
@@ -53,6 +61,7 @@ export class Parser {
         return {
           kind: "Program",
           body,
+          runtimeDirective: this.fileRuntimeDirective,
           span: this.createSpan(0, Math.min(this.current, this.tokens.length - 1))
         };
       }
@@ -85,6 +94,7 @@ export class Parser {
     return {
       kind: "Program",
       body,
+      runtimeDirective: this.fileRuntimeDirective,
       span: this.createSpan(0, this.tokens.length - 1)
     };
   }
@@ -1624,9 +1634,33 @@ export class Parser {
       return this.parsePostfix(id);
     }
     
+    // Runtime tag expressions: @py(expr), @js(expr), @go(expr), @rb(expr), @java(expr)
+    if (this.check("@")) {
+      const runtimeNames = ["py", "js", "go", "rb", "java"];
+      const nextToken = this.peekNext();
+      if (nextToken && runtimeNames.includes(nextToken.value)) {
+        const checkpoint = this.current;
+        const atToken = this.advance(); // consume @
+        const runtimeName = this.advance(); // consume runtime name
+        if (this.check("(")) {
+          this.advance(); // consume (
+          const expr = this.parseExpression();
+          this.consume(")", "Expected ')' after runtime-tagged expression");
+          return this.parsePostfix({
+            kind: "RuntimeTag",
+            runtime: runtimeName.value as AST.RuntimeTag["runtime"],
+            expr,
+            span: this.createSpan(checkpoint, this.current - 1)
+          });
+        }
+        // Not a runtime tag call, restore
+        this.current = checkpoint;
+      }
+    }
+
     // Identifiers and sigil identifiers
     // Also allow keywords as identifiers in expression context when they can't start a statement
-    if (this.peek().type === TokenType.Identifier || 
+    if (this.peek().type === TokenType.Identifier ||
         this.peek().type === TokenType.SigilIdentifier ||
         (this.peek().type === TokenType.Keyword && !this.isStatementKeyword(this.peek().value))) {
       const token = this.peek();
@@ -2506,9 +2540,15 @@ export class Parser {
   
   private parseFuncDecl(async = false, unsafe = false, generator = false, decorators?: AST.Expr[]): AST.FuncDecl {
     const start = this.current - 1;
-    
+
+    // Capture the declaration keyword for runtime resolution
+    const declKeywordValue = this.tokens[start]?.value;
+    const declKeyword = (declKeywordValue === "def" || declKeywordValue === "fn" ||
+                         declKeywordValue === "fun" || declKeywordValue === "func" ||
+                         declKeywordValue === "function") ? declKeywordValue as AST.FuncDecl["declKeyword"] : undefined;
+
     // Check if this is a Ruby-style def
-    const isRubyDef = this.tokens[start]?.value === "def";
+    const isRubyDef = declKeywordValue === "def";
     
     const name = this.parseIdentifier();
     
@@ -2727,6 +2767,7 @@ export class Parser {
       async,
       unsafe,
       generator,
+      declKeyword,
       body: body as AST.Block,
       span: this.createSpan(start, this.current - 1)
     };
@@ -3315,6 +3356,7 @@ export class Parser {
         kind: "Match",
         expr: discriminant,
         arms,
+        style: isPythonStyle ? "python" : "rust",
         span: this.createSpan(start, this.current - 1)
       } as AST.Match;
     }

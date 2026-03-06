@@ -121,7 +121,8 @@ export type Expr =
   | TypeAssertion
   | JSXElement
   | JSXFragment
-  | Match;
+  | Match
+  | RuntimeTag;
 
 export interface NumericLiteral {
   kind: "NumericLiteral";
@@ -363,6 +364,7 @@ export interface Match {
   kind: "Match";
   expr: Expr;
   arms: MatchArm[];
+  style?: "rust" | "python";
   span: Span;
 }
 
@@ -552,6 +554,13 @@ export interface JSXSpreadChild {
   span: Span;
 }
 
+export interface RuntimeTag {
+  kind: "RuntimeTag";
+  runtime: "py" | "js" | "go" | "rb" | "java";
+  expr: Expr;
+  span: Span;
+}
+
 export interface Go {
   kind: "Go";
   expr: Expr;
@@ -633,6 +642,7 @@ export interface FuncDecl {
   unsafe?: boolean;
   generator?: boolean;
   decorators?: Decorator[];
+  declKeyword?: "def" | "fn" | "fun" | "func" | "function";
   body: Block;
   span: Span;
 }
@@ -833,5 +843,6 @@ export interface Block {
 export interface Program {
   kind: "Program";
   body: (Decl | Stmt)[];
+  runtimeDirective?: string;
   span: Span;
 }

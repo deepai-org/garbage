@@ -8,10 +8,12 @@
     "build": "tsc",
     "dev": "ts-node src/index.ts",
     "transpile": "ts-node src/cli-transpile.ts",
+    "polyc": "ts-node src/cli-manifest.ts",
     "repl": "node repl.js"
   },
   "bin": {
-    "polyscript-transpile": "./dist/cli-transpile.js"
+    "polyscript-transpile": "./dist/cli-transpile.js",
+    "polyc": "./dist/cli-manifest.js"
   },
   "keywords": ["polyscript", "language", "compiler"],
   "author": "",
