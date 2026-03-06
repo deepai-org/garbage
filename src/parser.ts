@@ -5397,6 +5397,14 @@ export class Parser {
               // Could be a modifier if followed by another identifier/type
               // or could be the member name if followed by : ( { < [
               if (next.type === TokenType.Identifier) {
+                // Before treating as modifier, check for C# property pattern: type name { get/set }
+                const twoAhead = this.peekAt(2);
+                const threeAhead = this.peekAt(3);
+                if (twoAhead?.value === "{" &&
+                    (threeAhead?.value === "get" || threeAhead?.value === "set")) {
+                  // This is a type name, not a modifier - leave for C# property detection
+                  break;
+                }
                 // Likely a modifier (e.g., "volatile x")
                 unknownModifiers.push(value);
                 this.advance();

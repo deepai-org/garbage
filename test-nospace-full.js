@@ -1,1 +1,0 @@
-const { Lexer } = require('./dist/lexer'); const { Parser } = require('./dist/parser'); const code = `<Result<Vec<T>,Error>>{ok: true}`; const lexer = new Lexer(code); const tokens = lexer.tokenize(); const parser = new Parser(tokens); const ast = parser.parse(); console.log('Body length:', ast.body.length); if (ast.body[0]) console.log('First item kind:', ast.body[0].kind);
