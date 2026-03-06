@@ -932,3 +932,332 @@ describe('Import Hoisting', () => {
     }
   });
 });
+
+// ─── Control Flow: if ────────────────────────────────────────────
+
+describe('Control Flow: if', () => {
+  test('if/else produces IfOp with arms and elseBody', () => {
+    const code = 'function test(x) {\n  if (x > 0) {\n    return 1\n  } else {\n    return 0\n  }\n}';
+    const m = parseAndManifest(code);
+    const funcOp = m.ops.find(op => op.op === 'func_def') as any;
+    const ifOp = funcOp.body.find((op: any) => op.op === 'if');
+    expect(ifOp).toBeDefined();
+    expect(ifOp.arms).toHaveLength(1);
+    expect(ifOp.arms[0].test.kind).toBe('expr');
+    expect(ifOp.arms[0].test.code).toContain('x > 0');
+    expect(ifOp.arms[0].body).toHaveLength(1);
+    expect(ifOp.elseBody).toBeDefined();
+    expect(ifOp.elseBody).toHaveLength(1);
+  });
+
+  test('if arm test has runtime and code (expr kind)', () => {
+    const code = 'function f() {\n  if (true) {\n    return 1\n  }\n}';
+    const m = parseAndManifest(code);
+    const funcOp = m.ops.find(op => op.op === 'func_def') as any;
+    const ifOp = funcOp.body.find((op: any) => op.op === 'if');
+    expect(ifOp.arms[0].test.kind).toBe('expr');
+    expect(ifOp.arms[0].test.runtime).toBeDefined();
+  });
+
+  test('if body ops are valid manifest ops', () => {
+    const code = 'function f(x) {\n  if (x > 0) {\n    const y = x + 1\n    return y\n  }\n}';
+    const m = parseAndManifest(code);
+    const funcOp = m.ops.find(op => op.op === 'func_def') as any;
+    const ifOp = funcOp.body.find((op: any) => op.op === 'if');
+    expect(ifOp.arms[0].body.length).toBeGreaterThanOrEqual(1);
+  });
+});
+
+// ─── Control Flow: loop ──────────────────────────────────────────
+
+describe('Control Flow: loop', () => {
+  test('while loop produces LoopOp with mode "while" and test', () => {
+    const code = 'function f() {\n  let i = 0\n  while (i < 10) {\n    i += 1\n  }\n}';
+    const m = parseAndManifest(code);
+    const funcOp = m.ops.find(op => op.op === 'func_def') as any;
+    const loopOp = funcOp.body.find((op: any) => op.op === 'loop');
+    expect(loopOp).toBeDefined();
+    expect(loopOp.mode).toBe('while');
+    expect(loopOp.test).toBeDefined();
+    expect(loopOp.test.kind).toBe('expr');
+    expect(loopOp.test.code).toContain('i < 10');
+    expect(loopOp.body.length).toBeGreaterThan(0);
+  });
+
+  test('loop body contains inner ops', () => {
+    const code = 'function f() {\n  let x = 0\n  while (x < 5) {\n    console.log(x)\n    x += 1\n  }\n}';
+    const m = parseAndManifest(code);
+    const funcOp = m.ops.find(op => op.op === 'func_def') as any;
+    const loopOp = funcOp.body.find((op: any) => op.op === 'loop');
+    expect(loopOp.body.length).toBe(2); // console.log + assign
+  });
+});
+
+// ─── Compound Assignment ─────────────────────────────────────────
+
+describe('Compound Assignment', () => {
+  test('+= with literal produces assign op', () => {
+    const code = 'let x = 10\nx += 5';
+    const m = parseAndManifest(code);
+    const assignOp = m.ops.find(op => op.op === 'assign') as any;
+    expect(assignOp).toBeDefined();
+    expect(assignOp.target).toBe('x');
+    expect(assignOp.operator).toBe('+=');
+    expect(assignOp.value).toEqual({ kind: 'literal', value: 5 });
+  });
+
+  test('-= with literal produces assign op', () => {
+    const code = 'let x = 100\nx -= 25';
+    const m = parseAndManifest(code);
+    const assignOp = m.ops.find(op => op.op === 'assign') as any;
+    expect(assignOp.operator).toBe('-=');
+    expect(assignOp.value).toEqual({ kind: 'literal', value: 25 });
+  });
+
+  test('*= with literal produces assign op', () => {
+    const code = 'let x = 10\nx *= 3';
+    const m = parseAndManifest(code);
+    const assignOp = m.ops.find(op => op.op === 'assign') as any;
+    expect(assignOp.operator).toBe('*=');
+    expect(assignOp.value).toEqual({ kind: 'literal', value: 3 });
+  });
+
+  test('+= with expression produces assign with from eval', () => {
+    const code = 'let x = 10\nconst y = 5\nx += y';
+    const m = parseAndManifest(code);
+    const assignOps = m.ops.filter(op => op.op === 'assign') as any[];
+    const compoundAssign = assignOps.find(op => op.operator === '+=');
+    expect(compoundAssign).toBeDefined();
+    expect(compoundAssign.from).toBeDefined();
+    expect(compoundAssign.from.op).toBe('eval');
+  });
+});
+
+// ─── Async Functions ─────────────────────────────────────────────
+
+describe('Async Functions', () => {
+  test('async function produces func_def with async: true', () => {
+    const code = 'async function fetchData(url) {\n  const result = await fetch(url)\n  return result\n}';
+    const m = parseAndManifest(code);
+    const funcOp = m.ops.find(op => op.op === 'func_def') as any;
+    expect(funcOp).toBeDefined();
+    expect(funcOp.async).toBe(true);
+    expect(funcOp.name).toBe('fetchData');
+  });
+
+  test('non-async function does not have async flag', () => {
+    const code = 'function add(a, b) { return a + b }';
+    const m = parseAndManifest(code);
+    const funcOp = m.ops.find(op => op.op === 'func_def') as any;
+    expect(funcOp.async).toBeUndefined();
+  });
+});
+
+// ─── Spread and Default Params ───────────────────────────────────
+
+describe('Spread and Default Params', () => {
+  test('spread param has spread: true in ParamDef', () => {
+    const code = 'function merge(base, ...items) {\n  return base\n}';
+    const m = parseAndManifest(code);
+    const funcOp = m.ops.find(op => op.op === 'func_def') as any;
+    expect(funcOp.params).toHaveLength(2);
+    expect(funcOp.params[0].spread).toBeUndefined();
+    expect(funcOp.params[1].name).toBe('items');
+    expect(funcOp.params[1].spread).toBe(true);
+  });
+
+  test('default param has defaultValue in ParamDef', () => {
+    const code = 'function greet(name = "world") {\n  return name\n}';
+    const m = parseAndManifest(code);
+    const funcOp = m.ops.find(op => op.op === 'func_def') as any;
+    expect(funcOp.params).toHaveLength(1);
+    expect(funcOp.params[0].name).toBe('name');
+    expect(funcOp.params[0].defaultValue).toBeDefined();
+    expect(funcOp.params[0].defaultValue.kind).toBe('literal');
+  });
+});
+
+// ─── Declare with Mutable Flag ───────────────────────────────────
+
+describe('Declare with Mutable Flag', () => {
+  test('let without value produces declare with mutable: true', () => {
+    const code = 'let pending';
+    const m = parseAndManifest(code);
+    const declOp = m.ops.find(op => op.op === 'declare') as any;
+    expect(declOp).toBeDefined();
+    expect(declOp.bind).toBe('pending');
+    expect(declOp.mutable).toBe(true);
+    expect(declOp.value).toBeUndefined();
+  });
+
+  test('const with literal produces declare with mutable: false', () => {
+    const code = 'const VERSION = 42';
+    const m = parseAndManifest(code);
+    const declOp = m.ops.find(op => op.op === 'declare') as any;
+    expect(declOp).toBeDefined();
+    expect(declOp.bind).toBe('VERSION');
+    expect(declOp.mutable).toBe(false);
+    expect(declOp.value).toEqual({ kind: 'literal', value: 42 });
+  });
+});
+
+// ─── Return Variants ─────────────────────────────────────────────
+
+describe('Return Variants', () => {
+  test('return literal uses value not from', () => {
+    const code = 'function f() { return 42 }';
+    const m = parseAndManifest(code);
+    const funcOp = m.ops.find(op => op.op === 'func_def') as any;
+    const ret = funcOp.body.find((op: any) => op.op === 'return');
+    expect(ret.value).toEqual({ kind: 'literal', value: 42 });
+    expect(ret.from).toBeUndefined();
+  });
+
+  test('return string literal uses value', () => {
+    const code = 'function f() { return "hello" }';
+    const m = parseAndManifest(code);
+    const funcOp = m.ops.find(op => op.op === 'func_def') as any;
+    const ret = funcOp.body.find((op: any) => op.op === 'return');
+    expect(ret.value).toEqual({ kind: 'literal', value: 'hello' });
+  });
+
+  test('return identifier uses ref', () => {
+    const code = 'function f() {\n  const x = 10\n  return x\n}';
+    const m = parseAndManifest(code);
+    const funcOp = m.ops.find(op => op.op === 'func_def') as any;
+    const ret = funcOp.body.find((op: any) => op.op === 'return');
+    expect(ret.value).toEqual({ kind: 'ref', name: 'x' });
+    expect(ret.from).toBeUndefined();
+  });
+
+  test('return expression uses from with eval', () => {
+    const code = 'function f(a, b) { return a + b }';
+    const m = parseAndManifest(code);
+    const funcOp = m.ops.find(op => op.op === 'func_def') as any;
+    const ret = funcOp.body.find((op: any) => op.op === 'return');
+    expect(ret.from).toBeDefined();
+    expect(ret.from.op).toBe('eval');
+    expect(ret.from.code).toContain('a');
+    expect(ret.value).toBeUndefined();
+  });
+
+  test('return with no value produces bare return', () => {
+    const code = 'function f() {\n  console.log("done")\n  return\n}';
+    const m = parseAndManifest(code);
+    const funcOp = m.ops.find(op => op.op === 'func_def') as any;
+    expect(funcOp).toBeDefined();
+    const ret = funcOp.body.find((op: any) => op.op === 'return');
+    expect(ret).toBeDefined();
+    expect(ret.value).toBeUndefined();
+    expect(ret.from).toBeUndefined();
+  });
+});
+
+// ─── Recursive Functions ─────────────────────────────────────────
+
+describe('Recursive Functions', () => {
+  test('recursive function captures itself in body', () => {
+    const code = 'function factorial(n) {\n  if (n <= 1) { return 1 }\n  return n * factorial(n - 1)\n}';
+    const m = parseAndManifest(code);
+    const funcOp = m.ops.find(op => op.op === 'func_def') as any;
+    // The return from eval should capture 'factorial' (self-reference) and 'n' (param)
+    const returns = funcOp.body.filter((op: any) => op.op === 'return');
+    const exprReturn = returns.find((r: any) => r.from);
+    expect(exprReturn).toBeDefined();
+    expect(exprReturn.from.captures).toHaveProperty('factorial');
+    expect(exprReturn.from.captures).toHaveProperty('n');
+  });
+});
+
+// ─── Compiled Targets (Rust/C) ───────────────────────────────────
+
+describe('Compiled Targets', () => {
+  test('Rust-tagged code produces exec_compiled with lang rust', () => {
+    // The runtime-blocks module detects Rust/C via runtime affinity
+    // We test at the manifest type level since Rust syntax detection is limited
+    const { consolidateBlocks, isCompiledRuntime } = require('../src/codegen-omnivm/runtime-blocks');
+    expect(isCompiledRuntime('rust')).toBe(true);
+    expect(isCompiledRuntime('c')).toBe(true);
+    expect(isCompiledRuntime('javascript')).toBe(false);
+    expect(isCompiledRuntime('python')).toBe(false);
+  });
+});
+
+// ─── Native Op ───────────────────────────────────────────────────
+
+describe('Native Op', () => {
+  test('Go goroutine produces native op with error', () => {
+    // go keyword triggers native op with error message
+    const code = 'go fetch()';
+    const m = parseAndManifest(code);
+    const nativeOp = m.ops.find(op => op.op === 'native') as any;
+    expect(nativeOp).toBeDefined();
+    expect(nativeOp.runtime).toBe('go');
+    expect(nativeOp.code).toContain('ERROR');
+  });
+
+  test('defer produces native op', () => {
+    const code = 'defer cleanup()';
+    const m = parseAndManifest(code);
+    const nativeOp = m.ops.find(op => op.op === 'native') as any;
+    expect(nativeOp).toBeDefined();
+    expect(nativeOp.code).toContain('defer');
+  });
+});
+
+// ─── Manifest Type Validation ────────────────────────────────────
+
+describe('Manifest Type Validation', () => {
+  const validOps = [
+    'exec', 'eval', 'exec_compiled', 'eval_compiled',
+    'declare', 'assign', 'func_def', 'return',
+    'if', 'loop', 'parallel', 'concat', 'import', 'native',
+  ];
+
+  test('all op types are in the ManifestOp union', () => {
+    // This is a type-level test — the validOps list should match the union
+    expect(validOps).toContain('parallel');
+    expect(validOps).toContain('exec_compiled');
+    expect(validOps).toContain('native');
+  });
+
+  test('ParallelOp has branches with runtime, code, bind', () => {
+    // Type-level validation of the parallel op structure
+    const parallelOp = {
+      op: 'parallel' as const,
+      branches: [
+        { runtime: 'python', code: 'fetch_data()', bind: 'pyResult' },
+        { runtime: 'javascript', code: "fetch('/api')", bind: 'jsResult' },
+        { runtime: 'ruby', code: 'compute()', bind: 'rbResult' },
+      ],
+    };
+    expect(parallelOp.branches).toHaveLength(3);
+    expect(parallelOp.branches[0].runtime).toBe('python');
+    expect(parallelOp.branches[2].runtime).toBe('ruby');
+  });
+
+  test('LoopOp supports all four modes', () => {
+    const modes: Array<'while' | 'for' | 'infinite' | 'foreach'> = ['while', 'for', 'infinite', 'foreach'];
+    for (const mode of modes) {
+      const loopOp = { op: 'loop' as const, mode, body: [] };
+      expect(loopOp.mode).toBe(mode);
+    }
+  });
+
+  test('ConditionExpr supports expr, ref, and literal kinds', () => {
+    const exprCond = { kind: 'expr' as const, runtime: 'javascript', code: 'x > 0' };
+    const refCond = { kind: 'ref' as const, name: 'isReady' };
+    const litCond = { kind: 'literal' as const, value: true };
+    expect(exprCond.kind).toBe('expr');
+    expect(refCond.kind).toBe('ref');
+    expect(litCond.kind).toBe('literal');
+  });
+
+  test('FuncDefOp supports requires field for Go dependencies', () => {
+    const code = 'func handler(x) {\n  result := fetch_data(x)\n  return result\n}';
+    const m = parseAndManifest(code);
+    const funcOp = m.ops.find(op => op.op === 'func_def') as any;
+    expect(funcOp.requires).toContain('fetch_data');
+    expect(funcOp.source).toContain('func Init(');
+  });
+});

@@ -271,6 +271,32 @@ export class ManifestCodeGenerator {
     const aff = this.affinityMap.get(expr);
     const runtime = aff?.runtime || contextRuntime;
 
+    // Compound assignment (+=, -=, *=, /=) with Identifier LHS → assign op
+    if (expr.kind === "Assign" && expr.op !== "=" && expr.left.kind === "Identifier") {
+      const target = (expr.left as AST.Identifier).name;
+      if (this.isSimpleLiteral(expr.right)) {
+        return {
+          op: "assign",
+          target,
+          operator: expr.op,
+          value: { kind: "literal", value: this.literalValue(expr.right) },
+        };
+      }
+      const captures = this.computeCaptures(expr.right, runtime);
+      return {
+        op: "assign",
+        target,
+        operator: expr.op,
+        from: {
+          op: "eval",
+          runtime,
+          code: exprToCode(expr.right, this.source),
+          bind: "__rhs",
+          ...(captures ? { captures } : {}),
+        },
+      };
+    }
+
     // Simple assignment (=) with Identifier LHS → decompose into eval+bind
     // Must come before Go interception so Go assignments are handled properly
     if (expr.kind === "Assign" && expr.op === "=" && expr.left.kind === "Identifier") {
@@ -926,6 +952,24 @@ export class ManifestCodeGenerator {
 
     if (node.values.length === 1) {
       const val = node.values[0];
+
+      // Simple literal → return with value (no runtime eval needed)
+      if (this.isSimpleLiteral(val)) {
+        return {
+          op: "return",
+          value: { kind: "literal", value: this.literalValue(val) },
+        };
+      }
+
+      // Simple identifier reference → return with ref
+      if (val.kind === "Identifier") {
+        return {
+          op: "return",
+          value: { kind: "ref", name: val.name },
+        };
+      }
+
+      // Complex expression → return from eval
       const aff = this.affinityMap.get(val);
       const runtime = aff?.runtime || this.defaultRuntime;
       const captures = this.computeCaptures(val, runtime);
@@ -938,7 +982,7 @@ export class ManifestCodeGenerator {
           code: exprToCode(val, this.source),
           bind: "__ret",
           ...(captures ? { captures } : {}),
-            },
+        },
       };
     }
 
