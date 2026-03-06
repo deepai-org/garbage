@@ -52,7 +52,7 @@ src/
   ast.ts           - AST node type definitions (~836 lines)
   lexer.ts         - Tokenizer with 5 context modes (~1,237 lines)
   lexer-context.ts - Lexer mode stack management (~464 lines)
-  parser.ts        - Multi-language parser (~8,769 lines)
+  parser.ts        - Multi-language parser (~8,709 lines)
   transpiler.ts    - JavaScript code generator (~1,107 lines)
   index.ts         - Public API exports
 ```
@@ -77,14 +77,7 @@ The lexer switches between 5 modes to handle context-dependent tokenization:
 - Virtual semicolons for newline-sensitive languages
 - Complete AST with no data loss for imports, exports, decorators, types, patterns, and class members
 
-## Tests
-
-```bash
-npm test          # run all tests
-npm run build     # build TypeScript
-```
-
-430 of 432 tests passing across 30 test suites. Full specification in [Spec.md](Spec.md).
+432 tests passing across 30 test suites. Full specification in [Spec.md](Spec.md).
 
 ## License
 

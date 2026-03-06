@@ -1,5 +1,3 @@
-What target should we use if we actually try to implement the following language, either via compiler or interpreter?
-
 # PolyScript 1.0 — Complete Language Specification
 
 *(max-compatibility edition: every valid program in JavaScript, Python, TypeScript, Java, C#, C++, Go, PHP, Bash, or Ruby is valid PolyScript without change)*

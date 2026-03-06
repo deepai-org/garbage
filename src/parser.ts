@@ -47,19 +47,9 @@ export class Parser {
     let iterations = 0;
     const maxIterations = Math.max(1000, this.tokens.length * 2); // Safety limit with minimum
     
-    // Debug logging
-    if (typeof process !== 'undefined' && process.env.DEBUG_HANG) {
-      console.log(`[PARSE] Starting with ${this.tokens.length} tokens`);
-    }
-    
     while (!this.isAtEnd()) {
       iterations++;
       if (iterations > maxIterations) {
-        console.error(`Parser exceeded maximum iterations (${maxIterations}) - possible infinite loop`);
-        console.error(`Current position: ${this.current}/${this.tokens.length}`);
-        console.error(`Current token: ${this.peek().value} (${this.peek().type})`);
-        console.error(`Parsed ${body.length} statements so far`);
-        // Return what we've parsed so far instead of continuing
         return {
           kind: "Program",
           body,
@@ -74,30 +64,20 @@ export class Parser {
         if (item) {
           body.push(item);
         } else if (!this.isAtEnd()) {
-          // parseTopLevel returned null but we're not at end
-          // This shouldn't happen at the top level
           if (this.current === beforePos) {
-            console.error(`Warning: parseTopLevel returned null at position ${this.current}, token: ${this.peek().value}`);
             this.advance();
           }
         }
       } catch (error) {
         if (error instanceof ParseError) {
           this.errors.push(error);
-          // Debug: log the error
-          if (typeof process !== 'undefined' && process.env.DEBUG_PARSER) {
-            console.log('Parse error:', error.message, 'at token:', error.token);
-          }
           this.synchronize();
         } else {
           throw error;
         }
       }
       
-      // Ensure we're making progress
       if (this.current === beforePos && !this.isAtEnd()) {
-        console.error(`Parser stuck at position ${this.current}, token: ${this.peek().value}`);
-        console.error(`Forcing advance from ${this.peek().value}`);
         this.advance();
       }
     }
@@ -183,8 +163,6 @@ export class Parser {
       this.advance();
       vsCount++;
       if (vsCount > 100) {
-        // Too many virtual semicolons, something is wrong
-        console.error(`Error: Skipped ${vsCount} virtual semicolons without progress`);
         return null;
       }
     }
@@ -659,58 +637,33 @@ export class Parser {
     if (this.match("{")) {
       this.braceDepth++;
       const statements: (AST.Decl | AST.Stmt)[] = [];
-      const debugBlockParsing = false; // Debug flag for entire block
-      
       let loopCount = 0;
       while (!this.check("}") && !this.isAtEnd()) {
         loopCount++;
         if (loopCount > 1000) {
-          console.error(`parseBlock exceeded 1000 iterations at position ${this.current}`);
-          console.error(`Current token: ${this.peek().value} (${this.peek().type})`);
           break;
         }
-        
+
         const beforePos = this.current;
         try {
           // Skip virtual semicolons
           while (this.peek().virtualSemi) {
             this.advance();
           }
-          
-          // Inside a block, we need to handle both statements and declarations
-          // but we should use parseStatement/parseDeclaration directly
-          // rather than parseTopLevel which has module-level specific behavior
+
           let stmt: AST.Decl | AST.Stmt | null = null;
-          if (debugBlockParsing && (this.peek().value === "using" || this.peek().value === "defer")) {
-            console.log(`[DEBUG] Block parsing at ${this.current}: "${this.peek().value}"`);
-            console.log(`[DEBUG] isDeclStart: ${this.isDeclStart()}`);
-          }
-          
+
           if (this.isDeclStart()) {
             stmt = this.parseDeclaration();
           } else if (!this.check("}")) {
-            if (debugBlockParsing) {
-              console.log(`[DEBUG] Calling parseStatement() for "${this.peek().value}"`);
-            }
             stmt = this.parseStatement();
-            if (debugBlockParsing) {
-              console.log(`[DEBUG] parseStatement() returned:`, stmt ? stmt.kind : 'null');
-            }
           }
-          
+
           if (stmt) {
             statements.push(stmt);
-            if (debugBlockParsing && stmt.kind) {
-              console.log(`[DEBUG] Added statement: ${stmt.kind}`);
-            }
-          } else if (debugBlockParsing) {
-            console.log(`[DEBUG] No statement returned for "${this.tokens[beforePos]?.value}"`);
           }
         } catch (error) {
           if (error instanceof ParseError) {
-            if (debugBlockParsing) {
-              console.log(`[DEBUG] ParseError caught in block: ${error.message}`);
-            }
             this.errors.push(error);
             this.synchronize();
           } else {
@@ -719,7 +672,6 @@ export class Parser {
         }
         // Prevent infinite loop
         if (this.current === beforePos && !this.check("}")) {
-          console.error(`parseBlock not advancing at position ${this.current}, forcing advance`);
           this.advance();
         }
       }
@@ -1160,7 +1112,6 @@ export class Parser {
         }
         // Prevent infinite loop
         if (this.current === beforePos && !this.check("rescue") && !this.check("ensure") && !this.check("end")) {
-          console.error(`parseBeginBlock rescue body stuck at position ${this.current}, forcing advance`);
           this.advance();
         }
       }
@@ -1982,10 +1933,6 @@ export class Parser {
       // Check for ?. first to handle both ?.property and ?.[index]
       if (this.peek().value === "?.") {
         const next = this.peekNext();
-        // DEBUG
-        if (typeof process !== 'undefined' && process.env.DEBUG_PARSER) {
-          console.log('Found ?. at position', this.current, 'next token:', next?.value);
-        }
         if (next?.value === "[") {
           // Optional chaining with bracket notation (?.[)
           this.advance(); // consume ?.
@@ -3211,20 +3158,13 @@ export class Parser {
     // Track the initial brace depth (before parsing any arms)
     const matchBraceDepth = this.braceDepth;
     
-    // Debug flag for deep nest issue
-    const debugMatch = false; // discriminant.kind === "Identifier" && discriminant.name === "x";
-    
     // Loop condition depends on style
     while (!this.isAtEnd()) {
       // Skip virtual semicolons first
       while (this.peek().virtualSemi) {
         this.advance();
       }
-      
-      if (debugMatch) {
-        console.log(`[DEBUG] Match loop at pos ${this.current}, token: "${this.peek().value}" (type: ${this.peek().type}), braceDepth: ${this.braceDepth}`);
-      }
-      
+
       // For Python style, check if we've dedented back
       if (isPythonStyle) {
         const currentIndent = this.peek().indentCol;
@@ -7827,75 +7767,67 @@ export class Parser {
   private isJSXElement(): boolean {
     // JSX disambiguation based on spec 10.6
     const saved = this.current;
-    const DEBUG = false; // Set to true for debugging
-    
+
     try {
       // Check for JSXTagStart or < token
       const token = this.peek();
       if (token.type !== TokenType.JSXTagStart && token.value !== "<") {
-        if (DEBUG) console.log('isJSXElement: no JSXTagStart or < found');
         return false;
       }
       this.advance(); // consume JSXTagStart or <
-      
+
       // Check what follows < to apply JSX recognition patterns (spec 10.6.2)
       const next = this.peek();
-      
-      // Pattern 1: Fragment <> 
+
+      // Pattern 1: Fragment <>
       if (next.value === ">") {
         this.current = saved;
         return true;
       }
-      
+
       // Pattern 2: Closing tag </
       if (next.value === "/") {
         this.current = saved;
         return true;
       }
-      
+
       // Pattern 3 & 4: Identifier (component or HTML element)
       if (next.type !== TokenType.Identifier) {
-        if (DEBUG) console.log('isJSXElement: not an identifier after <');
         this.current = saved;
         return false;
       }
-      
+
       const elementName = next.value;
-      
+
       // Pattern 3: Capital letter → JSX Component (but check for type assertion)
       if (/^[A-Z]/.test(elementName)) {
-        if (DEBUG) console.log('isJSXElement: found capital letter component');
         this.current = saved;
-        
+
         // Check if this could be a type assertion <Type>expr
         // Type assertions have the pattern <Identifier>expression
         // JSX has patterns like <Identifier attr=... or <Identifier>...content...</Identifier>
         if (this.couldBeTypeAssertion()) {
-          if (DEBUG) console.log('isJSXElement: looks like type assertion, not JSX');
           return false;
         }
-        
+
         return this.isValidJSXContinuation();
       }
-      
-      // Pattern 4: HTML tag name → JSX Element  
+
+      // Pattern 4: HTML tag name → JSX Element
       if (this.isHTMLTag(elementName)) {
-        if (DEBUG) console.log('isJSXElement: found HTML tag');
         this.current = saved;
         return this.isValidJSXContinuation();
       }
-      
+
       // Pattern 5: Qualified name (namespace.component)
       this.advance(); // consume identifier
       if (this.peek().value === ".") {
-        if (DEBUG) console.log('isJSXElement: found qualified name');
         this.current = saved;
         return this.isValidJSXContinuation();
       }
-      
+
       // Not a JSX pattern - check if it's a primitive type (non-JSX pattern)
       if (this.isPrimitiveType(elementName)) {
-        if (DEBUG) console.log('isJSXElement: primitive type, not JSX');
         this.current = saved;
         return false;
       }
