@@ -250,10 +250,57 @@ export class Lexer {
       return;
     }
     
-    // Sigil identifiers
-    if (char === '$' && /[a-zA-Z_]/.test(this.peek())) {
-      this.scanSigilIdentifier();
-      return;
+    // Sigil identifiers and bash special variables
+    if (char === '$') {
+      const next = this.peek();
+      if (/[a-zA-Z_]/.test(next)) {
+        this.scanSigilIdentifier();
+        return;
+      }
+      // Bash special variables: $?, $!, $#, $@, $$, $0-$9
+      if (next === '?' || next === '!' || next === '#' || next === '@' || next === '$' || /[0-9]/.test(next)) {
+        const start = this.position - 1;
+        const startLine = this.line;
+        const startColumn = this.column - 1;
+        const value = '$' + this.advance();
+        this.addTokenEx(TokenType.SigilIdentifier, value, start, this.position, startLine, startColumn);
+        return;
+      }
+      // Bash command substitution $(...) — scan as sigil identifier
+      if (next === '(') {
+        const start = this.position - 1;
+        const startLine = this.line;
+        const startColumn = this.column - 1;
+        this.advance(); // consume '('
+        let depth = 1;
+        let value = '$(';
+        while (depth > 0 && !this.isAtEnd()) {
+          const c = this.advance();
+          if (c === '(') depth++;
+          else if (c === ')') depth--;
+          if (depth > 0) value += c;
+        }
+        value += ')';
+        this.addTokenEx(TokenType.SigilIdentifier, value, start, this.position, startLine, startColumn);
+        return;
+      }
+      // Bash ${...} variable expansion
+      if (next === '{') {
+        const start = this.position - 1;
+        const startLine = this.line;
+        const startColumn = this.column - 1;
+        this.advance(); // consume '{'
+        let value = '${';
+        while (this.peek() !== '}' && !this.isAtEnd()) {
+          value += this.advance();
+        }
+        if (this.peek() === '}') {
+          value += this.advance();
+        }
+        this.addTokenEx(TokenType.SigilIdentifier, value, start, this.position, startLine, startColumn);
+        return;
+      }
+      // Fall through — emit $ as an operator
     }
     
     // Heredoc check (before operators)

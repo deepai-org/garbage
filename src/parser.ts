@@ -305,12 +305,13 @@ export class Parser {
     
     // Python-style from X import Y — only if 'import' appears soon after
     if (value === "from" && type === TokenType.Keyword) {
-      // Look ahead: from <path> import ... — path can be dotted (from os.path import ...)
-      for (let i = 1; i <= 6; i++) {
+      // Look ahead: from <path> import ... — path can be deeply dotted
+      for (let i = 1; i <= 30; i++) {
         const ahead = this.peekAt(i);
         if (!ahead || ahead.type === TokenType.EOF) break;
         if (ahead.value === "import" && ahead.type === TokenType.Keyword) return true;
-        // Stop if we see operators that aren't dots
+        // Stop if we see operators that aren't dots, or virtual semis
+        if (ahead.virtualSemi) break;
         if (ahead.type === TokenType.Operator && ahead.value !== ".") break;
       }
       return false;
@@ -500,15 +501,40 @@ export class Parser {
       return this.parseIf();
     }
     
-    if (this.match("switch", "match")) {
+    if (this.check("switch")) {
+      this.advance();
+      return this.parseSwitch() as AST.Stmt;
+    }
+    // match keyword — but not when followed by = (assignment target, e.g. match = str =~ rx)
+    if (this.check("match") && !this.isAssignmentOp(this.peekAt(1)!)) {
+      this.advance();
+      return this.parseSwitch() as AST.Stmt;
+    }
+    // Kotlin-style `when` as match expression
+    if (this.peek().value === "when" &&
+        (this.peekAt(1)?.value === "(" || this.peekAt(1)?.value === "{")) {
+      this.advance(); // consume 'when'
       return this.parseSwitch() as AST.Stmt;
     }
     
-    // Don't parse 'case' as a statement when inside a switch
-    if (this.peek().value === "case" && !this.insideSwitch) {
-      this.advance();
-      // Bash-style case statement
-      return this.parseCaseStatement();
+    // Bash-style case...in...esac — allowed even inside switch (distinguishes from switch case)
+    if (this.peek().value === "case") {
+      // Bash case: `case expr in ... esac` — detect by looking for `in` after expr
+      if (!this.insideSwitch) {
+        this.advance();
+        return this.parseCaseStatement();
+      } else {
+        // Inside a switch, only allow if it looks like bash case (has `in` or `when` nearby)
+        const cp = this.current;
+        this.advance(); // case
+        const expr = this.parsePrimary(); // consume discriminant
+        if (this.check("in") || this.check("when")) {
+          this.advance(); // consume 'in' or 'when'
+          return this.parseCaseEsac(cp, expr);
+        }
+        // Not bash case — restore and let switch handle it
+        this.current = cp;
+      }
     }
     
     if (this.match("select")) {
@@ -541,12 +567,14 @@ export class Parser {
     if (this.peek().value === "using") {
       const next = this.peekNext();
       const nextNext = this.peekAt(2);
-      
+
       // Resource management: using var = expr { ... }
       if (next?.type === TokenType.Identifier && nextNext?.value === "=") {
         this.advance(); // consume 'using'
         return this.parseUsing();
       }
+      // C# using (Type var = expr) { ... }
+      // Removed: was causing error recovery issues inside other constructs
     }
     
     if (this.match("defer")) {
@@ -596,6 +624,24 @@ export class Parser {
       return this.parseBeginBlock();
     }
     
+    // Rust `use path::to::module`, Ruby `include Module`
+    if (this.peek().type === TokenType.Identifier &&
+        (this.peek().value === "use" || this.peek().value === "include") &&
+        this.peekAt(1) && (this.peekAt(1)!.type === TokenType.Identifier ||
+                           this.peekAt(1)!.type === TokenType.StringLiteral)) {
+      this.advance(); // consume 'use' or 'include'
+      return this.parseImport() as any;
+    }
+
+    // Rust `mod name;` module declaration
+    if (this.peek().type === TokenType.Identifier && this.peek().value === "mod" &&
+        this.peekAt(1)?.type === TokenType.Identifier) {
+      this.advance(); // consume 'mod'
+      const modName = this.parseIdentifier();
+      this.consumeSemicolon();
+      return { kind: "Import", path: modName.name, span: modName.span } as any;
+    }
+
     // Check for short declarations (Go-style :=)
     if (this.peek().type === TokenType.Identifier) {
       const checkpoint = this.current;
@@ -804,7 +850,10 @@ export class Parser {
     const start = this.current - 1;
     // Parse the discriminant - just a primary expression to avoid consuming 'in'
     const discriminant = this.parsePrimary();
-    this.consume("in", "Expected 'in' after case expression");
+    // Accept both 'in' (bash) and 'when' (Ruby) as the keyword after case discriminant
+    if (!this.match("in") && !this.match("when")) {
+      this.consume("in", "Expected 'in' or 'when' after case expression");
+    }
     return this.parseCaseEsac(start, discriminant);
   }
   
@@ -827,22 +876,23 @@ export class Parser {
       if (this.match("*")) {
         this.consume(")", "Expected ')' after case pattern");
         
-        // Parse case body
+        // Parse case body — stop at ;;, esac, or new pattern followed by )
         const statements: (AST.Decl | AST.Stmt)[] = [];
         while (!this.check(";;") && !this.check("esac") && !this.isAtEnd()) {
+          if (this.isNewCaseArm()) break;
           const stmt = this.parseTopLevel();
           if (stmt) statements.push(stmt);
         }
-        
+
         const body: AST.Block = {
           kind: "Block",
           statements,
           span: this.createSpan(this.current, this.current)
         };
-        
+
         // Check for fallthrough (no ;;)
         const fallthrough = !this.match(";;");
-        
+
         // Add default case to cases array with empty patterns to indicate default
         cases.push({
           patterns: [], // Empty patterns indicate default case
@@ -856,12 +906,14 @@ export class Parser {
       } else {
         // Parse pattern (number, string, etc.)
         patterns.push(this.parseExpression());
-        
+
         this.consume(")", "Expected ')' after case pattern");
-        
-        // Parse case body
+
+        // Parse case body — stop at ;;, esac, or new pattern followed by )
         const statements: (AST.Decl | AST.Stmt)[] = [];
         while (!this.check(";;") && !this.check("esac") && !this.isAtEnd()) {
+          // Detect start of a new case arm (implicit arm boundary without ;;)
+          if (this.isNewCaseArm()) break;
           const stmt = this.parseTopLevel();
           if (stmt) statements.push(stmt);
         }
@@ -895,6 +947,33 @@ export class Parser {
     };
   }
   
+  /**
+   * Detect if current position starts a new bash case arm pattern.
+   * Uses conservative lookahead to avoid false positives.
+   * Checks for: literal/identifier/_ followed by ), or range pattern like N..M)
+   */
+  private isNewCaseArm(): boolean {
+    const t = this.peek();
+    // Simple pattern: value )
+    if ((t.type === TokenType.NumericLiteral || t.type === TokenType.StringLiteral ||
+         t.type === TokenType.Identifier || (t.type === TokenType.Keyword && t.value === "_")) &&
+        this.peekAt(1)?.value === ")") {
+      return true;
+    }
+    // Range pattern: N..M ) or N..M)
+    if ((t.type === TokenType.NumericLiteral || t.type === TokenType.Identifier) &&
+        this.peekAt(1)?.value === ".." &&
+        this.peekAt(2) &&
+        this.peekAt(3)?.value === ")") {
+      return true;
+    }
+    // Wildcard pattern: * )
+    if (t.value === "*" && this.peekAt(1)?.value === ")") {
+      return true;
+    }
+    return false;
+  }
+
   private parseBashTestExpression(): AST.Expr {
     // Parse [ ... ] as a special test expression
     const start = this.current;
@@ -1679,6 +1758,14 @@ export class Parser {
       }
     }
 
+    // Kotlin-style `when` as match expression
+    if (this.peek().value === "when" &&
+        (this.peekAt(1)?.value === "(" || this.peekAt(1)?.value === "{")) {
+      this.advance(); // consume 'when'
+      const switchExpr = this.parseSwitch();
+      return switchExpr as any;
+    }
+
     // Identifiers and sigil identifiers
     // Also allow keywords as identifiers in expression context when they can't start a statement
     if (this.peek().type === TokenType.Identifier ||
@@ -1787,12 +1874,21 @@ export class Parser {
       };
     }
     
-    // match expression
-    if (this.match("match")) {
+    // match expression — but not when followed by assignment (e.g. match = str =~ rx)
+    if (this.check("match") && !this.isAssignmentOp(this.peekAt(1)!)) {
+      this.advance();
       const switchExpr = this.parseSwitch();
-      // Convert Switch statement to an expression context
-      // For now, return it as-is (would need AST changes for proper match expression)
       return switchExpr as any;
+    }
+    // match as identifier (assignment target)
+    if (this.check("match")) {
+      const token = this.advance();
+      const id: AST.Identifier = {
+        kind: "Identifier",
+        name: token.value,
+        span: this.createSpanFrom(token)
+      };
+      return this.parsePostfix(id);
     }
     
     throw this.error(this.peek(), "Unexpected token in expression");
@@ -2390,9 +2486,20 @@ export class Parser {
           span: this.createSpan(start, this.current - 1)
         };
       }
-      // Old-style simple import
+      // Old-style simple import (possibly dotted or :: separated)
       else {
-        path = this.advance().value;
+        let pathParts = [this.advance().value];
+        while (this.match(".") || this.match("::")) {
+          const sep = this.previous()!.value;
+          if (this.peek().type === TokenType.Identifier || this.peek().type === TokenType.Keyword) {
+            pathParts.push(sep === "::" ? "::" : ".");
+            pathParts.push(this.advance().value);
+          } else if (this.match("*")) {
+            pathParts.push(sep === "::" ? "::" : ".");
+            pathParts.push("*");
+          } else break;
+        }
+        path = pathParts.join("");
         if (this.match("as")) {
           alias = this.parseIdentifier();
         }
@@ -2698,10 +2805,20 @@ export class Parser {
       genericParams = [];
       do {
         genericParams.push(this.parseIdentifier());
+        // Skip type constraints: extends Type, super Type, : Type
+        if (this.match("extends", "super")) {
+          this.parseType();
+        } else if (this.check(":") && !this.check("::")) {
+          this.advance();
+          this.parseType();
+          while (this.match("+")) {
+            this.parseType();
+          }
+        }
       } while (this.match(","));
       this.consume(">", "Expected '>' after generic parameters");
     }
-    
+
     // For Ruby def, parameters are optional (can be without parentheses)
     let params: AST.Param[] = [];
     if (this.check("(")) {
@@ -2716,11 +2833,36 @@ export class Parser {
     }
     
     let returnType: AST.TypeNode | undefined;
-    
+
     // Check for return type annotations
     if (this.match("->")) {
       // Arrow notation always indicates return type
       returnType = this.parseType();
+    } else if (declKeywordValue === "func" && this.check("(") && !this.check("(=")) {
+      // Go multi-return: func name(params) (Type1, Type2) { ... }
+      const checkpoint = this.current;
+      try {
+        this.advance(); // consume '('
+        const types: AST.TypeNode[] = [];
+        if (!this.check(")")) {
+          do {
+            types.push(this.parseGoTypeAnnotation());
+          } while (this.match(","));
+        }
+        this.consume(")", "Expected ')' after return types");
+        if (types.length === 1) {
+          returnType = types[0];
+        } else if (types.length > 1) {
+          // Represent as a tuple/union for multi-return
+          returnType = { kind: "UnionType", types, span: this.createSpan(checkpoint, this.current - 1) } as any;
+        }
+      } catch {
+        this.current = checkpoint;
+      }
+    } else if (declKeywordValue === "func" && this.peek().type === TokenType.Identifier &&
+               !this.check("{") && !this.peek().virtualSemi) {
+      // Go single return type without parens: func name(params) Type { ... }
+      returnType = this.parseGoTypeAnnotation();
     } else if (this.check(":")) {
       // Colon could be either type annotation or Python-style block
       // Check if next token after colon indicates an indent block
@@ -3081,11 +3223,14 @@ export class Parser {
     let type: AST.TypeNode | undefined;
     if (this.match(":")) {
       type = this.parseType();
-    } else if (this.peek().type === TokenType.Identifier &&
-               !this.check(",") && !this.check(")") && !this.check("=") && !this.check("?") &&
-               name.kind === "Identifier") {
+    } else if (name.kind === "Identifier" &&
+               !this.check(",") && !this.check(")") && !this.check("=") && !this.check("?") && !this.check("|") &&
+               (this.peek().type === TokenType.Identifier ||
+                // Go interface{}, chan, *Type, []Type, map[K]V
+                this.check("interface") || this.check("chan") || this.check("*") ||
+                (this.check("[") && this.peekAt(1)?.value === "]"))) {
       // Go-style type annotation: name Type (no colon separator)
-      type = this.parseType();
+      type = this.parseGoTypeAnnotation();
     }
 
     let defaultValue: AST.Expr | undefined;
@@ -3111,7 +3256,72 @@ export class Parser {
     
     return param;
   }
-  
+
+  /**
+   * Parse a Go-style type in parameter position: handles interface{}, *Type,
+   * chan/chan<-/chan-> Type, []Type, map[K]V, and dotted paths (http.Request).
+   */
+  private parseGoTypeAnnotation(): AST.TypeNode {
+    const start = this.current;
+    const mkId = (n: string, span: AST.Span): AST.Identifier => ({ kind: "Identifier", name: n, span });
+    const mkSpan = () => this.createSpan(start, this.current - 1);
+
+    // Pointer type: *Type
+    if (this.match("*")) {
+      const inner = this.parseGoTypeAnnotation();
+      return { kind: "SimpleType", id: mkId("*" + (inner.kind === "SimpleType" ? (inner as any).id.name : ""), inner.span), span: inner.span } as any;
+    }
+
+    // Slice type: []Type
+    if (this.check("[") && this.peekAt(1)?.value === "]") {
+      this.advance(); // [
+      this.advance(); // ]
+      const elem = this.parseGoTypeAnnotation();
+      return { kind: "GenericType", base: mkId("[]", mkSpan()), args: [elem], span: mkSpan() } as AST.TypeNode;
+    }
+
+    // map[K]V
+    if (this.check("map") && this.peekAt(1)?.value === "[") {
+      this.advance(); // map
+      this.advance(); // [
+      const keyType = this.parseGoTypeAnnotation();
+      this.consume("]", "Expected ']' after map key type");
+      const valType = this.parseGoTypeAnnotation();
+      return { kind: "GenericType", base: mkId("map", mkSpan()), args: [keyType, valType], span: mkSpan() } as AST.TypeNode;
+    }
+
+    // chan<- Type, <-chan Type, chan Type
+    if (this.check("chan")) {
+      this.advance(); // chan
+      if (this.match("<-")) { /* chan<- Type (send-only) */ }
+      const chanType = this.parseGoTypeAnnotation();
+      return { kind: "ChanType", direction: "both", elementType: chanType, span: mkSpan() } as any;
+    }
+    if (this.check("<-") && this.peekAt(1)?.value === "chan") {
+      this.advance(); // <-
+      this.advance(); // chan
+      const chanType = this.parseGoTypeAnnotation();
+      return { kind: "ChanType", direction: "recv", elementType: chanType, span: mkSpan() } as any;
+    }
+
+    // interface{}
+    if (this.check("interface") && this.peekAt(1)?.value === "{") {
+      this.advance(); this.advance();
+      this.consume("}", "Expected '}' after interface{}");
+      return { kind: "SimpleType", id: mkId("interface{}", mkSpan()), span: mkSpan() } as AST.TypeNode;
+    }
+
+    // struct{}
+    if (this.check("struct") && this.peekAt(1)?.value === "{") {
+      this.advance(); this.advance();
+      this.consume("}", "Expected '}' after struct{}");
+      return { kind: "SimpleType", id: mkId("struct{}", mkSpan()), span: mkSpan() } as AST.TypeNode;
+    }
+
+    // Fall back to regular type parsing (handles dotted types, generics, etc.)
+    return this.parseType();
+  }
+
   private parseDestructuringPattern(): AST.ArrayPattern | AST.ObjectPattern {
     const start = this.current;
     const token = this.peek();
@@ -3322,7 +3532,8 @@ export class Parser {
   
   private parseSwitch(): AST.Switch | AST.Match {
     const start = this.current - 1;
-    const isMatch = this.previous()?.value === "match";
+    const prevVal = this.previous()?.value;
+    const isMatch = prevVal === "match" || prevVal === "when";
     const discriminant = this.parseExpression();
     const cases: AST.SwitchCase[] = [];
     let defaultCase: AST.Block | undefined;
@@ -3381,8 +3592,8 @@ export class Parser {
       
       const caseStart = this.current;
       
-      // Handle default case
-      if (this.match("default")) {
+      // Handle default case (also `else` for Kotlin when-style)
+      if (this.match("default") || (isMatch && this.match("else"))) {
         // Match uses => while switch uses :
         if (isMatch && !isPythonStyle) {
           this.consume("=>", "Expected '=>' after default");
@@ -3700,20 +3911,49 @@ export class Parser {
   private parseDoStatement(): AST.Stmt {
     const start = this.current - 1;
     const startToken = this.tokens[start - 1]; // The 'do' token
-    
+
+    // Ruby-style block: do |params| body end
+    if (this.check("|")) {
+      this.advance(); // consume '|'
+      const params: AST.Param[] = [];
+      if (!this.check("|")) {
+        do {
+          params.push(this.parseParameter());
+        } while (this.match(","));
+      }
+      this.consume("|", "Expected '|' after block parameters");
+      // Parse body until 'end'
+      const stmts: AST.Stmt[] = [];
+      while (!this.check("end") && !this.isAtEnd()) {
+        while (this.peek().virtualSemi) this.advance();
+        if (this.check("end")) break;
+        stmts.push(this.parseTopLevel() as AST.Stmt);
+      }
+      this.consume("end", "Expected 'end' to close do block");
+      const body: AST.Block = { kind: "Block", statements: stmts, span: this.createSpan(start, this.current - 1) };
+      // Emit as a Lambda expression statement (the block is a Ruby block/lambda)
+      const lambda: AST.Lambda = {
+        kind: "Lambda",
+        params,
+        body,
+        span: this.createSpan(start, this.current - 1)
+      };
+      return { kind: "ExprStmt", expression: lambda, span: lambda.span } as any;
+    }
+
     // Parse the block
     const body = this.parseBlock();
-    
+
     // Check what comes after the block
     if (this.match("while")) {
       // This is a JavaScript-style do-while loop
       this.consume("(", "Expected '(' after 'while' in do-while loop");
       const test = this.parseExpression();
       this.consume(")", "Expected ')' after condition in do-while loop");
-      
+
       // Optional semicolon after do-while
       this.consumeSemicolon();
-      
+
       return {
         kind: "Loop",
         mode: "do-while",
@@ -3834,6 +4074,8 @@ export class Parser {
             let body: AST.Block;
             if (this.match(":")) {
               body = this.parseIndentBlock();
+            } else if (this.match("do")) {
+              body = this.parseKeywordBlock("do");
             } else {
               body = this.parseBlockOrStatement();
             }
@@ -4153,10 +4395,23 @@ export class Parser {
           span: stmt.span
         };
       }
+    } else if (this.check("(")) {
+      // Java-style try-with-resources: try (resource = expr) { body }
+      // Skip the resource declaration and parse as regular try body
+      this.advance(); // consume '('
+      // Parse resource declarations (skip until closing paren)
+      let parenDepth = 1;
+      while (parenDepth > 0 && !this.isAtEnd()) {
+        if (this.check("(")) parenDepth++;
+        if (this.check(")")) parenDepth--;
+        if (parenDepth > 0) this.advance();
+      }
+      this.consume(")", "Expected ')' after try-with-resources");
+      body = this.parseBlock();
     } else {
       body = this.parseBlock();
     }
-    
+
     const catches: AST.CatchClause[] = [];
     
     while (this.match("catch", "except", "rescue")) {
@@ -4164,37 +4419,40 @@ export class Parser {
       let param: AST.Identifier | undefined;
       let type: AST.TypeNode | undefined;
       
-      // Check for Python-style except/rescue with colon
-      if (clauseType === "except" && this.check(":")) {
-        // Python-style except: or except Exception:
-        // First check if there's an exception type before the colon
+      // Python-style except: except Type: except Type as var:
+      // But NOT except (e) { ... } which uses parenthesized catch below
+      if (clauseType === "except" && !this.check("(") && !this.check("{")) {
+        // Parse optional exception type(s) and binding
         if (this.peek().type === TokenType.Identifier && !this.check(":")) {
           type = this.parseType();
           if (this.match("as")) {
             param = this.parseIdentifier();
           }
         }
-        this.consume(":", "Expected ':' after except clause");
-        
-        // Parse except body
-        let catchBody: AST.Block;
-        if (this.checkIndentBlock()) {
-          catchBody = this.parseIndentBlock();
+        // Expect colon for Python-style, or handle brace-style
+        if (this.match(":")) {
+          let catchBody: AST.Block;
+          if (this.checkIndentBlock()) {
+            catchBody = this.parseIndentBlock();
+          } else {
+            const stmt = this.parseStatement();
+            catchBody = {
+              kind: "Block",
+              statements: [stmt],
+              span: stmt.span
+            };
+          }
+          catches.push({
+            param,
+            type,
+            body: catchBody,
+            span: this.createSpan(this.current - 1, this.current)
+          });
         } else {
-          // Single statement (often 'pass')
-          const stmt = this.parseStatement();
-          catchBody = {
-            kind: "Block",
-            statements: [stmt],
-            span: stmt.span
-          };
+          // Fall through to brace-style catch body
+          const catchBody = this.parseBlock();
+          catches.push({ param, type, body: catchBody, span: this.createSpan(this.current - 1, this.current) });
         }
-        catches.push({
-          param,
-          type,
-          body: catchBody,
-          span: this.createSpan(this.current - 1, this.current)
-        });
       } else if (clauseType === "rescue") {
         // Ruby-style rescue Type => var or just rescue
         if (this.peek().type === TokenType.Identifier && !this.check("=>")) {
@@ -5352,16 +5610,27 @@ export class Parser {
       typeParams = [];
       do {
         typeParams.push(this.parseIdentifier());
+        // Skip type constraints: extends Type, super Type, : Type
+        if (this.match("extends", "super")) {
+          this.parseType();
+        } else if (this.check(":") && !this.check("::")) {
+          this.advance();
+          this.parseType();
+          // Handle multiple constraints with + (e.g., <T: Clone + Debug>)
+          while (this.match("+")) {
+            this.parseType();
+          }
+        }
       } while (this.match(","));
       this.consume(">", "Expected '>' after type parameters");
     }
-    
+
     // Parse extends clause
     let extendsType: AST.TypeNode | undefined;
     if (this.match("extends")) {
       extendsType = this.parseType();
     }
-    
+
     // Parse implements clause
     let implementsTypes: AST.TypeNode[] | undefined;
     if (this.match("implements")) {
@@ -5495,10 +5764,17 @@ export class Parser {
               genericParams = [];
               do {
                 genericParams.push(this.parseIdentifier());
+                if (this.match("extends", "super")) {
+                  this.parseType();
+                } else if (this.check(":") && !this.check("::")) {
+                  this.advance();
+                  this.parseType();
+                  while (this.match("+")) this.parseType();
+                }
               } while (this.match(","));
               this.consume(">", "Expected '>' after generic parameters");
             }
-            
+
             // Parse parameters
             const params = this.parseParameterList();
             
@@ -6158,6 +6434,13 @@ export class Parser {
         genericParams = [];
         do {
           genericParams.push(this.parseIdentifier());
+          if (this.match("extends", "super")) {
+            this.parseType();
+          } else if (this.check(":") && !this.check("::")) {
+            this.advance();
+            this.parseType();
+            while (this.match("+")) this.parseType();
+          }
         } while (this.match(","));
         this.consume(">", "Expected '>' after generic parameters");
       }
@@ -6241,10 +6524,17 @@ export class Parser {
       typeParams = [];
       do {
         typeParams.push(this.parseIdentifier());
+        if (this.match("extends", "super")) {
+          this.parseType();
+        } else if (this.check(":") && !this.check("::")) {
+          this.advance();
+          this.parseType();
+          while (this.match("+")) this.parseType();
+        }
       } while (this.match(","));
       this.consume(">", "Expected '>' after generic parameters");
     }
-    
+
     // Parse either "Type" or "Trait for Type"
     let trait: AST.TypeNode | undefined;
     let type: AST.TypeNode;
@@ -6927,13 +7217,19 @@ export class Parser {
     
     // Parse the iterable expression
     const iterable = this.parseExpression();
-    
+
+    // Skip virtual semicolons before optional filter/chained for
+    while (this.peek().virtualSemi) this.advance();
+
     // Parse optional filter
     let filter: AST.Expr | undefined;
     if (this.match("if")) {
       filter = this.parseExpression();
     }
-    
+
+    // Skip virtual semicolons before closing bracket
+    while (this.peek().virtualSemi) this.advance();
+
     this.consume("]", "Expected ']' after list comprehension");
     
     return {
