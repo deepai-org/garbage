@@ -319,7 +319,7 @@ pass
       'exec', 'eval', 'exec_compiled', 'eval_compiled',
       'declare', 'assign', 'func_def', 'return',
       'if', 'loop', 'try', 'throw', 'parallel', 'concat', 'import', 'native',
-      'chan', 'select', 'spawn', 'yield',
+      'chan', 'select', 'spawn', 'yield', 'await',
     ];
     function checkOps(ops: ManifestOp[]) {
       for (const op of ops) {
@@ -843,11 +843,17 @@ describe('ShortDecl Decomposition', () => {
     expect(evalOp.runtime).toBe('go');
   });
 
-  test('Go short decl produces no raw := in output', () => {
+  test('Go short decl with make() produces ChanOp, no raw := in output', () => {
     const code = 'ch := make(42)';
     const m = parseAndManifest(code);
     const json = JSON.stringify(m);
     expect(json).not.toContain(':=');
+    // make() now produces ChanOp instead of eval
+    const chanOp = m.ops.find(op => op.op === 'chan') as any;
+    expect(chanOp).toBeDefined();
+    expect(chanOp.action).toBe('make');
+    expect(chanOp.bind).toBe('ch');
+    expect(chanOp.size).toBe(42);
   });
 });
 
@@ -1787,7 +1793,7 @@ select {
       'exec', 'eval', 'exec_compiled', 'eval_compiled',
       'declare', 'assign', 'func_def', 'return',
       'if', 'loop', 'try', 'throw', 'parallel', 'concat', 'import', 'native',
-      'chan', 'select', 'spawn', 'yield',
+      'chan', 'select', 'spawn', 'yield', 'await',
     ];
 
     const code = `
@@ -1838,5 +1844,281 @@ select {
     expect(json).toContain('"chan"');
     expect(json).toContain('"select"');
     expect(json).toContain('"yield"');
+  });
+});
+
+// ─── AwaitOp ──────────────────────────────────────────────────────
+
+describe('AwaitOp', () => {
+  test('await expr produces AwaitOp (not stringified in exec code)', () => {
+    const code = 'await fetch(url)';
+    const m = parseAndManifest(code);
+    const op = m.ops[0] as any;
+    expect(op.op).toBe('await');
+    expect(op.runtime).toBeDefined();
+    expect(op.from).toBeDefined();
+    expect(op.from.op).toBe('eval');
+    expect(op.from.code).toContain('fetch');
+  });
+
+  test('const data = await fetch(url) produces AwaitOp with bind', () => {
+    const code = 'const data = await fetch(url)';
+    const m = parseAndManifest(code);
+    const op = m.ops[0] as any;
+    expect(op.op).toBe('await');
+    expect(op.bind).toBe('data');
+    expect(op.from.op).toBe('eval');
+    expect(op.from.code).toContain('fetch');
+    expect(op.from.bind).toBe('data');
+  });
+
+  test('let result = await compute() produces AwaitOp with bind (VarDecl)', () => {
+    const code = 'let result = await compute()';
+    const m = parseAndManifest(code);
+    const op = m.ops[0] as any;
+    expect(op.op).toBe('await');
+    expect(op.bind).toBe('result');
+    expect(op.from.op).toBe('eval');
+    expect(op.from.code).toContain('compute');
+  });
+
+  test('val := await getResult() produces AwaitOp with bind (ShortDecl)', () => {
+    const code = 'val := await getResult()';
+    const m = parseAndManifest(code);
+    const op = m.ops[0] as any;
+    expect(op.op).toBe('await');
+    expect(op.bind).toBe('val');
+    expect(op.from.op).toBe('eval');
+    expect(op.from.code).toContain('getResult');
+  });
+
+  test('await Promise.all([...]) still produces ParallelOp (not AwaitOp)', () => {
+    const code = 'await Promise.all([taskA(), taskB()])';
+    const m = parseAndManifest(code);
+    const parallel = m.ops.find(op => op.op === 'parallel');
+    expect(parallel).toBeDefined();
+    const awaitOp = m.ops.find(op => op.op === 'await');
+    expect(awaitOp).toBeUndefined();
+  });
+
+  test('await inside function body produces AwaitOp with captures', () => {
+    const code = `
+async function loadData(url) {
+  const data = await fetch(url)
+  return data
+}`;
+    const m = parseAndManifest(code);
+    const funcOp = m.ops.find(op => op.op === 'func_def') as any;
+    expect(funcOp).toBeDefined();
+    expect(funcOp.async).toBe(true);
+    const awaitOp = funcOp.body.find((op: any) => op.op === 'await');
+    expect(awaitOp).toBeDefined();
+    expect(awaitOp.bind).toBe('data');
+    expect(awaitOp.from.captures).toBeDefined();
+    expect(awaitOp.from.captures).toHaveProperty('url');
+  });
+});
+
+// ─── Error Handling: runtime on catches ───────────────────────────
+
+describe('Error Handling: runtime on catches', () => {
+  test('try/catch has runtime on catch clause', () => {
+    const code = `
+function safe() {
+  try {
+    const x = risky()
+  } catch (e) {
+    const y = 2
+  }
+}`;
+    const m = parseAndManifest(code);
+    const funcOp = m.ops.find(op => op.op === 'func_def') as any;
+    const tryOp = funcOp.body.find((op: any) => op.op === 'try');
+    expect(tryOp).toBeDefined();
+    expect(tryOp.catches[0].runtime).toBeDefined();
+    expect(typeof tryOp.catches[0].runtime).toBe('string');
+  });
+
+  test('try/catch/finally has runtime on catch, finallyBody preserved', () => {
+    const code = `
+function cleanup() {
+  try {
+    const x = 1
+  } catch (err) {
+    const y = 2
+  } finally {
+    const z = 3
+  }
+}`;
+    const m = parseAndManifest(code);
+    const funcOp = m.ops.find(op => op.op === 'func_def') as any;
+    const tryOp = funcOp.body.find((op: any) => op.op === 'try');
+    expect(tryOp.catches[0].runtime).toBeDefined();
+    expect(tryOp.finallyBody).toBeDefined();
+    expect(tryOp.finallyBody.length).toBeGreaterThan(0);
+  });
+
+  test('empty catch (bare catch {}) has runtime but no param', () => {
+    const code = `
+function swallow() {
+  try {
+    const x = risky()
+  } catch {
+    const y = 0
+  }
+}`;
+    const m = parseAndManifest(code);
+    const funcOp = m.ops.find(op => op.op === 'func_def') as any;
+    const tryOp = funcOp.body.find((op: any) => op.op === 'try');
+    expect(tryOp).toBeDefined();
+    expect(tryOp.catches[0].param).toBeUndefined();
+    expect(tryOp.catches[0].runtime).toBeDefined();
+  });
+
+  test('cross-runtime try: JS try body + Python catch', () => {
+    const code = `
+import os
+function safe_import() {
+  try {
+    const data = fetch("/api")
+  } catch (e) {
+    const fallback = os.path.join(".", "cache")
+  }
+}`;
+    const m = parseAndManifest(code);
+    const funcOp = m.ops.find(op => op.op === 'func_def') as any;
+    const tryOp = funcOp.body.find((op: any) => op.op === 'try');
+    expect(tryOp).toBeDefined();
+    // Catch handler runtime is determined from its body
+    expect(tryOp.catches[0].runtime).toBeDefined();
+  });
+
+  test('multiple catch clauses each get their own runtime', () => {
+    const code = `
+function multi_catch() {
+  try {
+    const x = risky()
+  } catch (e) {
+    const a = 1
+  }
+}`;
+    const m = parseAndManifest(code);
+    const funcOp = m.ops.find(op => op.op === 'func_def') as any;
+    const tryOp = funcOp.body.find((op: any) => op.op === 'try');
+    expect(tryOp).toBeDefined();
+    for (const c of tryOp.catches) {
+      expect(c.runtime).toBeDefined();
+    }
+  });
+});
+
+// ─── make() as ChanOp ────────────────────────────────────────────
+
+describe('make() as ChanOp', () => {
+  test('ch := make(10) produces ChanOp make with size and bind', () => {
+    const code = 'ch := make(10)';
+    const m = parseAndManifest(code);
+    const op = m.ops[0] as any;
+    expect(op.op).toBe('chan');
+    expect(op.action).toBe('make');
+    expect(op.bind).toBe('ch');
+    expect(op.size).toBe(10);
+  });
+
+  test('const ch = make(5) produces ChanOp make with size and bind', () => {
+    const code = 'const ch = make(5)';
+    const m = parseAndManifest(code);
+    const op = m.ops[0] as any;
+    expect(op.op).toBe('chan');
+    expect(op.action).toBe('make');
+    expect(op.bind).toBe('ch');
+    expect(op.size).toBe(5);
+  });
+
+  test('let ch = make(0) produces ChanOp make with size 0', () => {
+    const code = 'let ch = make(0)';
+    const m = parseAndManifest(code);
+    const op = m.ops[0] as any;
+    expect(op.op).toBe('chan');
+    expect(op.action).toBe('make');
+    expect(op.bind).toBe('ch');
+    expect(op.size).toBe(0);
+  });
+
+  test('make(10) standalone produces ChanOp make (no bind)', () => {
+    const code = 'make(10)';
+    const m = parseAndManifest(code);
+    const op = m.ops[0] as any;
+    expect(op.op).toBe('chan');
+    expect(op.action).toBe('make');
+    expect(op.size).toBe(10);
+    expect(op.bind).toBeUndefined();
+  });
+});
+
+// ─── Integration: new await/error/make ops ────────────────────────
+
+describe('New Op Integration (await/error/make)', () => {
+  test('AwaitOp in valid ops list', () => {
+    const validOps = [
+      'exec', 'eval', 'exec_compiled', 'eval_compiled',
+      'declare', 'assign', 'func_def', 'return',
+      'if', 'loop', 'try', 'throw', 'parallel', 'concat', 'import', 'native',
+      'chan', 'select', 'spawn', 'yield', 'await',
+    ];
+    expect(validOps).toContain('await');
+  });
+
+  test('stress test: await + try/catch + make() in one function', () => {
+    const code = `
+async function pipeline() {
+  const ch = make(5)
+  try {
+    const data = await fetch("/api")
+    return data
+  } catch (e) {
+    return null
+  }
+}`;
+    const m = parseAndManifest(code);
+    const funcOp = m.ops.find(op => op.op === 'func_def') as any;
+    expect(funcOp).toBeDefined();
+    expect(funcOp.async).toBe(true);
+
+    // Should have chan (make), try, and body ops
+    const chanOp = funcOp.body.find((op: any) => op.op === 'chan');
+    expect(chanOp).toBeDefined();
+    expect(chanOp.action).toBe('make');
+    expect(chanOp.bind).toBe('ch');
+
+    const tryOp = funcOp.body.find((op: any) => op.op === 'try');
+    expect(tryOp).toBeDefined();
+
+    // Inside try body: await op
+    const awaitOp = tryOp.body.find((op: any) => op.op === 'await');
+    expect(awaitOp).toBeDefined();
+    expect(awaitOp.bind).toBe('data');
+
+    // Catch has runtime
+    expect(tryOp.catches[0].runtime).toBeDefined();
+  });
+
+  test('JSON-serializable with new ops', () => {
+    const code = `
+async function test() {
+  const ch = make(1)
+  const data = await fetch("/x")
+  try {
+    ch <- data
+  } catch (e) {
+    const err = e
+  }
+}`;
+    const m = parseAndManifest(code);
+    expect(() => JSON.stringify(m)).not.toThrow();
+    const json = JSON.stringify(m);
+    expect(json).toContain('"await"');
+    expect(json).toContain('"chan"');
+    expect(json).toContain('"try"');
   });
 });

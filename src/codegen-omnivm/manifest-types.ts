@@ -49,7 +49,8 @@ export type ManifestOp =
   | ChanOp
   | SelectOp
   | SpawnOp
-  | YieldOp;
+  | YieldOp
+  | AwaitOp;
 
 // ─── Core Runtime Dispatch ────────────────────────────────────────
 
@@ -213,6 +214,10 @@ export interface TryOp {
 export interface ManifestCatch {
   param?: string;
   body: ManifestOp[];
+  /** Runtime of the catch handler (for cross-runtime error bridging). */
+  runtime?: string;
+  /** Error type filter (e.g., "ValueError", "TypeError"). */
+  errorType?: string;
 }
 
 /** Throw an error value. */
@@ -341,6 +346,21 @@ export interface YieldOp {
   from?: EvalOp;
   /** yield* / yield from (delegate to sub-generator). */
   delegate?: boolean;
+}
+
+// ─── Await (explicit async pump signal) ──────────────────────────
+
+/**
+ * Await an async expression. Tells OmniVM to evaluate the inner expression
+ * and pump event loops until the result resolves.
+ * Only non-parallel awaits become AwaitOp — `await Promise.all(...)` etc.
+ * still emit ParallelOp.
+ */
+export interface AwaitOp {
+  op: "await";
+  runtime: string;
+  from: EvalOp;
+  bind?: string;
 }
 
 // ─── Shared Types ─────────────────────────────────────────────────

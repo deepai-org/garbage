@@ -48,6 +48,7 @@ import {
   SelectCase,
   SpawnOp,
   YieldOp,
+  AwaitOp,
   ParamDef,
   ManifestValue,
   ConditionExpr,
@@ -198,6 +199,54 @@ export class ManifestCodeGenerator {
       };
     });
     return { op: "parallel" as const, branches };
+  }
+
+  // ─── Await Detection ────────────────────────────────────────────
+
+  /**
+   * Detect if an expression is `await expr` (not a parallel pattern).
+   * Returns the inner expression, or null.
+   */
+  private isAwaitExpr(expr: AST.Expr): { inner: AST.Expr } | null {
+    if (expr.kind === "Unary" && expr.op === "await" && expr.prefix) {
+      return { inner: expr.argument };
+    }
+    return null;
+  }
+
+  /**
+   * Emit an AwaitOp for a non-parallel await expression.
+   */
+  private emitAwait(inner: AST.Expr, runtime: OmniRuntime, bind?: string): AwaitOp {
+    const captures = this.computeCaptures(inner, runtime);
+    return {
+      op: "await",
+      runtime,
+      from: {
+        op: "eval",
+        runtime,
+        code: exprToCode(inner, this.source),
+        bind: bind || "__awaited",
+        ...(captures ? { captures } : {}),
+      },
+      ...(bind ? { bind } : {}),
+    };
+  }
+
+  // ─── make() Detection ─────────────────────────────────────────
+
+  /**
+   * Detect if an expression is a `make(N)` call (channel creation).
+   * Returns the buffer size, or null.
+   */
+  private isMakeCall(expr: AST.Expr): { size?: number } | null {
+    if (expr.kind === "Call" && expr.callee.kind === "Identifier" && expr.callee.name === "make") {
+      const size = expr.args.length > 0 && expr.args[0].kind === "NumericLiteral"
+        ? Number((expr.args[0] as AST.NumericLiteral).raw)
+        : undefined;
+      return { size };
+    }
+    return null;
   }
 
   // ─── Literal Detection ──────────────────────────────────────────
@@ -361,6 +410,23 @@ export class ManifestCodeGenerator {
     const parallel = this.isParallelPattern(expr);
     if (parallel) {
       return this.emitParallel(parallel.exprs, "__parallel");
+    }
+
+    // Await (non-parallel) → AwaitOp
+    const awaitExpr = this.isAwaitExpr(expr);
+    if (awaitExpr) {
+      return this.emitAwait(awaitExpr.inner, runtime);
+    }
+
+    // make() → ChanOp make
+    const makeCall = this.isMakeCall(expr);
+    if (makeCall) {
+      return {
+        op: "chan",
+        action: "make",
+        runtime,
+        size: makeCall.size,
+      } as ChanOp;
     }
 
     // Channel operations
@@ -703,6 +769,28 @@ export class ManifestCodeGenerator {
           continue;
         }
 
+        // Await (non-parallel) → AwaitOp with bind
+        const awaitExpr = this.isAwaitExpr(valExpr);
+        if (awaitExpr && !this.isParallelPattern(awaitExpr.inner)) {
+          ops.push(this.emitAwait(awaitExpr.inner, runtime, name));
+          this.recordBinding(name, runtime);
+          continue;
+        }
+
+        // make() → ChanOp make with bind
+        const makeCall = this.isMakeCall(valExpr);
+        if (makeCall) {
+          ops.push({
+            op: "chan",
+            action: "make",
+            runtime,
+            bind: name,
+            size: makeCall.size,
+          } as ChanOp);
+          this.recordBinding(name, runtime);
+          continue;
+        }
+
         // Channel recv: val = <-ch → ChanOp recv with bind
         const recv = this.isChanRecv(valExpr);
         if (recv) {
@@ -768,6 +856,28 @@ export class ManifestCodeGenerator {
         continue;
       }
 
+      // Await (non-parallel) → AwaitOp with bind
+      const awaitExpr = this.isAwaitExpr(valExpr);
+      if (awaitExpr && !this.isParallelPattern(awaitExpr.inner)) {
+        ops.push(this.emitAwait(awaitExpr.inner, runtime, name));
+        this.recordBinding(name, runtime);
+        continue;
+      }
+
+      // make() → ChanOp make with bind
+      const makeCall = this.isMakeCall(valExpr);
+      if (makeCall) {
+        ops.push({
+          op: "chan",
+          action: "make",
+          runtime,
+          bind: name,
+          size: makeCall.size,
+        } as ChanOp);
+        this.recordBinding(name, runtime);
+        continue;
+      }
+
       // Channel recv: val = <-ch → ChanOp recv with bind
       const recv = this.isChanRecv(valExpr);
       if (recv) {
@@ -818,6 +928,29 @@ export class ManifestCodeGenerator {
     if (node.pairs) {
       for (const pair of node.pairs) {
         const name = pair.name.name;
+
+        // Await (non-parallel) → AwaitOp with bind
+        const awaitExpr = this.isAwaitExpr(pair.expr);
+        if (awaitExpr && !this.isParallelPattern(awaitExpr.inner)) {
+          ops.push(this.emitAwait(awaitExpr.inner, runtime, name));
+          this.recordBinding(name, runtime);
+          continue;
+        }
+
+        // make() → ChanOp make with bind
+        const makeCall = this.isMakeCall(pair.expr);
+        if (makeCall) {
+          ops.push({
+            op: "chan",
+            action: "make",
+            runtime,
+            bind: name,
+            size: makeCall.size,
+          } as ChanOp);
+          this.recordBinding(name, runtime);
+          continue;
+        }
+
         // Channel recv: val := <-ch → ChanOp recv with bind
         const recv = this.isChanRecv(pair.expr);
         if (recv) {
@@ -857,6 +990,24 @@ export class ManifestCodeGenerator {
    * Emit an eval op that binds a value. For Go + Call, uses func/args format.
    */
   private emitBindingEval(bindName: string, valExpr: AST.Expr, runtime: OmniRuntime): ManifestOp {
+    // Await (non-parallel) → AwaitOp with bind
+    const awaitExpr = this.isAwaitExpr(valExpr);
+    if (awaitExpr && !this.isParallelPattern(awaitExpr.inner)) {
+      return this.emitAwait(awaitExpr.inner, runtime, bindName);
+    }
+
+    // make() → ChanOp make with bind
+    const makeCall = this.isMakeCall(valExpr);
+    if (makeCall) {
+      return {
+        op: "chan",
+        action: "make",
+        runtime,
+        bind: bindName,
+        size: makeCall.size,
+      } as ChanOp;
+    }
+
     if (runtime === OmniRuntime.Go && valExpr.kind === "Call") {
       return {
         op: "eval",
@@ -1373,16 +1524,37 @@ export class ManifestCodeGenerator {
       bodyOps.push(...this.emitBlock(block));
     }
 
-    // Decompose catch clauses
+    // Decompose catch clauses with runtime and optional errorType
     const catches: ManifestCatch[] = node.catches.map(c => {
       const catchBlocks = consolidateBlocks(c.body.statements, this.affinityMap);
       const catchOps: ManifestOp[] = [];
       for (const block of catchBlocks) {
         catchOps.push(...this.emitBlock(block));
       }
+
+      // Determine catch handler runtime from first body op or try body's dominant runtime
+      let catchRuntime: string | undefined;
+      if (catchBlocks.length > 0) {
+        catchRuntime = catchBlocks[0].runtime;
+      } else if (bodyBlocks.length > 0) {
+        catchRuntime = bodyBlocks[0].runtime;
+      }
+
+      // Extract errorType from typed catch param (Python except ValueError, Java catch IOException)
+      let errorType: string | undefined;
+      if (c.type) {
+        if (c.type.kind === "SimpleType") {
+          errorType = c.type.id.name;
+        } else if (this.source && c.type.span) {
+          errorType = this.source.slice(c.type.span.start, c.type.span.end);
+        }
+      }
+
       return {
         ...(c.param ? { param: c.param.name } : {}),
         body: catchOps,
+        ...(catchRuntime ? { runtime: catchRuntime } : {}),
+        ...(errorType ? { errorType } : {}),
       };
     });
 
