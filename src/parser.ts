@@ -27,6 +27,7 @@ export class Parser {
   
   // Context tracking
   private insideSwitch = false;
+  private noRubyBlock = false;
   
   // Directives
   private nextStmtGenericMode: "on" | "off" | "auto" = "auto";
@@ -1994,7 +1995,7 @@ export class Parser {
         expr = callExpr;
         
         // Check for Ruby block after function call
-        if (this.check("do")) {
+        if (this.check("do") && !this.noRubyBlock) {
           const blockStart = this.current;
           this.advance(); // consume 'do'
           
@@ -2034,7 +2035,7 @@ export class Parser {
       
       // Check for Ruby block after member access (Ruby method calls without parens)
       // e.g., items.each do |item| ... end
-      if (this.check("do") && expr.kind === "Member") {
+      if (this.check("do") && expr.kind === "Member" && !this.noRubyBlock) {
         // Convert the member access to a call with no arguments
         const callExpr: AST.Call = {
           kind: "Call",
@@ -4069,7 +4070,9 @@ export class Parser {
               name: id.value,
               span: this.createSpanFrom(id)
             };
+            this.noRubyBlock = true;
             const iterable = this.parseExpression();
+            this.noRubyBlock = false;
             // Consume optional Python-style colon (for x in items:)
             let body: AST.Block;
             if (this.match(":")) {
@@ -4357,8 +4360,12 @@ export class Parser {
     const start = this.current - 1;
     const variable = this.parseIdentifier();
     this.consume("in", "Expected 'in' in foreach loop");
+    // Suppress Ruby block consumption so factory.deps do ... done doesn't
+    // get parsed as Ruby method call (items.each do |x| ... end)
+    this.noRubyBlock = true;
     const iterable = this.parseExpression();
-    
+    this.noRubyBlock = false;
+
     // Check for do/done keyword block
     let body: AST.Block;
     if (this.match("do")) {
