@@ -54,7 +54,7 @@ export class Pass1Structural {
     switch (node.kind) {
       // --- Definite Python ---
       case "ListComprehension":
-        this.assign(node, OmniRuntime.Python, "definite", { type: "node_type", detail: "ListComprehension" });
+        this.assign(node, OmniRuntime.Python, "definite", { type: "syntax", detail: "ListComprehension" });
         this.visitExpr(node.expression);
         this.visitExpr(node.iterable);
         if (node.filter) this.visitExpr(node.filter);
@@ -434,6 +434,9 @@ export class Pass1Structural {
   private visitExprGeneric(expr: AST.Expr): void {
     switch (expr.kind) {
       case "Binary":
+        if (expr.op === "===" || expr.op === "!==") {
+          this.assign(expr, OmniRuntime.JavaScript, "definite", { type: "syntax", detail: `strict equality ${expr.op}` });
+        }
         this.visitExpr(expr.left);
         this.visitExpr(expr.right);
         break;
@@ -483,6 +486,7 @@ export class Pass1Structural {
         }
         break;
       case "Lambda":
+        this.assign(expr, OmniRuntime.JavaScript, "definite", { type: "syntax", detail: "arrow function =>" });
         this.symbolTable.pushScope();
         for (const param of expr.params) {
           if (param.name.kind === "Identifier") {
@@ -519,6 +523,9 @@ export class Pass1Structural {
         for (const el of expr.elements) this.visitExpr(el);
         // Sets with {a, b, c} notation — could be Python
         this.assign(expr, OmniRuntime.Python, "inferred", { type: "node_type", detail: "SetLiteral" });
+        break;
+      case "RegexLiteral":
+        this.assign(expr, OmniRuntime.JavaScript, "definite", { type: "syntax", detail: "regex literal /.../" });
         break;
       default:
         // Literals and other leaf nodes — no further traversal needed

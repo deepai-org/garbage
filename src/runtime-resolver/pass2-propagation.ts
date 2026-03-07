@@ -227,6 +227,36 @@ export class Pass2Propagation {
       this.ensureAffinity(node, calleeAff);
     }
 
+    // --- Syntactic Dominance Rule ---
+    // If any argument has "syntax" evidence, that language wins the call context.
+    // This handles cases like files.map(x => x) where files is Python-bound
+    // but the arrow function is syntactically impossible in Python.
+    const syntaxVotes = new Map<OmniRuntime, number>();
+    for (const arg of node.args) {
+      const argAff = this.affinityMap.get(arg);
+      if (argAff) {
+        const hasSyntaxEvidence = argAff.evidence.some(e => e.type === "syntax");
+        if (hasSyntaxEvidence) {
+          syntaxVotes.set(argAff.runtime, (syntaxVotes.get(argAff.runtime) || 0) + 1);
+        }
+      }
+    }
+
+    if (syntaxVotes.size === 1) {
+      // Exactly one language has syntax evidence — it wins
+      const [winnerRuntime] = syntaxVotes.keys();
+      this.affinityMap.set(node, {
+        runtime: winnerRuntime,
+        confidence: "definite",
+        evidence: [
+          { type: "syntax", detail: "syntactic dominance: argument syntax overrides callee provenance" },
+          ...calleeAff.evidence,
+        ],
+      });
+    }
+    // If zero syntax votes: callee provenance already set above
+    // If multiple syntax votes (collision): callee provenance breaks tie (already set above)
+
     const nodeAff = this.getOrDefault(node);
 
     // Check for async: if this is an await expression wrapping a call

@@ -17,7 +17,7 @@ export enum OmniRuntime {
  * Evidence for why a runtime was assigned.
  */
 export interface AffinityEvidence {
-  type: "node_type" | "keyword" | "import" | "method" | "builtin" | "scope" | "directive" | "runtime_tag" | "fallback";
+  type: "node_type" | "keyword" | "import" | "method" | "builtin" | "scope" | "directive" | "runtime_tag" | "syntax" | "fallback";
   detail: string;
 }
 

@@ -2122,3 +2122,71 @@ async function test() {
     expect(json).toContain('"try"');
   });
 });
+
+// --- Syntactic Dominance in Manifest ---
+
+describe('Syntactic Dominance - Manifest', () => {
+  test('files.map(f => f.toUpperCase()) emits JS eval with arrow function', () => {
+    const code = `import os\nconst files = os.listdir("/home")\nconst names = files.map(f => f.toUpperCase())`;
+    const m = parseAndManifest(code);
+    // The map call should be JS runtime due to arrow function syntax dominance
+    const evalOps = m.ops.filter(op => op.op === 'eval') as any[];
+    const mapOp = evalOps.find(op => op.code && op.code.includes('map'));
+    expect(mapOp).toBeDefined();
+    expect(mapOp.runtime).toBe('javascript');
+  });
+
+  test('sorted(names) emits Python eval', () => {
+    const code = `import os\nconst files = os.listdir("/home")\nconst names = files.map(f => f.toUpperCase())\nresult = sorted(names)`;
+    const m = parseAndManifest(code);
+    const evalOps = m.ops.filter(op => op.op === 'eval') as any[];
+    const sortedOp = evalOps.find(op => op.code && op.code.includes('sorted'));
+    expect(sortedOp).toBeDefined();
+    expect(sortedOp.runtime).toBe('python');
+  });
+
+  test('mixed function body: Python import → JS .map() → Python sorted() → correct runtimes', () => {
+    const code = `import os
+const files = os.listdir("/home")
+const names = files.map(f => f.toUpperCase())
+result = sorted(names)`;
+    const m = parseAndManifest(code);
+    const evalOps = m.ops.filter(op => op.op === 'eval') as any[];
+
+    // os.listdir should be Python
+    const listdirOp = evalOps.find(op => op.code && op.code.includes('listdir'));
+    expect(listdirOp).toBeDefined();
+    expect(listdirOp.runtime).toBe('python');
+
+    // .map() should be JS (syntax dominance from arrow function)
+    const mapOp = evalOps.find(op => op.code && op.code.includes('map'));
+    expect(mapOp).toBeDefined();
+    expect(mapOp.runtime).toBe('javascript');
+
+    // sorted() should be Python
+    const sortedOp = evalOps.find(op => op.code && op.code.includes('sorted'));
+    expect(sortedOp).toBeDefined();
+    expect(sortedOp.runtime).toBe('python');
+  });
+
+  test('.filter(x => x !== null) on Python object emits JS eval', () => {
+    const code = `import os\nconst files = os.listdir("/home")\nconst valid = files.filter(x => x !== null)`;
+    const m = parseAndManifest(code);
+    const evalOps = m.ops.filter(op => op.op === 'eval') as any[];
+    const filterOp = evalOps.find(op => op.code && op.code.includes('filter'));
+    expect(filterOp).toBeDefined();
+    expect(filterOp.runtime).toBe('javascript');
+  });
+
+  test('.append(1) on Python object stays Python in manifest', () => {
+    const code = `import os\nconst files = os.listdir("/home")\nfiles.append("new_file")`;
+    const m = parseAndManifest(code);
+    // append is an ExprStmt so may be exec or eval
+    const appendOp = m.ops.find(op => {
+      const o = op as any;
+      return o.code && o.code.includes('append');
+    }) as any;
+    expect(appendOp).toBeDefined();
+    expect(appendOp.runtime).toBe('python');
+  });
+});

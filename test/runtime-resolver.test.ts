@@ -568,3 +568,87 @@ describe('Import-to-Usage Propagation', () => {
     }
   });
 });
+
+// --- Syntactic Dominance Tests ---
+
+describe('Syntactic Dominance', () => {
+  test('Lambda gets definite JS affinity with syntax evidence in Pass 1', () => {
+    const result = resolve('const fn = x => x * 2');
+    for (const [node, aff] of result.affinityMap) {
+      if (node.kind === 'Lambda') {
+        expect(aff.runtime).toBe(OmniRuntime.JavaScript);
+        expect(aff.confidence).toBe('definite');
+        expect(aff.evidence.some(e => e.type === 'syntax')).toBe(true);
+      }
+    }
+  });
+
+  test('RegexLiteral gets definite JS affinity with syntax evidence in Pass 1', () => {
+    const result = resolve('const re = /pattern/g');
+    for (const [node, aff] of result.affinityMap) {
+      if (node.kind === 'RegexLiteral') {
+        expect(aff.runtime).toBe(OmniRuntime.JavaScript);
+        expect(aff.confidence).toBe('definite');
+        expect(aff.evidence.some(e => e.type === 'syntax')).toBe(true);
+      }
+    }
+  });
+
+  test('Binary === gets definite JS affinity with syntax evidence in Pass 1', () => {
+    const result = resolve('const eq = x === y');
+    for (const [node, aff] of result.affinityMap) {
+      if (node.kind === 'Binary' && (node as AST.Binary).op === '===') {
+        expect(aff.runtime).toBe(OmniRuntime.JavaScript);
+        expect(aff.confidence).toBe('definite');
+        expect(aff.evidence.some(e => e.type === 'syntax')).toBe(true);
+      }
+    }
+  });
+
+  test('.map(x => x.name) on Python object → JS via syntax dominance', () => {
+    const result = resolve('import os\nfiles = os.listdir("/tmp")\nfiles.map(f => f.toUpperCase())');
+    for (const [node, aff] of result.affinityMap) {
+      if (node.kind === 'Call' &&
+          (node as AST.Call).callee.kind === 'Member' &&
+          ((node as AST.Call).callee as AST.Member).property.name === 'map') {
+        expect(aff.runtime).toBe(OmniRuntime.JavaScript);
+      }
+    }
+  });
+
+  test('.customMethod(x => x) on Python object → JS via syntax dominance', () => {
+    const result = resolve('import os\nfiles = os.listdir("/tmp")\nfiles.customMethod(f => f)');
+    for (const [node, aff] of result.affinityMap) {
+      if (node.kind === 'Call' &&
+          (node as AST.Call).callee.kind === 'Member' &&
+          ((node as AST.Call).callee as AST.Member).property.name === 'customMethod') {
+        expect(aff.runtime).toBe(OmniRuntime.JavaScript);
+      }
+    }
+  });
+
+  test('.append(1) on Python object → Python (no syntax evidence, provenance wins)', () => {
+    const result = resolve('import os\nfiles = os.listdir("/tmp")\nfiles.append(1)');
+    for (const [node, aff] of result.affinityMap) {
+      if (node.kind === 'Call' &&
+          (node as AST.Call).callee.kind === 'Member' &&
+          ((node as AST.Call).callee as AST.Member).property.name === 'append') {
+        expect(aff.runtime).toBe(OmniRuntime.Python);
+      }
+    }
+  });
+
+  test('syntax collision: both JS and Python syntax in args → callee provenance wins', () => {
+    // Use a helper wrapping a comprehension as a separate argument.
+    // wrap() is a Python-sourced call with a Lambda (JS) and a comprehension (Python) as separate args.
+    const result = resolve('import os\nos.process([y for y in z], x => x)');
+    for (const [node, aff] of result.affinityMap) {
+      if (node.kind === 'Call' &&
+          (node as AST.Call).callee.kind === 'Member' &&
+          ((node as AST.Call).callee as AST.Member).property.name === 'process') {
+        // Collision: Python ListComprehension + JS Lambda → callee provenance (Python) breaks tie
+        expect(aff.runtime).toBe(OmniRuntime.Python);
+      }
+    }
+  });
+});
