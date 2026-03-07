@@ -40,6 +40,8 @@ export type ManifestOp =
   | ReturnOp
   | IfOp
   | LoopOp
+  | TryOp
+  | ThrowOp
   | ParallelOp
   | ConcatOp
   | ImportOp
@@ -194,6 +196,25 @@ export interface LoopOp {
   variable?: string;
   iterable?: ManifestValue;
   body: ManifestOp[];
+}
+
+/** Error handling: try/catch/finally. */
+export interface TryOp {
+  op: "try";
+  body: ManifestOp[];
+  catches: ManifestCatch[];
+  finallyBody?: ManifestOp[];
+}
+
+export interface ManifestCatch {
+  param?: string;
+  body: ManifestOp[];
+}
+
+/** Throw an error value. */
+export interface ThrowOp {
+  op: "throw";
+  value: ManifestValue;
 }
 
 // ─── Concurrency ─────────────────────────────────────────────────

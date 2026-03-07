@@ -36,6 +36,9 @@ import {
   ReturnOp,
   IfOp,
   LoopOp,
+  TryOp,
+  ThrowOp,
+  ManifestCatch,
   ParallelOp,
   ConcatOp,
   ImportOp,
@@ -225,6 +228,12 @@ export class ManifestCodeGenerator {
 
       case "Loop":
         return [this.emitLoop(node)];
+
+      case "Try":
+        return [this.emitTry(node)];
+
+      case "Throw":
+        return [this.emitThrow(node)];
 
       case "ExportDecl":
         if (node.declaration) return this.emitNode(node.declaration, blockRuntime);
@@ -918,7 +927,7 @@ export class ManifestCodeGenerator {
     return ifOp;
   }
 
-  private emitLoop(node: AST.Loop): LoopOp {
+  private emitLoop(node: AST.Loop): ManifestOp {
     const bodyBlocks = consolidateBlocks(node.body.statements, this.affinityMap);
     const bodyOps: ManifestOp[] = [];
     for (const block of bodyBlocks) {
@@ -928,7 +937,8 @@ export class ManifestCodeGenerator {
     const loopOp: LoopOp = {
       op: "loop",
       mode: node.mode === "while" ? "while" :
-            node.mode === "for" ? "for" : "infinite",
+            node.mode === "for" ? "for" :
+            node.mode === "foreach" ? "foreach" : "infinite",
       body: bodyOps,
     };
 
@@ -940,6 +950,21 @@ export class ManifestCodeGenerator {
         runtime: testRuntime,
         code: exprToCode(node.test, this.source),
       };
+    }
+
+    // Foreach: set variable and iterable
+    if (node.mode === "foreach") {
+      if (node.variable) {
+        loopOp.variable = node.variable.name;
+      }
+      if (node.iterable) {
+        if (node.iterable.kind === "Identifier") {
+          loopOp.iterable = { kind: "ref", name: node.iterable.name };
+        } else {
+          // Complex iterable expression → ref to a literal representation
+          loopOp.iterable = { kind: "ref", name: exprToCode(node.iterable, this.source) };
+        }
+      }
     }
 
     return loopOp;
@@ -993,6 +1018,68 @@ export class ManifestCodeGenerator {
         kind: "literal",
         value: node.values.map(v => exprToCode(v, this.source)),
       },
+    };
+  }
+
+  // ─── Try/Catch/Throw ────────────────────────────────────────
+
+  private emitTry(node: AST.Try): TryOp {
+    // Decompose try body
+    const bodyBlocks = consolidateBlocks(node.body.statements, this.affinityMap);
+    const bodyOps: ManifestOp[] = [];
+    for (const block of bodyBlocks) {
+      bodyOps.push(...this.emitBlock(block));
+    }
+
+    // Decompose catch clauses
+    const catches: ManifestCatch[] = node.catches.map(c => {
+      const catchBlocks = consolidateBlocks(c.body.statements, this.affinityMap);
+      const catchOps: ManifestOp[] = [];
+      for (const block of catchBlocks) {
+        catchOps.push(...this.emitBlock(block));
+      }
+      return {
+        ...(c.param ? { param: c.param.name } : {}),
+        body: catchOps,
+      };
+    });
+
+    const tryOp: TryOp = {
+      op: "try",
+      body: bodyOps,
+      catches,
+    };
+
+    // Decompose finally body if present
+    if (node.finallyBody) {
+      const finallyBlocks = consolidateBlocks(node.finallyBody.statements, this.affinityMap);
+      const finallyOps: ManifestOp[] = [];
+      for (const block of finallyBlocks) {
+        finallyOps.push(...this.emitBlock(block));
+      }
+      tryOp.finallyBody = finallyOps;
+    }
+
+    return tryOp;
+  }
+
+  private emitThrow(node: AST.Throw): ThrowOp {
+    if (this.isSimpleLiteral(node.value)) {
+      return {
+        op: "throw",
+        value: { kind: "literal", value: this.literalValue(node.value) },
+      };
+    }
+    if (node.value.kind === "Identifier") {
+      return {
+        op: "throw",
+        value: { kind: "ref", name: node.value.name },
+      };
+    }
+    // Complex expression — use literal with stringified code
+    return {
+      op: "throw",
+      value: { kind: "literal", value: exprToCode(node.value, this.source) },
     };
   }
 

@@ -1261,3 +1261,216 @@ describe('Manifest Type Validation', () => {
     expect(funcOp.source).toContain('func Init(');
   });
 });
+
+// --- Foreach Loops ─────────────────────────────────────────────
+
+describe('Foreach Loops', () => {
+  test('for-in loop emits foreach mode with variable and iterable ref', () => {
+    const code = 'for item in items {\n  console.log(item)\n}';
+    const m = parseAndManifest(code);
+    const loop = m.ops.find(op => op.op === 'loop') as any;
+    expect(loop).toBeDefined();
+    expect(loop.mode).toBe('foreach');
+    expect(loop.variable).toBe('item');
+    expect(loop.iterable).toBeDefined();
+    expect(loop.iterable.kind).toBe('ref');
+    expect(loop.iterable.name).toBe('items');
+  });
+
+  test('foreach inside function with cross-runtime body', () => {
+    const code = `
+def py_process(x):
+  return x
+
+function process_all(items) {
+  for item in items {
+    const result = py_process(item)
+  }
+}`;
+    const m = parseAndManifest(code);
+    const funcOp = m.ops.find(op => op.op === 'func_def' && (op as any).name === 'process_all') as any;
+    expect(funcOp).toBeDefined();
+    const loop = funcOp.body.find((op: any) => op.op === 'loop');
+    expect(loop).toBeDefined();
+    expect(loop.mode).toBe('foreach');
+    expect(loop.variable).toBe('item');
+  });
+});
+
+// --- Try/Catch/Throw ───────────────────────────────────────────
+
+describe('Try/Catch/Throw', () => {
+  test('try/catch emits try op with body and catches', () => {
+    const code = `
+function safe_call() {
+  try {
+    const result = risky()
+    return result
+  } catch (e) {
+    return null
+  }
+}`;
+    const m = parseAndManifest(code);
+    const funcOp = m.ops.find(op => op.op === 'func_def') as any;
+    const tryOp = funcOp.body.find((op: any) => op.op === 'try');
+    expect(tryOp).toBeDefined();
+    expect(tryOp.body.length).toBeGreaterThan(0);
+    expect(tryOp.catches.length).toBe(1);
+    expect(tryOp.catches[0].param).toBe('e');
+    expect(tryOp.catches[0].body.length).toBeGreaterThan(0);
+  });
+
+  test('try/catch/finally emits finallyBody', () => {
+    const code = `
+function with_cleanup() {
+  try {
+    const x = 1
+  } catch (err) {
+    const y = 2
+  } finally {
+    const z = 3
+  }
+}`;
+    const m = parseAndManifest(code);
+    const funcOp = m.ops.find(op => op.op === 'func_def') as any;
+    const tryOp = funcOp.body.find((op: any) => op.op === 'try');
+    expect(tryOp).toBeDefined();
+    expect(tryOp.finallyBody).toBeDefined();
+    expect(tryOp.finallyBody.length).toBeGreaterThan(0);
+  });
+
+  test('throw emits throw op with literal value', () => {
+    const code = `
+function fail() {
+  throw "something went wrong"
+}`;
+    const m = parseAndManifest(code);
+    const funcOp = m.ops.find(op => op.op === 'func_def') as any;
+    const throwOp = funcOp.body.find((op: any) => op.op === 'throw');
+    expect(throwOp).toBeDefined();
+    expect(throwOp.value.kind).toBe('literal');
+    expect(throwOp.value.value).toBe('something went wrong');
+  });
+
+  test('throw with identifier emits ref', () => {
+    const code = `
+function rethrow() {
+  const err = "error"
+  throw err
+}`;
+    const m = parseAndManifest(code);
+    const funcOp = m.ops.find(op => op.op === 'func_def') as any;
+    const throwOp = funcOp.body.find((op: any) => op.op === 'throw');
+    expect(throwOp).toBeDefined();
+    expect(throwOp.value.kind).toBe('ref');
+    expect(throwOp.value.value || throwOp.value.name).toBe('err');
+  });
+});
+
+// --- /= Operator ───────────────────────────────────────────────
+
+describe('Division Assignment', () => {
+  test('/= emits assign op with divide operator', () => {
+    const code = 'let total = 100\ntotal /= 4';
+    const m = parseAndManifest(code);
+    const assign = m.ops.find(op => op.op === 'assign') as any;
+    expect(assign).toBeDefined();
+    expect(assign.target).toBe('total');
+    expect(assign.operator).toBe('/=');
+    expect(assign.value).toEqual({ kind: 'literal', value: 4 });
+  });
+
+  test('%= emits assign op with modulo operator', () => {
+    const code = 'let x = 10\nx %= 3';
+    const m = parseAndManifest(code);
+    const assign = m.ops.find(op => op.op === 'assign') as any;
+    expect(assign).toBeDefined();
+    expect(assign.target).toBe('x');
+    expect(assign.operator).toBe('%=');
+    expect(assign.value).toEqual({ kind: 'literal', value: 3 });
+  });
+});
+
+// --- Scope Shadowing ───────────────────────────────────────────
+
+describe('Scope Shadowing', () => {
+  test('inner function shadows outer variable using param-dependent expr', () => {
+    const code = `
+const x = 10
+function inner(n) {
+  const x = n + 1
+  return x
+}`;
+    const m = parseAndManifest(code);
+    // Outer x is a declare
+    const declare = m.ops.find(op => op.op === 'declare') as any;
+    expect(declare).toBeDefined();
+    expect(declare.bind).toBe('x');
+
+    // Inner function has its own x (depends on param, stays in body)
+    const funcOp = m.ops.find(op => op.op === 'func_def') as any;
+    expect(funcOp).toBeDefined();
+    const innerEval = funcOp.body.find((op: any) => op.op === 'eval' && op.bind === 'x');
+    expect(innerEval).toBeDefined();
+    expect(innerEval.code).toContain('n');
+  });
+});
+
+// --- Deep Mutual Recursion ────────────────────────────────────
+
+describe('Deep Mutual Recursion', () => {
+  test('cross-runtime recursive chain captures all callees', () => {
+    const code = `
+def py_step(n):
+  if n <= 0:
+    return 0
+  return js_step(n - 1)
+
+function js_step(n) {
+  if (n <= 0) {
+    return 0
+  }
+  return py_step(n - 1)
+}`;
+    const m = parseAndManifest(code);
+    const pyFunc = m.ops.find(op => op.op === 'func_def' && (op as any).name === 'py_step') as any;
+    const jsFunc = m.ops.find(op => op.op === 'func_def' && (op as any).name === 'js_step') as any;
+    expect(pyFunc).toBeDefined();
+    expect(jsFunc).toBeDefined();
+
+    // py_step should reference js_step in its body (via captures or code)
+    const pyBody = JSON.stringify(pyFunc.body);
+    expect(pyBody).toContain('js_step');
+
+    // js_step should reference py_step
+    const jsBody = JSON.stringify(jsFunc.body);
+    expect(jsBody).toContain('py_step');
+  });
+});
+
+// --- Nested Loops ─────────────────────────────────────────────
+
+describe('Nested Loops', () => {
+  test('while loop inside while loop', () => {
+    const code = `
+function matrix_scan() {
+  let i = 0
+  while (i < 3) {
+    let j = 0
+    while (j < 3) {
+      console.log(i + j)
+      j += 1
+    }
+    i += 1
+  }
+}`;
+    const m = parseAndManifest(code);
+    const funcOp = m.ops.find(op => op.op === 'func_def') as any;
+    const outerLoop = funcOp.body.find((op: any) => op.op === 'loop');
+    expect(outerLoop).toBeDefined();
+    expect(outerLoop.mode).toBe('while');
+    const innerLoop = outerLoop.body.find((op: any) => op.op === 'loop');
+    expect(innerLoop).toBeDefined();
+    expect(innerLoop.mode).toBe('while');
+  });
+});
