@@ -1448,7 +1448,14 @@ export class ManifestCodeGenerator {
     // Foreach: set variable and iterable
     if (node.mode === "foreach") {
       if (node.variable) {
-        loopOp.variable = node.variable.name;
+        if (node.variable.kind === "ArrayPattern") {
+          loopOp.variable = node.variable.elements
+            .filter((e): e is AST.Identifier => e !== null && e.kind === "Identifier")
+            .map(e => e.name)
+            .join(", ");
+        } else {
+          loopOp.variable = node.variable.name;
+        }
       }
       if (node.iterable) {
         if (node.iterable.kind === "Identifier") {

@@ -1,13 +1,7 @@
 import { Lexer } from '../src/lexer';
 import { Parser } from '../src/parser';
 import * as AST from '../src/ast';
-
-function parseCode(code: string): AST.Program {
-  const lexer = new Lexer(code);
-  const tokens = lexer.tokenize();
-  const parser = new Parser(tokens);
-  return parser.parse();
-}
+import { parseCode } from './helpers';
 
 describe('Parser', () => {
   describe('Declarations', () => {
@@ -214,7 +208,7 @@ describe('Parser', () => {
       const ast = parseCode('foreach item in items { print(item); }');
       const loop = ast.body[0] as AST.Loop;
       expect(loop.mode).toBe('foreach');
-      expect(loop.variable?.name).toBe('item');
+      expect(loop.variable?.kind === 'Identifier' && loop.variable.name).toBe('item');
     });
 
     test('parses switch statements', () => {

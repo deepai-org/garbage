@@ -1371,9 +1371,7 @@ export class Parser {
   
   private parsePrimary(): AST.Expr {
     // Handle function expressions (including async)
-    // For 'func', skip if Go-style typed params detected (e.g., func(x int))
-    // — those are handled at statement level as func declarations.
-    if (this.peek().value === "function" || (this.peek().value === "func" && !this.hasGoTypedParams())) {
+    if (this.peek().value === "function" || this.peek().value === "func") {
       const start = this.current;
       this.advance(); // consume 'function' or 'func'
 
@@ -2898,9 +2896,18 @@ export class Parser {
       isBlockParam = true;
     }
     
-    // Handle spread parameter (...param)
+    // Handle spread parameter (...param), Python *args, or Python **kwargs
     let isSpread = false;
     if (this.match("...")) {
+      isSpread = true;
+    } else if (this.check("**")) {
+      // Python-style **kwargs (double-splat)
+      this.advance(); // consume **
+      isSpread = true;
+    } else if (this.check("*") &&
+               (this.peekNext()?.type === TokenType.Identifier || this.peekNext()?.type === TokenType.Keyword)) {
+      // Python-style *args (single-splat)
+      this.advance(); // consume *
       isSpread = true;
     }
     
@@ -2933,17 +2940,22 @@ export class Parser {
     if (this.match("?")) {
       optional = true;
     }
-    
+
     let type: AST.TypeNode | undefined;
     if (this.match(":")) {
       type = this.parseType();
+    } else if (this.peek().type === TokenType.Identifier &&
+               !this.check(",") && !this.check(")") && !this.check("=") && !this.check("?") &&
+               name.kind === "Identifier") {
+      // Go-style type annotation: name Type (no colon separator)
+      type = this.parseType();
     }
-    
+
     let defaultValue: AST.Expr | undefined;
     if (this.match("=")) {
       defaultValue = this.parseExpression();
     }
-    
+
     const param: AST.Param = {
       name,
       type,
@@ -3637,10 +3649,46 @@ export class Parser {
         } else {
           const checkpoint = this.current;
           const id = this.advance();
-          if (this.match("in")) {
+          if (this.match(",")) {
+            // Multi-variable: for key, value of/in ...
+            const firstVar: AST.Identifier = {
+              kind: "Identifier",
+              name: id.value,
+              span: this.createSpanFrom(id)
+            };
+            const secondId = this.peek();
+            if (secondId.type === TokenType.Identifier || secondId.type === TokenType.Keyword) {
+              this.advance();
+              const secondVar: AST.Identifier = {
+                kind: "Identifier",
+                name: secondId.value,
+                span: this.createSpanFrom(secondId)
+              };
+              if (this.match("of", "in")) {
+                const variable: AST.ArrayPattern = {
+                  kind: "ArrayPattern",
+                  elements: [firstVar, secondVar],
+                  span: this.createSpan(checkpoint, this.current - 1)
+                };
+                const iterable = this.parseExpression();
+                this.match(":");
+                const body = this.parseBlockOrStatement();
+                return {
+                  kind: "Loop",
+                  mode: "foreach",
+                  variable,
+                  iterable,
+                  body,
+                  span: this.createSpan(start, this.current - 1)
+                };
+              }
+            }
+            // Didn't match multi-variable pattern, backtrack
+            this.current = checkpoint;
+          } else if (this.match("in")) {
             // foreach style: for x in collection
-            const variable = {
-              kind: "Identifier" as const,
+            const variable: AST.Identifier = {
+              kind: "Identifier",
               name: id.value,
               span: this.createSpanFrom(id)
             };

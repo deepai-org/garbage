@@ -500,7 +500,14 @@ export class Transpiler {
       if (node.await) this.emit('await ');
       this.emit('const ');
       if (node.variable) {
-        this.emit(this.visitIdentifier(node.variable));
+        if (node.variable.kind === "ArrayPattern") {
+          const names = node.variable.elements
+            .filter((e): e is AST.Identifier => e !== null && e.kind === "Identifier")
+            .map(e => this.visitIdentifier(e));
+          this.emit('[' + names.join(', ') + ']');
+        } else {
+          this.emit(this.visitIdentifier(node.variable));
+        }
       }
       this.emit(' of ');
       if (node.iterable) {

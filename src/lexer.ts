@@ -909,7 +909,12 @@ export class Lexer {
         const nextToken = this.tokens[i + 1];
         
         // Check if there's a line break between tokens
-        if (nextToken.line > token.line) {
+        // Use end line of token, not start line, for multi-line tokens (e.g. triple-quoted strings)
+        let tokenEndLine = token.line;
+        if (token.value && token.value.includes('\n')) {
+          tokenEndLine = token.line + (token.value.match(/\n/g) || []).length;
+        }
+        if (nextToken.line > tokenEndLine) {
           // Suppress virtual semicolons in JSX context
           // This includes when we're inside JSX elements or when closing a JSX expression
           const inJSXContext = jsxDepth > 0;

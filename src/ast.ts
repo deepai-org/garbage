@@ -330,7 +330,7 @@ export interface Loop {
   test?: Expr;
   step?: Expr;
   iterable?: Expr;
-  variable?: Identifier;
+  variable?: Identifier | ArrayPattern;
   body: Block;
   label?: Identifier;
   await?: boolean;
