@@ -3710,20 +3710,36 @@ export class Parser {
       }
       
       // Check for Go-style for loop (without parentheses)
-      // Look for pattern: identifier := 
+      // Look for pattern: identifier :=
       if (this.peek().type === TokenType.Identifier && this.peekAt(1)?.value === ":=") {
         // Go-style for loop without parentheses
         // Parse init statement manually to avoid consuming semicolon
         const initStart = this.current;
         const name = this.parseIdentifier();
         this.consume(":=", "Expected ':=' in for init");
+
+        // Check for Go for-range: `for task := range iterable { ... }`
+        if (this.peek().type === TokenType.Identifier && this.peek().value === "range") {
+          this.advance(); // consume 'range'
+          const iterable = this.parseExpression();
+          const body = this.parseBlockOrStatement();
+          return {
+            kind: "Loop",
+            mode: "foreach",
+            variable: name,
+            iterable,
+            body,
+            span: this.createSpan(start, this.current - 1)
+          };
+        }
+
         const expr = this.parseExpression();
         const init: AST.ShortDecl = {
           kind: "ShortDecl",
           pairs: [{ name, expr }],
           span: this.createSpan(initStart, this.current - 1)
         };
-        
+
         this.consume(";", "Expected ';' after init");
         
         let test: AST.Expr | undefined;
@@ -6967,6 +6983,23 @@ export class Parser {
             };
             return this.parseDictComprehension(dictExpr, start);
           }
+        } else if (key.kind === "Identifier" && this.check("(")) {
+          // Shorthand method: method() { ... }
+          this.advance(); // consume '('
+          const params: AST.Param[] = [];
+          if (!this.check(")")) {
+            do {
+              params.push(this.parseParameter());
+            } while (this.match(","));
+          }
+          this.consume(")", "Expected ')' after method parameters");
+          const methodBody = this.parseBlockOrStatement();
+          value = {
+            kind: "Lambda",
+            params,
+            body: methodBody,
+            span: this.createSpan(propStart, this.current - 1)
+          } as AST.Lambda;
         } else if (key.kind === "Identifier") {
           // Shorthand property
           shorthand = true;

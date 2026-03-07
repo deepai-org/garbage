@@ -34,8 +34,15 @@ export function exprToCode(expr: AST.Expr, source?: string): string {
       return String(expr.value);
     case "NullLiteral":
       return "null";
-    case "Member":
-      return `${exprToCode(expr.object, source)}.${expr.property.name}`;
+    case "Member": {
+      const obj = exprToCode(expr.object, source);
+      if (expr.computed) {
+        const dot = expr.optional ? "?." : "";
+        return `${obj}${dot}[${expr.property.name}]`;
+      }
+      const dot = expr.optional ? "?." : ".";
+      return `${obj}${dot}${expr.property.name}`;
+    }
     case "Call":
       const args = expr.args.map(a => exprToCode(a, source)).join(", ");
       return `${exprToCode(expr.callee, source)}(${args})`;
@@ -49,20 +56,29 @@ export function exprToCode(expr: AST.Expr, source?: string): string {
       }
       return `${exprToCode(expr.argument, source)}${expr.op}`;
     }
-    case "Index":
-      return `${exprToCode(expr.object, source)}[${exprToCode(expr.index, source)}]`;
+    case "Index": {
+      const idxObj = exprToCode(expr.object, source);
+      const idxBracket = expr.optional ? "?.[" : "[";
+      return `${idxObj}${idxBracket}${exprToCode(expr.index, source)}]`;
+    }
     case "Assign":
       return `${exprToCode(expr.left, source)} ${expr.op} ${exprToCode(expr.right, source)}`;
     case "Ternary":
       return `(${exprToCode(expr.test, source)} ? ${exprToCode(expr.consequent, source)} : ${exprToCode(expr.alternate, source)})`;
     case "ArrayLiteral":
       return `[${expr.elements.map(e => exprToCode(e, source)).join(", ")}]`;
-    case "ObjectLiteral":
-      const props = expr.properties.map(p => {
-        const key = p.key.kind === "Identifier" ? p.key.name : exprToCode(p.key as AST.Expr, source);
+    case "ObjectLiteral": {
+      const objProps = expr.properties.map(p => {
+        if (p.shorthand && p.key.kind === "Identifier") {
+          return p.key.name;
+        }
+        const key = p.computed
+          ? `[${exprToCode(p.key as AST.Expr, source)}]`
+          : (p.key.kind === "Identifier" ? p.key.name : exprToCode(p.key as AST.Expr, source));
         return `${key}: ${exprToCode(p.value, source)}`;
       }).join(", ");
-      return `{${props}}`;
+      return `{${objProps}}`;
+    }
     case "Lambda": {
       const lParams = expr.params.map(p => paramToCode(p, source)).join(", ");
       return lambdaToCode(expr, lParams, source);
@@ -86,6 +102,12 @@ export function exprToCode(expr: AST.Expr, source?: string): string {
       if (expr.value) return `${prefix}${expr.delegate ? "" : " "}${exprToCode(expr.value, source)}`;
       return "yield";
     }
+    case "RegexLiteral":
+      return `/${expr.pattern}/${expr.flags}`;
+    case "SetLiteral":
+      return `new Set([${expr.elements.map(e => exprToCode(e, source)).join(", ")}])`;
+    case "TypeAssertion":
+      return `(${exprToCode(expr.expr, source)} as ${typeToCode(expr.type, source)})`;
     default:
       return spanExtract(expr, source) || "/* expr */";
   }
@@ -151,6 +173,86 @@ export function nodeToSourceCode(node: AST.Decl | AST.Stmt | AST.Expr, source?: 
       if (node.value) return `${prefix}${node.delegate ? "" : " "}${exprToCode(node.value, source)}`;
       return "yield";
     }
+    case "Break":
+      return node.label ? `break ${node.label.name}` : "break";
+    case "Continue":
+      return node.label ? `continue ${node.label.name}` : "continue";
+    case "Throw":
+      return `throw ${exprToCode(node.value, source)}`;
+    case "Pass":
+      return "/* pass */";
+    case "Echo":
+      return `console.log(${node.values.map(v => exprToCode(v, source)).join(", ")})`;
+    case "Defer": {
+      if ("kind" in node.body && (node.body as any).kind === "Block") {
+        return `defer { ${blockToCode(node.body as AST.Block, source)} }`;
+      }
+      return `defer ${exprToCode(node.body as AST.Expr, source)}`;
+    }
+    case "Reassign":
+      return `${node.name.name} = ${exprToCode(node.expr, source)}`;
+    case "If": {
+      const parts: string[] = [];
+      for (let i = 0; i < node.arms.length; i++) {
+        const arm = node.arms[i];
+        const kw = i === 0 ? "if" : "else if";
+        parts.push(`${kw} (${exprToCode(arm.test, source)}) { ${blockToCode(arm.body, source)} }`);
+      }
+      if (node.elseBody) {
+        parts.push(`else { ${blockToCode(node.elseBody, source)} }`);
+      }
+      return parts.join(" ");
+    }
+    case "Loop": {
+      const loopNode = node as AST.Loop;
+      switch (loopNode.mode) {
+        case "while":
+          return `while (${loopNode.test ? exprToCode(loopNode.test, source) : "true"}) { ${blockToCode(loopNode.body, source)} }`;
+        case "do-while":
+          return `do { ${blockToCode(loopNode.body, source)} } while (${loopNode.test ? exprToCode(loopNode.test, source) : "true"})`;
+        case "for": {
+          const init = loopNode.init ? nodeToSourceCode(loopNode.init, source) : "";
+          const test = loopNode.test ? exprToCode(loopNode.test, source) : "";
+          const step = loopNode.step ? exprToCode(loopNode.step, source) : "";
+          return `for (${init}; ${test}; ${step}) { ${blockToCode(loopNode.body, source)} }`;
+        }
+        case "foreach": {
+          const varName = loopNode.variable
+            ? (loopNode.variable.kind === "Identifier" ? loopNode.variable.name : spanExtract(loopNode.variable, source) || "item")
+            : "item";
+          const iter = loopNode.iterable ? exprToCode(loopNode.iterable, source) : "[]";
+          const kw = loopNode.await ? "for await" : "for";
+          return `${kw} (const ${varName} of ${iter}) { ${blockToCode(loopNode.body, source)} }`;
+        }
+        case "infinite":
+          return `while (true) { ${blockToCode(loopNode.body, source)} }`;
+        default:
+          return `while (true) { ${blockToCode(loopNode.body, source)} }`;
+      }
+    }
+    case "Try": {
+      let result = `try { ${blockToCode(node.body, source)} }`;
+      for (const c of node.catches) {
+        const param = c.param ? c.param.name : "";
+        result += ` catch${param ? ` (${param})` : ""} { ${blockToCode(c.body, source)} }`;
+      }
+      if (node.finallyBody) {
+        result += ` finally { ${blockToCode(node.finallyBody, source)} }`;
+      }
+      return result;
+    }
+    case "Switch": {
+      const cases = node.cases.map(c => {
+        const patterns = c.patterns.map(p => exprToCode(p, source)).join(", ");
+        return `case ${patterns}: ${blockToCode(c.body, source)}; break;`;
+      }).join(" ");
+      const dflt = node.defaultCase ? ` default: ${blockToCode(node.defaultCase, source)};` : "";
+      return `switch (${exprToCode(node.discriminant, source)}) { ${cases}${dflt} }`;
+    }
+    case "Import":
+      return `import "${node.path}"`;
+    case "ImportDecl":
+      return `import ${importSpecsToCode(node)} from "${node.path}"`;
     default:
       if (isExprKind(node.kind)) {
         return exprToCode(node as AST.Expr, source);
@@ -164,6 +266,49 @@ export function paramToCode(param: AST.Param, source?: string): string {
   const spread = param.spread ? "..." : "";
   const defaultVal = param.defaultValue ? ` = ${exprToCode(param.defaultValue, source)}` : "";
   return `${spread}${name}${defaultVal}`;
+}
+
+export function typeToCode(type: AST.TypeNode, source?: string): string {
+  switch (type.kind) {
+    case "SimpleType":
+      return type.id.name;
+    case "GenericType":
+      return `${type.base.name}<${type.args.map(a => typeToCode(a, source)).join(", ")}>`;
+    case "NullableType":
+      return `${typeToCode(type.inner, source)}?`;
+    case "UnionType":
+      return type.types.map(t => typeToCode(t, source)).join(" | ");
+    case "FuncType": {
+      const params = type.params.map(p => {
+        const name = p.name ? `${p.name.name}: ` : "";
+        const opt = p.optional ? "?" : "";
+        return `${name}${opt}${typeToCode(p.type, source)}`;
+      }).join(", ");
+      return `(${params}) => ${typeToCode(type.ret, source)}`;
+    }
+    case "ChanType":
+      return `chan ${type.elementType ? typeToCode(type.elementType, source) : ""}`.trim();
+    case "ImplType":
+      return `impl ${typeToCode(type.trait, source)}`;
+    case "DynType":
+      return `dyn ${typeToCode(type.trait, source)}`;
+    case "IndexedAccessType":
+      return `${typeToCode(type.object, source)}[${type.index}]`;
+    case "ObjectType": {
+      const props = type.properties.map(p => {
+        const ro = p.readonly ? "readonly " : "";
+        const opt = p.optional ? "?" : "";
+        return `${ro}${p.name}${opt}: ${typeToCode(p.type, source)}`;
+      }).join("; ");
+      return `{ ${props} }`;
+    }
+    default:
+      return spanExtract(type, source) || "unknown";
+  }
+}
+
+function blockToCode(block: AST.Block, source?: string): string {
+  return block.statements.map(s => nodeToSourceCode(s, source)).join("; ");
 }
 
 export function importSpecsToCode(node: AST.ImportDecl): string {
@@ -366,8 +511,7 @@ function armBodyToCode(body: AST.Expr | AST.Block, source?: string): string {
       return exprToCode((block.statements[0] as AST.ExprStmt).expr, source);
     }
     // Multi-statement block → IIFE
-    const stmts = block.statements.map(s => nodeToSourceCode(s, source)).join("; ");
-    return `(() => { ${stmts} })()`;
+    return `(() => { ${blockToCode(block, source)} })()`;
   }
   return exprToCode(body as AST.Expr, source);
 }
@@ -378,9 +522,7 @@ function lambdaToCode(expr: AST.Lambda, paramsCode: string, source?: string): st
   const asyncPrefix = expr.async ? "async " : "";
 
   if ('kind' in expr.body && (expr.body as any).kind === "Block") {
-    const block = expr.body as AST.Block;
-    const stmts = block.statements.map(s => nodeToSourceCode(s, source));
-    return `${asyncPrefix}(${paramsCode}) => { ${stmts.join("; ")} }`;
+    return `${asyncPrefix}(${paramsCode}) => { ${blockToCode(expr.body as AST.Block, source)} }`;
   }
 
   // Expression body — exprToCode handles JSX, Match, etc.
@@ -530,6 +672,114 @@ function collectIds(
     case "Go":
       collectIds((node as any).expr, ids, locals);
       break;
+    case "If": {
+      const ifNode = node as AST.If;
+      for (const arm of ifNode.arms) {
+        collectIds(arm.test, ids, locals);
+        for (const s of arm.body.statements) collectIds(s, ids, locals);
+      }
+      if (ifNode.elseBody) {
+        for (const s of ifNode.elseBody.statements) collectIds(s, ids, locals);
+      }
+      break;
+    }
+    case "Loop": {
+      const loopNode = node as AST.Loop;
+      const loopLocals = new Set(locals);
+      if (loopNode.variable) {
+        if (loopNode.variable.kind === "Identifier") loopLocals.add(loopNode.variable.name);
+      }
+      if (loopNode.init) collectIds(loopNode.init, ids, loopLocals);
+      if (loopNode.test) collectIds(loopNode.test, ids, loopLocals);
+      if (loopNode.step) collectIds(loopNode.step, ids, loopLocals);
+      if (loopNode.iterable) collectIds(loopNode.iterable, ids, locals); // iterable evaluated before variable binding
+      for (const s of loopNode.body.statements) collectIds(s, ids, loopLocals);
+      break;
+    }
+    case "Try": {
+      const tryNode = node as AST.Try;
+      for (const s of tryNode.body.statements) collectIds(s, ids, locals);
+      for (const c of tryNode.catches) {
+        const catchLocals = new Set(locals);
+        if (c.param) catchLocals.add(c.param.name);
+        for (const s of c.body.statements) collectIds(s, ids, catchLocals);
+      }
+      if (tryNode.finallyBody) {
+        for (const s of tryNode.finallyBody.statements) collectIds(s, ids, locals);
+      }
+      break;
+    }
+    case "Switch": {
+      const switchNode = node as AST.Switch;
+      collectIds(switchNode.discriminant, ids, locals);
+      for (const c of switchNode.cases) {
+        for (const p of c.patterns) collectIds(p, ids, locals);
+        for (const s of c.body.statements) collectIds(s, ids, locals);
+      }
+      if (switchNode.defaultCase) {
+        for (const s of switchNode.defaultCase.statements) collectIds(s, ids, locals);
+      }
+      break;
+    }
+    case "Throw":
+      collectIds((node as AST.Throw).value, ids, locals);
+      break;
+    case "Defer": {
+      const deferNode = node as AST.Defer;
+      if ("kind" in deferNode.body && (deferNode.body as any).kind === "Block") {
+        for (const s of (deferNode.body as AST.Block).statements) collectIds(s, ids, locals);
+      } else {
+        collectIds(deferNode.body as AST.Expr, ids, locals);
+      }
+      break;
+    }
+    case "Reassign":
+      collectIds((node as AST.Reassign).name, ids, locals);
+      collectIds((node as AST.Reassign).expr, ids, locals);
+      break;
+    case "Echo":
+      for (const v of (node as AST.Echo).values) collectIds(v, ids, locals);
+      break;
+    case "VarDecl": {
+      const varNode = node as AST.VarDecl;
+      if (varNode.values) {
+        for (const v of varNode.values) collectIds(v, ids, locals);
+      }
+      for (const n of varNode.names) locals.add(n.name);
+      break;
+    }
+    case "ConstDecl": {
+      const constNode = node as AST.ConstDecl;
+      for (const v of constNode.values) collectIds(v, ids, locals);
+      for (const n of constNode.names) locals.add(n.name);
+      break;
+    }
+    case "ShortDecl": {
+      const sdNode = node as AST.ShortDecl;
+      if (sdNode.pairs) {
+        for (const p of sdNode.pairs) {
+          collectIds(p.expr, ids, locals);
+          locals.add(p.name.name);
+        }
+      }
+      if (sdNode.value) collectIds(sdNode.value, ids, locals);
+      if (sdNode.targets) {
+        for (const t of sdNode.targets) {
+          if (t.kind === "Identifier") locals.add(t.name);
+        }
+      }
+      break;
+    }
+    case "FuncDecl": {
+      const funcNode = node as AST.FuncDecl;
+      locals.add(funcNode.name.name);
+      const funcLocals = new Set(locals);
+      for (const p of funcNode.params) {
+        if (p.name.kind === "Identifier") funcLocals.add(p.name.name);
+      }
+      for (const s of funcNode.body.statements) collectIds(s, ids, funcLocals);
+      break;
+    }
     // For other node kinds, don't try to walk — they use span extraction anyway
     default:
       break;
