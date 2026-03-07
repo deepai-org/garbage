@@ -45,7 +45,11 @@ export type ManifestOp =
   | ParallelOp
   | ConcatOp
   | ImportOp
-  | NativeOp;
+  | NativeOp
+  | ChanOp
+  | SelectOp
+  | SpawnOp
+  | YieldOp;
 
 // ─── Core Runtime Dispatch ────────────────────────────────────────
 
@@ -278,6 +282,65 @@ export interface NativeOp {
   runtime: string;
   code: string;
   bind?: string;
+}
+
+// ─── Channels ─────────────────────────────────────────────────────
+
+/** Channel lifecycle operation: make, send, recv, close. */
+export interface ChanOp {
+  op: "chan";
+  action: "make" | "send" | "recv" | "close";
+  runtime: string;
+  /** Channel binding name (send/recv/close). */
+  channel?: string;
+  /** Result binding name (make/recv). */
+  bind?: string;
+  /** Buffer capacity (make only). */
+  size?: number;
+  /** Data to send (send only). */
+  value?: ManifestValue;
+  captures?: CaptureMap;
+}
+
+// ─── Select (unified select/await) ───────────────────────────────
+
+/** Multiplexed channel select: wait for first-of-N channel operations. */
+export interface SelectOp {
+  op: "select";
+  cases: SelectCase[];
+  /** Non-blocking default branch (Go `default:`). */
+  defaultBody?: ManifestOp[];
+}
+
+export interface SelectCase {
+  action: "recv" | "send";
+  channel: string;
+  /** Where to store received value (recv only). */
+  bind?: string;
+  /** What to send (send only). */
+  value?: ManifestValue;
+  body: ManifestOp[];
+}
+
+// ─── Spawn (goroutine / background task) ─────────────────────────
+
+/** Spawn a background task (goroutine, green thread). */
+export interface SpawnOp {
+  op: "spawn";
+  runtime: string;
+  code: string;
+  captures?: CaptureMap;
+}
+
+// ─── Yield (generator) ───────────────────────────────────────────
+
+/** Generator yield: produce a value or delegate to sub-generator. */
+export interface YieldOp {
+  op: "yield";
+  value?: ManifestValue;
+  from?: EvalOp;
+  /** yield* / yield from (delegate to sub-generator). */
+  delegate?: boolean;
 }
 
 // ─── Shared Types ─────────────────────────────────────────────────

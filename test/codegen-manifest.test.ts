@@ -318,7 +318,8 @@ pass
     const validOps = [
       'exec', 'eval', 'exec_compiled', 'eval_compiled',
       'declare', 'assign', 'func_def', 'return',
-      'if', 'loop', 'parallel', 'concat', 'import', 'native',
+      'if', 'loop', 'try', 'throw', 'parallel', 'concat', 'import', 'native',
+      'chan', 'select', 'spawn', 'yield',
     ];
     function checkOps(ops: ManifestOp[]) {
       for (const op of ops) {
@@ -330,6 +331,10 @@ pass
           if (op.elseBody) checkOps(op.elseBody);
         }
         if (op.op === 'loop') checkOps(op.body);
+        if (op.op === 'select') {
+          for (const c of op.cases) checkOps(c.body);
+          if (op.defaultBody) checkOps(op.defaultBody);
+        }
       }
     }
     checkOps(m.ops);
@@ -636,13 +641,13 @@ describe('Captures Analysis', () => {
 // --- Go Runtime Restrictions ---
 
 describe('Go Runtime Restrictions', () => {
-  test('Go function call emits func/args format', () => {
+  test('Go function call emits spawn op', () => {
     const code = 'go fetch_data()';
     const m = parseAndManifest(code);
-    // go statement itself is an error marker, but let's check it
-    const json = JSON.stringify(m);
-    expect(json).toContain('ERROR');
-    expect(json).toContain('goroutines not supported');
+    const spawnOp = m.ops.find(op => op.op === 'spawn') as any;
+    expect(spawnOp).toBeDefined();
+    expect(spawnOp.runtime).toBe('go');
+    expect(spawnOp.code).toContain('fetch_data');
   });
 
   test('defer produces error marker', () => {
@@ -653,12 +658,12 @@ describe('Go Runtime Restrictions', () => {
     expect(json).toContain('defer not supported');
   });
 
-  test('select produces error marker', () => {
+  test('select produces SelectOp', () => {
     const code = 'select { case x: let a = 1 }';
     const m = parseAndManifest(code);
-    const json = JSON.stringify(m);
-    expect(json).toContain('ERROR');
-    expect(json).toContain('select not supported');
+    const selectOp = m.ops.find(op => op.op === 'select') as any;
+    expect(selectOp).toBeDefined();
+    expect(selectOp.cases).toBeDefined();
   });
 
   test('Go short declaration with Call produces eval with func/args', () => {
@@ -1186,14 +1191,13 @@ describe('Compiled Targets', () => {
 // ─── Native Op ───────────────────────────────────────────────────
 
 describe('Native Op', () => {
-  test('Go goroutine produces native op with error', () => {
-    // go keyword triggers native op with error message
+  test('Go goroutine produces spawn op', () => {
     const code = 'go fetch()';
     const m = parseAndManifest(code);
-    const nativeOp = m.ops.find(op => op.op === 'native') as any;
-    expect(nativeOp).toBeDefined();
-    expect(nativeOp.runtime).toBe('go');
-    expect(nativeOp.code).toContain('ERROR');
+    const spawnOp = m.ops.find(op => op.op === 'spawn') as any;
+    expect(spawnOp).toBeDefined();
+    expect(spawnOp.runtime).toBe('go');
+    expect(spawnOp.code).toContain('fetch');
   });
 
   test('defer produces native op', () => {
@@ -1211,7 +1215,8 @@ describe('Manifest Type Validation', () => {
   const validOps = [
     'exec', 'eval', 'exec_compiled', 'eval_compiled',
     'declare', 'assign', 'func_def', 'return',
-    'if', 'loop', 'parallel', 'concat', 'import', 'native',
+    'if', 'loop', 'try', 'throw', 'parallel', 'concat', 'import', 'native',
+    'chan', 'select', 'spawn', 'yield',
   ];
 
   test('all op types are in the ManifestOp union', () => {
@@ -1367,6 +1372,119 @@ function rethrow() {
   });
 });
 
+// --- Parallel Op Emission ───────────────────────────────────────
+
+describe('Parallel Op Emission', () => {
+  test('Promise.all with array literal emits parallel op with 2 branches', () => {
+    const code = 'Promise.all([fetch("/a"), fetch("/b")])';
+    const m = parseAndManifest(code);
+    const parallel = m.ops.find(op => op.op === 'parallel') as any;
+    expect(parallel).toBeDefined();
+    expect(parallel.branches).toHaveLength(2);
+    expect(parallel.branches[0].code).toContain('fetch');
+    expect(parallel.branches[1].code).toContain('fetch');
+    expect(parallel.branches[0].bind).toBe('__parallel_0');
+    expect(parallel.branches[1].bind).toBe('__parallel_1');
+  });
+
+  test('await Promise.all unwraps await and emits parallel op with 3 branches', () => {
+    const code = 'await Promise.all([taskA(), taskB(), taskC()])';
+    const m = parseAndManifest(code);
+    const parallel = m.ops.find(op => op.op === 'parallel') as any;
+    expect(parallel).toBeDefined();
+    expect(parallel.branches).toHaveLength(3);
+  });
+
+  test('asyncio.gather emits parallel op with 2 branches', () => {
+    const code = 'asyncio.gather(coro1(), coro2())';
+    const m = parseAndManifest(code);
+    const parallel = m.ops.find(op => op.op === 'parallel') as any;
+    expect(parallel).toBeDefined();
+    expect(parallel.branches).toHaveLength(2);
+    expect(parallel.branches[0].code).toContain('coro1');
+    expect(parallel.branches[1].code).toContain('coro2');
+  });
+
+  test('CompletableFuture.allOf emits parallel op with 2 branches', () => {
+    const code = 'CompletableFuture.allOf(future1, future2)';
+    const m = parseAndManifest(code);
+    const parallel = m.ops.find(op => op.op === 'parallel') as any;
+    expect(parallel).toBeDefined();
+    expect(parallel.branches).toHaveLength(2);
+    expect(parallel.branches[0].code).toBe('future1');
+    expect(parallel.branches[1].code).toBe('future2');
+  });
+
+  test('const binding with Promise.all emits parallel with named bind prefix', () => {
+    const code = 'const results = await Promise.all([fetch("/a"), fetch("/b")])';
+    const m = parseAndManifest(code);
+    const parallel = m.ops.find(op => op.op === 'parallel') as any;
+    expect(parallel).toBeDefined();
+    expect(parallel.branches[0].bind).toBe('results_0');
+    expect(parallel.branches[1].bind).toBe('results_1');
+  });
+
+  test('let binding with asyncio.gather emits parallel op', () => {
+    const code = 'let data = asyncio.gather(load_a(), load_b())';
+    const m = parseAndManifest(code);
+    const parallel = m.ops.find(op => op.op === 'parallel') as any;
+    expect(parallel).toBeDefined();
+    expect(parallel.branches[0].bind).toBe('data_0');
+    expect(parallel.branches[1].bind).toBe('data_1');
+  });
+
+  test('parallel inside async function body', () => {
+    const code = `
+async function fetchAll() {
+  const results = await Promise.all([fetch("/x"), fetch("/y")])
+  return results
+}`;
+    const m = parseAndManifest(code);
+    const funcOp = m.ops.find(op => op.op === 'func_def') as any;
+    expect(funcOp).toBeDefined();
+    expect(funcOp.async).toBe(true);
+    const parallel = funcOp.body.find((op: any) => op.op === 'parallel');
+    expect(parallel).toBeDefined();
+    expect(parallel.branches).toHaveLength(2);
+    expect(parallel.branches[0].bind).toBe('results_0');
+  });
+
+  test('non-parallel Call does not emit parallel op', () => {
+    const code = 'const x = fetch("/api")';
+    const m = parseAndManifest(code);
+    const parallel = m.ops.find(op => op.op === 'parallel');
+    expect(parallel).toBeUndefined();
+  });
+
+  test('Promise.all without array literal arg does not emit parallel op', () => {
+    const code = 'const x = Promise.all(promises)';
+    const m = parseAndManifest(code);
+    const parallel = m.ops.find(op => op.op === 'parallel');
+    expect(parallel).toBeUndefined();
+  });
+
+  test('parallel op branches have runtime from affinity', () => {
+    const code = 'Promise.all([fetch("/a"), compute(42)])';
+    const m = parseAndManifest(code);
+    const parallel = m.ops.find(op => op.op === 'parallel') as any;
+    expect(parallel).toBeDefined();
+    // Both branches should have a runtime assigned
+    for (const branch of parallel.branches) {
+      expect(branch.runtime).toBeDefined();
+      expect(typeof branch.runtime).toBe('string');
+    }
+  });
+
+  test('parallel op is JSON-serializable', () => {
+    const code = 'await Promise.all([taskA(), taskB()])';
+    const m = parseAndManifest(code);
+    expect(() => JSON.stringify(m)).not.toThrow();
+    const json = JSON.stringify(m);
+    expect(json).toContain('"parallel"');
+    expect(json).toContain('branches');
+  });
+});
+
 // --- /= Operator ───────────────────────────────────────────────
 
 describe('Division Assignment', () => {
@@ -1472,5 +1590,253 @@ function matrix_scan() {
     const innerLoop = outerLoop.body.find((op: any) => op.op === 'loop');
     expect(innerLoop).toBeDefined();
     expect(innerLoop.mode).toBe('while');
+  });
+});
+
+// ─── Channel Operations ───────────────────────────────────────────
+
+describe('ChanOp', () => {
+  test('<-ch produces ChanOp recv', () => {
+    const m = parseAndManifest('<-ch');
+    const op = m.ops[0] as any;
+    expect(op.op).toBe('chan');
+    expect(op.action).toBe('recv');
+    expect(op.channel).toBe('ch');
+  });
+
+  test('ch <- value produces ChanOp send', () => {
+    const m = parseAndManifest('ch <- 42');
+    const op = m.ops[0] as any;
+    expect(op.op).toBe('chan');
+    expect(op.action).toBe('send');
+    expect(op.channel).toBe('ch');
+    expect(op.value).toEqual({ kind: 'literal', value: 42 });
+  });
+
+  test('val := <-ch produces ChanOp recv with bind', () => {
+    const m = parseAndManifest('val := <-ch');
+    const op = m.ops[0] as any;
+    expect(op.op).toBe('chan');
+    expect(op.action).toBe('recv');
+    expect(op.channel).toBe('ch');
+    expect(op.bind).toBe('val');
+  });
+
+  test('close(ch) produces ChanOp close', () => {
+    const m = parseAndManifest('close(ch)');
+    const op = m.ops[0] as any;
+    expect(op.op).toBe('chan');
+    expect(op.action).toBe('close');
+    expect(op.channel).toBe('ch');
+  });
+
+  test('channel recv inside function body', () => {
+    const code = 'function worker(ch) {\n  const msg = <-ch\n  return msg\n}';
+    const m = parseAndManifest(code);
+    const funcOp = m.ops.find(op => op.op === 'func_def') as any;
+    const chanOp = funcOp.body.find((op: any) => op.op === 'chan');
+    expect(chanOp).toBeDefined();
+    expect(chanOp.action).toBe('recv');
+    expect(chanOp.bind).toBe('msg');
+  });
+
+  test('channel send with non-literal value uses ref', () => {
+    const m = parseAndManifest('ch <- data');
+    const op = m.ops[0] as any;
+    expect(op.op).toBe('chan');
+    expect(op.action).toBe('send');
+    expect(op.value).toEqual({ kind: 'ref', name: 'data' });
+  });
+});
+
+// ─── Select ───────────────────────────────────────────────────────
+
+describe('SelectOp', () => {
+  test('select with recv case produces SelectOp', () => {
+    const code = 'select {\n  case <-ch:\n    let x = 1\n}';
+    const m = parseAndManifest(code);
+    const op = m.ops[0] as any;
+    expect(op.op).toBe('select');
+    expect(op.cases).toBeDefined();
+    expect(op.cases.length).toBeGreaterThanOrEqual(1);
+    expect(op.cases[0].action).toBe('recv');
+    expect(op.cases[0].channel).toBe('ch');
+    expect(op.cases[0].body.length).toBeGreaterThan(0);
+  });
+
+  test('select with default produces defaultBody', () => {
+    const code = 'select {\n  case <-ch:\n    let x = 1\n  default:\n    let y = 2\n}';
+    const m = parseAndManifest(code);
+    const op = m.ops[0] as any;
+    expect(op.op).toBe('select');
+    expect(op.defaultBody).toBeDefined();
+    expect(op.defaultBody.length).toBeGreaterThan(0);
+  });
+
+  test('select with send case', () => {
+    const code = 'select {\n  case ch <- 42:\n    let x = 1\n}';
+    const m = parseAndManifest(code);
+    const op = m.ops[0] as any;
+    expect(op.op).toBe('select');
+    expect(op.cases.length).toBeGreaterThanOrEqual(1);
+    expect(op.cases[0].action).toBe('send');
+    expect(op.cases[0].channel).toBe('ch');
+    expect(op.cases[0].value).toEqual({ kind: 'literal', value: 42 });
+  });
+});
+
+// ─── Spawn ────────────────────────────────────────────────────────
+
+describe('SpawnOp', () => {
+  test('go doWork() produces SpawnOp (not ERROR)', () => {
+    const m = parseAndManifest('go doWork()');
+    const op = m.ops[0] as any;
+    expect(op.op).toBe('spawn');
+    expect(op.runtime).toBe('go');
+    expect(op.code).toContain('doWork');
+    // Should NOT contain ERROR marker anymore
+    const json = JSON.stringify(m);
+    expect(json).not.toContain('ERROR');
+  });
+
+  test('go func(){}() produces SpawnOp with lambda code', () => {
+    const code = 'go func() { let x = 1 }()';
+    const m = parseAndManifest(code);
+    const op = m.ops[0] as any;
+    expect(op.op).toBe('spawn');
+    expect(op.runtime).toBe('go');
+  });
+
+  test('spawn captures cross-runtime vars', () => {
+    const code = 'import os\ngo doWork()';
+    const m = parseAndManifest(code);
+    const spawnOp = m.ops.find(op => op.op === 'spawn') as any;
+    expect(spawnOp).toBeDefined();
+    expect(spawnOp.op).toBe('spawn');
+  });
+});
+
+// ─── Generators / Yield ───────────────────────────────────────────
+
+describe('YieldOp', () => {
+  test('generator function has generator: true', () => {
+    const code = 'function* gen() { yield 1 }';
+    const m = parseAndManifest(code);
+    const funcOp = m.ops.find(op => op.op === 'func_def') as any;
+    expect(funcOp).toBeDefined();
+    expect(funcOp.generator).toBe(true);
+  });
+
+  test('yield value produces YieldOp with value', () => {
+    const code = 'yield 42';
+    const m = parseAndManifest(code);
+    const op = m.ops[0] as any;
+    expect(op.op).toBe('yield');
+    expect(op.value).toEqual({ kind: 'literal', value: 42 });
+  });
+
+  test('yield* iterable produces YieldOp with delegate', () => {
+    const code = 'yield* items';
+    const m = parseAndManifest(code);
+    const op = m.ops[0] as any;
+    expect(op.op).toBe('yield');
+    expect(op.delegate).toBe(true);
+    expect(op.value).toEqual({ kind: 'ref', name: 'items' });
+  });
+
+  test('bare yield produces YieldOp with no value', () => {
+    const code = 'yield';
+    const m = parseAndManifest(code);
+    const op = m.ops[0] as any;
+    expect(op.op).toBe('yield');
+    expect(op.value).toBeUndefined();
+    expect(op.from).toBeUndefined();
+  });
+
+  test('yield with expression produces YieldOp with from eval', () => {
+    const code = 'yield compute(42)';
+    const m = parseAndManifest(code);
+    const op = m.ops[0] as any;
+    expect(op.op).toBe('yield');
+    expect(op.from).toBeDefined();
+    expect(op.from.op).toBe('eval');
+    expect(op.from.code).toContain('compute');
+  });
+});
+
+// ─── Integration: new ops ─────────────────────────────────────────
+
+describe('New Op Integration', () => {
+  test('channel + select + spawn together', () => {
+    const code = `
+go doWork()
+<-ch
+select {
+  case <-ch:
+    let x = 1
+}`;
+    const m = parseAndManifest(code);
+    const opTypes = new Set(m.ops.map(op => op.op));
+    expect(opTypes.has('spawn')).toBe(true);
+    expect(opTypes.has('chan')).toBe(true);
+    expect(opTypes.has('select')).toBe(true);
+  });
+
+  test('all new ops in valid ops list', () => {
+    const validOps = [
+      'exec', 'eval', 'exec_compiled', 'eval_compiled',
+      'declare', 'assign', 'func_def', 'return',
+      'if', 'loop', 'try', 'throw', 'parallel', 'concat', 'import', 'native',
+      'chan', 'select', 'spawn', 'yield',
+    ];
+
+    const code = `
+go doWork()
+<-ch
+ch <- 42
+close(ch)
+yield 1
+select {
+  case <-ch:
+    let x = 1
+}`;
+    const m = parseAndManifest(code);
+    function checkOps(ops: ManifestOp[]) {
+      for (const op of ops) {
+        expect(validOps).toContain(op.op);
+        if (op.op === 'func_def') checkOps(op.body);
+        if (op.op === 'if') {
+          for (const arm of op.arms) checkOps(arm.body);
+          if (op.elseBody) checkOps(op.elseBody);
+        }
+        if (op.op === 'loop') checkOps(op.body);
+        if (op.op === 'select') {
+          for (const c of op.cases) checkOps(c.body);
+          if (op.defaultBody) checkOps(op.defaultBody);
+        }
+      }
+    }
+    checkOps(m.ops);
+  });
+
+  test('new ops are JSON-serializable', () => {
+    const code = `
+go doWork()
+<-ch
+ch <- 42
+close(ch)
+yield 1
+yield* items
+select {
+  case <-ch:
+    let x = 1
+}`;
+    const m = parseAndManifest(code);
+    expect(() => JSON.stringify(m)).not.toThrow();
+    const json = JSON.stringify(m);
+    expect(json).toContain('"spawn"');
+    expect(json).toContain('"chan"');
+    expect(json).toContain('"select"');
+    expect(json).toContain('"yield"');
   });
 });

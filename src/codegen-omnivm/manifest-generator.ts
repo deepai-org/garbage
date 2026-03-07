@@ -43,6 +43,11 @@ import {
   ConcatOp,
   ImportOp,
   NativeOp,
+  ChanOp,
+  SelectOp,
+  SelectCase,
+  SpawnOp,
+  YieldOp,
   ParamDef,
   ManifestValue,
   ConditionExpr,
@@ -124,6 +129,75 @@ export class ManifestCodeGenerator {
    */
   private recordBinding(name: string, runtime: OmniRuntime): void {
     this.bindingTable.set(name, runtime);
+  }
+
+  // ─── Parallel Pattern Detection ─────────────────────────────────
+
+  /**
+   * Detect if an expression is a parallelizable pattern:
+   * - Promise.all([expr1, expr2, ...])
+   * - asyncio.gather(expr1, expr2, ...)
+   * - CompletableFuture.allOf(expr1, expr2, ...)
+   * Optionally wrapped in Unary("await", ...).
+   * Returns the list of branch expressions, or null.
+   */
+  private isParallelPattern(expr: AST.Expr): { exprs: AST.Expr[] } | null {
+    let inner = expr;
+    // Unwrap await
+    if (inner.kind === "Unary" && inner.op === "await" && inner.prefix) {
+      inner = inner.argument;
+    }
+    if (inner.kind !== "Call") return null;
+    const callee = inner.callee;
+    if (callee.kind !== "Member") return null;
+    const obj = callee.object;
+    const prop = callee.property;
+    if (obj.kind !== "Identifier") return null;
+
+    // Promise.all([expr1, expr2, ...]) — single ArrayLiteral arg
+    if (obj.name === "Promise" && prop.name === "all") {
+      if (inner.args.length === 1 && inner.args[0].kind === "ArrayLiteral") {
+        return { exprs: (inner.args[0] as AST.ArrayLiteral).elements };
+      }
+      return null;
+    }
+
+    // asyncio.gather(expr1, expr2, ...)
+    if (obj.name === "asyncio" && prop.name === "gather") {
+      if (inner.args.length > 0) {
+        return { exprs: inner.args };
+      }
+      return null;
+    }
+
+    // CompletableFuture.allOf(expr1, expr2, ...)
+    if (obj.name === "CompletableFuture" && prop.name === "allOf") {
+      if (inner.args.length > 0) {
+        return { exprs: inner.args };
+      }
+      return null;
+    }
+
+    return null;
+  }
+
+  /**
+   * Emit a ParallelOp from a list of branch expressions.
+   * Each branch gets its own runtime affinity from the resolver.
+   */
+  private emitParallel(exprs: AST.Expr[], bindPrefix: string): ParallelOp {
+    const branches = exprs.map((expr, i) => {
+      const aff = this.affinityMap.get(expr);
+      const runtime = aff?.runtime || this.defaultRuntime;
+      const captures = this.computeCaptures(expr, runtime);
+      return {
+        runtime,
+        code: exprToCode(expr, this.source),
+        bind: `${bindPrefix}_${i}`,
+        ...(captures ? { captures } : {}),
+      };
+    });
+    return { op: "parallel" as const, branches };
   }
 
   // ─── Literal Detection ──────────────────────────────────────────
@@ -247,13 +321,16 @@ export class ManifestCodeGenerator {
         return this.emitShortDecl(node);
 
       case "Go":
-        return [{ op: "native", runtime: OmniRuntime.Go, code: "/* ERROR: goroutines not supported in OmniVM Go runtime. Use pre-registered functions. */" }];
+        return [this.emitSpawn(node)];
 
       case "Defer":
         return [{ op: "native", runtime: OmniRuntime.Go, code: "/* ERROR: defer not supported in OmniVM Go runtime. */" }];
 
       case "Select":
-        return [{ op: "native", runtime: OmniRuntime.Go, code: "/* ERROR: select not supported in OmniVM Go runtime. */" }];
+        return [this.emitSelect(node)];
+
+      case "Yield":
+        return [this.emitYield(node)];
 
       default: {
         const aff = this.affinityMap.get(node);
@@ -279,6 +356,21 @@ export class ManifestCodeGenerator {
   private emitExprAsOp(expr: AST.Expr, contextRuntime: OmniRuntime): ManifestOp {
     const aff = this.affinityMap.get(expr);
     const runtime = aff?.runtime || contextRuntime;
+
+    // Parallel pattern check (standalone expression)
+    const parallel = this.isParallelPattern(expr);
+    if (parallel) {
+      return this.emitParallel(parallel.exprs, "__parallel");
+    }
+
+    // Channel operations
+    const chanOp = this.detectChanOp(expr, runtime);
+    if (chanOp) return chanOp;
+
+    // Yield expression → YieldOp
+    if (expr.kind === "Yield") {
+      return this.emitYield(expr as AST.Yield);
+    }
 
     // Compound assignment (+=, -=, *=, /=) with Identifier LHS → assign op
     if (expr.kind === "Assign" && expr.op !== "=" && expr.left.kind === "Identifier") {
@@ -402,7 +494,194 @@ export class ManifestCodeGenerator {
     };
   }
 
-  // ─── Register Ops (pre-existing external functions) ──────────
+  // ─── Channel Detection Helpers ──────────────────────────────
+
+  /** Detect channel send: Binary with op "<-" → { channel, value } */
+  private isChanSend(expr: AST.Expr): { channel: string; value: AST.Expr } | null {
+    if (expr.kind === "Binary" && expr.op === "<-") {
+      const channel = exprToCode(expr.left, this.source);
+      return { channel, value: expr.right };
+    }
+    return null;
+  }
+
+  /** Detect channel recv: Unary with op "<-", prefix: true → { channel } */
+  private isChanRecv(expr: AST.Expr): { channel: string } | null {
+    if (expr.kind === "Unary" && expr.op === "<-" && expr.prefix) {
+      const channel = exprToCode(expr.argument, this.source);
+      return { channel };
+    }
+    return null;
+  }
+
+  /** Detect channel close: Call to close(ch) → { channel } */
+  private isChanClose(expr: AST.Expr): { channel: string } | null {
+    if (expr.kind === "Call" && expr.callee.kind === "Identifier" && expr.callee.name === "close") {
+      if (expr.args.length === 1) {
+        const channel = exprToCode(expr.args[0], this.source);
+        return { channel };
+      }
+    }
+    return null;
+  }
+
+  /** Detect any channel operation and emit a ChanOp, or null. */
+  private detectChanOp(expr: AST.Expr, runtime: OmniRuntime): ChanOp | null {
+    // Channel send: ch <- value
+    const send = this.isChanSend(expr);
+    if (send) {
+      const captures = this.computeCaptures(expr, runtime);
+      const value: ManifestValue = this.isSimpleLiteral(send.value)
+        ? { kind: "literal", value: this.literalValue(send.value) }
+        : { kind: "ref", name: exprToCode(send.value, this.source) };
+      return {
+        op: "chan",
+        action: "send",
+        runtime,
+        channel: send.channel,
+        value,
+        ...(captures ? { captures } : {}),
+      };
+    }
+
+    // Channel recv: <-ch (standalone, no bind)
+    const recv = this.isChanRecv(expr);
+    if (recv) {
+      const captures = this.computeCaptures(expr, runtime);
+      return {
+        op: "chan",
+        action: "recv",
+        runtime,
+        channel: recv.channel,
+        ...(captures ? { captures } : {}),
+      };
+    }
+
+    // Channel close: close(ch)
+    const close = this.isChanClose(expr);
+    if (close) {
+      return {
+        op: "chan",
+        action: "close",
+        runtime,
+        channel: close.channel,
+      };
+    }
+
+    return null;
+  }
+
+  // ─── Spawn (goroutine) ─────────────────────────────────────────
+
+  private emitSpawn(node: AST.Go): SpawnOp {
+    const aff = this.affinityMap.get(node);
+    const runtime = aff?.runtime || OmniRuntime.Go;
+    const captures = this.computeCaptures(node.expr, runtime);
+    return {
+      op: "spawn",
+      runtime,
+      code: exprToCode(node.expr, this.source),
+      ...(captures ? { captures } : {}),
+    };
+  }
+
+  // ─── Select ────────────────────────────────────────────────────
+
+  private emitSelect(node: AST.Select): SelectOp {
+    const cases: SelectCase[] = [];
+    let defaultBody: ManifestOp[] | undefined;
+
+    for (const c of node.cases) {
+      // Each case pattern should be a channel operation expression
+      for (const pattern of c.patterns) {
+        const bodyBlocks = consolidateBlocks(c.body.statements, this.affinityMap);
+        const bodyOps: ManifestOp[] = [];
+        for (const block of bodyBlocks) {
+          bodyOps.push(...this.emitBlock(block));
+        }
+
+        // Detect recv pattern: <-ch or val := <-ch
+        const recv = this.isChanRecv(pattern);
+        if (recv) {
+          cases.push({
+            action: "recv",
+            channel: recv.channel,
+            body: bodyOps,
+          });
+          continue;
+        }
+
+        // Detect send pattern: ch <- value
+        const send = this.isChanSend(pattern);
+        if (send) {
+          const value: ManifestValue = this.isSimpleLiteral(send.value)
+            ? { kind: "literal", value: this.literalValue(send.value) }
+            : { kind: "ref", name: exprToCode(send.value, this.source) };
+          cases.push({
+            action: "send",
+            channel: send.channel,
+            value,
+            body: bodyOps,
+          });
+          continue;
+        }
+
+        // Fallback: treat as recv on the expression
+        cases.push({
+          action: "recv",
+          channel: exprToCode(pattern, this.source),
+          body: bodyOps,
+        });
+      }
+    }
+
+    // defaultCase is a separate Block on the AST node
+    if (node.defaultCase) {
+      const defBlocks = consolidateBlocks(node.defaultCase.statements, this.affinityMap);
+      const defOps: ManifestOp[] = [];
+      for (const block of defBlocks) {
+        defOps.push(...this.emitBlock(block));
+      }
+      defaultBody = defOps;
+    }
+
+    return {
+      op: "select",
+      cases,
+      ...(defaultBody ? { defaultBody } : {}),
+    };
+  }
+
+  // ─── Yield ─────────────────────────────────────────────────────
+
+  private emitYield(node: AST.Yield): YieldOp {
+    const yieldOp: YieldOp = { op: "yield" };
+
+    if (node.value) {
+      if (this.isSimpleLiteral(node.value)) {
+        yieldOp.value = { kind: "literal", value: this.literalValue(node.value) };
+      } else if (node.value.kind === "Identifier") {
+        yieldOp.value = { kind: "ref", name: node.value.name };
+      } else {
+        const aff = this.affinityMap.get(node.value);
+        const runtime = aff?.runtime || this.defaultRuntime;
+        const captures = this.computeCaptures(node.value, runtime);
+        yieldOp.from = {
+          op: "eval",
+          runtime,
+          code: exprToCode(node.value, this.source),
+          bind: "__yield",
+          ...(captures ? { captures } : {}),
+        };
+      }
+    }
+
+    if (node.delegate) {
+      yieldOp.delegate = true;
+    }
+
+    return yieldOp;
+  }
 
   // ─── Declarations ─────────────────────────────────────────────
 
@@ -415,6 +694,30 @@ export class ManifestCodeGenerator {
         const valExpr = node.values[i];
         const aff = this.affinityMap.get(valExpr);
         const runtime = aff?.runtime || this.defaultRuntime;
+
+        // Parallel pattern check
+        const parallel = this.isParallelPattern(valExpr);
+        if (parallel) {
+          ops.push(this.emitParallel(parallel.exprs, name));
+          this.recordBinding(name, runtime);
+          continue;
+        }
+
+        // Channel recv: val = <-ch → ChanOp recv with bind
+        const recv = this.isChanRecv(valExpr);
+        if (recv) {
+          const captures = this.computeCaptures(valExpr, runtime);
+          ops.push({
+            op: "chan",
+            action: "recv",
+            runtime,
+            channel: recv.channel,
+            bind: name,
+            ...(captures ? { captures } : {}),
+          });
+          this.recordBinding(name, runtime);
+          continue;
+        }
 
         if (this.isSimpleLiteral(valExpr)) {
           // Manifest-scope literal → declare
@@ -457,6 +760,30 @@ export class ManifestCodeGenerator {
       const aff = this.affinityMap.get(valExpr);
       const runtime = aff?.runtime || this.defaultRuntime;
 
+      // Parallel pattern check
+      const parallel = this.isParallelPattern(valExpr);
+      if (parallel) {
+        ops.push(this.emitParallel(parallel.exprs, name));
+        this.recordBinding(name, runtime);
+        continue;
+      }
+
+      // Channel recv: val = <-ch → ChanOp recv with bind
+      const recv = this.isChanRecv(valExpr);
+      if (recv) {
+        const captures = this.computeCaptures(valExpr, runtime);
+        ops.push({
+          op: "chan",
+          action: "recv",
+          runtime,
+          channel: recv.channel,
+          bind: name,
+          ...(captures ? { captures } : {}),
+        });
+        this.recordBinding(name, runtime);
+        continue;
+      }
+
       if (this.isSimpleLiteral(valExpr)) {
         // Manifest-scope literal → declare
         ops.push({
@@ -491,6 +818,21 @@ export class ManifestCodeGenerator {
     if (node.pairs) {
       for (const pair of node.pairs) {
         const name = pair.name.name;
+        // Channel recv: val := <-ch → ChanOp recv with bind
+        const recv = this.isChanRecv(pair.expr);
+        if (recv) {
+          const captures = this.computeCaptures(pair.expr, runtime);
+          ops.push({
+            op: "chan",
+            action: "recv",
+            runtime,
+            channel: recv.channel,
+            bind: name,
+            ...(captures ? { captures } : {}),
+          });
+          this.recordBinding(name, runtime);
+          continue;
+        }
         ops.push(this.emitBindingEval(name, pair.expr, runtime));
         this.recordBinding(name, runtime);
       }

@@ -81,6 +81,11 @@ export function exprToCode(expr: AST.Expr, source?: string): string {
       return jsxFragmentToCreateElement(expr, source);
     case "Match":
       return matchToTernary(expr, source);
+    case "Yield": {
+      const prefix = expr.delegate ? "yield* " : "yield";
+      if (expr.value) return `${prefix}${expr.delegate ? "" : " "}${exprToCode(expr.value, source)}`;
+      return "yield";
+    }
     default:
       return spanExtract(expr, source) || "/* expr */";
   }
@@ -139,6 +144,13 @@ export function nodeToSourceCode(node: AST.Decl | AST.Stmt | AST.Expr, source?: 
     }
     case "Return":
       return `return ${node.values.map(v => exprToCode(v, source)).join(", ")}`;
+    case "Go":
+      return `go ${exprToCode(node.expr, source)}`;
+    case "Yield": {
+      const prefix = node.delegate ? "yield* " : "yield";
+      if (node.value) return `${prefix}${node.delegate ? "" : " "}${exprToCode(node.value, source)}`;
+      return "yield";
+    }
     default:
       if (isExprKind(node.kind)) {
         return exprToCode(node as AST.Expr, source);
@@ -511,6 +523,12 @@ function collectIds(
           collectIds(arm.body as AST.Expr, ids, locals);
         }
       }
+      break;
+    case "Yield":
+      if ((node as any).value) collectIds((node as any).value, ids, locals);
+      break;
+    case "Go":
+      collectIds((node as any).expr, ids, locals);
       break;
     // For other node kinds, don't try to walk — they use span extraction anyway
     default:

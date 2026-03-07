@@ -1371,39 +1371,44 @@ export class Parser {
   
   private parsePrimary(): AST.Expr {
     // Handle function expressions (including async)
-    if (this.peek().value === "function") {
+    // For 'func', skip if Go-style typed params detected (e.g., func(x int))
+    // — those are handled at statement level as func declarations.
+    if (this.peek().value === "function" || (this.peek().value === "func" && !this.hasGoTypedParams())) {
       const start = this.current;
-      this.advance(); // consume 'function'
-      
+      this.advance(); // consume 'function' or 'func'
+
       // Check for generator function*
       const isGenerator = this.match("*");
-      
+
       // Function expressions can be anonymous
       let name: AST.Identifier | undefined = undefined;
       if (this.peek().type === TokenType.Identifier) {
         name = this.parseIdentifier();
       }
-      
+
       // Parse parameters
       const params = this.parseParameterList();
-      
+
       // Parse return type if present
       let returnType: AST.TypeNode | undefined = undefined;
       if (this.match(":")) {
         returnType = this.parseType();
       }
-      
+
       // Parse body
       const body = this.parseBlock();
-      
+
       // Return as a Lambda expression (anonymous function)
-      return {
+      // Allow postfix operations (like IIFE calls: func(){}())
+      const lambda: AST.Expr = {
         kind: "Lambda",
         params,
         returnType,
         body,
         span: this.createSpan(start, this.current - 1)
       };
+      if (isGenerator) (lambda as any).generator = true;
+      return this.parsePostfix(lambda);
     }
     
     // Handle async lambda/function expressions
@@ -3640,6 +3645,8 @@ export class Parser {
               span: this.createSpanFrom(id)
             };
             const iterable = this.parseExpression();
+            // Consume optional Python-style colon (for x in items:)
+            this.match(":");
             const body = this.parseBlockOrStatement();
             return {
               kind: "Loop",
@@ -4379,6 +4386,30 @@ export class Parser {
     };
   }
   
+  /**
+   * Check if 'func' keyword is followed by Go-style typed params: func(name type, ...)
+   * or func Name(name type, ...). Peeks ahead without consuming tokens.
+   */
+  private hasGoTypedParams(): boolean {
+    // Current token is 'func'. Skip optional name identifier to find '('
+    let idx = this.current + 1;
+    // Skip function name if present: func Name(...)
+    if (idx < this.tokens.length && this.tokens[idx].type === TokenType.Identifier) {
+      idx++;
+    }
+    // Must have '(' next
+    if (idx >= this.tokens.length || this.tokens[idx].value !== "(") return false;
+    const firstParam = idx + 1;
+    if (firstParam >= this.tokens.length) return false;
+    // Empty params func() → not Go-typed
+    if (this.tokens[firstParam].value === ")") return false;
+    // Check if first param is identifier followed by another identifier (Go-style: name type)
+    if (this.tokens[firstParam].type !== TokenType.Identifier) return false;
+    const afterFirst = firstParam + 1;
+    if (afterFirst >= this.tokens.length) return false;
+    return this.tokens[afterFirst].type === TokenType.Identifier;
+  }
+
   private parsePass(): AST.Pass {
     const start = this.current - 1;
     this.consumeSemicolon();
