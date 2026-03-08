@@ -574,8 +574,6 @@ export class Parser {
         this.advance(); // consume 'using'
         return this.parseUsing();
       }
-      // C# using (Type var = expr) { ... }
-      // Removed: was causing error recovery issues inside other constructs
     }
     
     if (this.match("defer")) {
@@ -1099,13 +1097,19 @@ export class Parser {
     const statements: (AST.Decl | AST.Stmt)[] = [];
     
     while (!this.isAtEnd()) {
+      // Skip virtual semicolons before checking indentation
+      while (this.peek().virtualSemi) {
+        this.advance();
+      }
+      if (this.isAtEnd()) break;
+
       const nextIndent = this.peek().indentCol ?? 0;
-      
+
       // Check if we've dedented back to or past the base level
       if (nextIndent < blockIndent) {
         break;
       }
-      
+
       try {
         const stmt = this.parseTopLevel();
         if (stmt) statements.push(stmt);
@@ -2081,6 +2085,59 @@ export class Parser {
         continue;
       }
       
+      // Ruby block with curly braces: expr { |x, y| body }
+      // Only when { is followed by | (to disambiguate from object literals/blocks)
+      if (this.check("{") && this.peekNext()?.value === "|" && !this.noRubyBlock &&
+          (expr.kind === "Call" || expr.kind === "Member" || expr.kind === "Identifier")) {
+        // Convert to call if needed
+        let callExpr: AST.Call;
+        if (expr.kind === "Call") {
+          callExpr = expr as AST.Call;
+        } else {
+          callExpr = {
+            kind: "Call",
+            callee: expr,
+            args: [],
+            span: expr.span
+          };
+        }
+
+        const blockStart = this.current;
+        this.advance(); // consume '{'
+
+        // Parse block parameters |x, y|
+        let blockParams: AST.Identifier[] = [];
+        if (this.match("|")) {
+          do {
+            blockParams.push(this.parseIdentifier());
+          } while (this.match(","));
+          this.consume("|", "Expected '|' after block parameters");
+        }
+
+        // Parse block body until '}'
+        const blockStatements: (AST.Stmt | AST.Decl)[] = [];
+        while (!this.isAtEnd() && !this.check("}")) {
+          if (this.peek().virtualSemi) {
+            this.advance();
+            continue;
+          }
+
+          const stmt = this.parseStatement();
+          if (stmt) blockStatements.push(stmt);
+        }
+
+        this.consume("}", "Expected '}' to close Ruby block");
+
+        (callExpr as any).rubyBlock = {
+          params: blockParams,
+          body: blockStatements,
+          span: this.createSpan(blockStart, this.current - 1)
+        };
+
+        expr = callExpr;
+        continue;
+      }
+
       // Member access and optional chaining
       // Check for ?. first to handle both ?.property and ?.[index]
       if (this.peek().value === "?.") {
@@ -5931,6 +5988,20 @@ export class Parser {
           }
         }
         
+        // ES2022 static initializer block: static { ... }
+        if (isStatic && this.check("{")) {
+          const body = this.parseBlock();
+          members.push({
+            kind: "Method",
+            name: { kind: "Identifier", name: "__static_init__", span: body.span } as AST.Identifier,
+            params: [],
+            body,
+            static: true,
+            span: this.createSpan(memberStart, this.current - 1)
+          } as any);
+          continue;
+        }
+
         // Handle property declarations and methods
         // Allow keywords as method names (e.g., 'match' can be a method name)
         // Process any identifier or keyword as a potential field/method name
