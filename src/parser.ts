@@ -179,7 +179,7 @@ export class Parser {
     }
     
     if (this.isAtEnd()) return null;
-    
+
     // Handle closing braces
     // Note: braceDepth only tracks {} blocks (if/for/while/function bodies)
     // It does NOT track braces for classes, interfaces, object literals, etc.
@@ -889,6 +889,8 @@ export class Parser {
           span: this.createSpan(this.current, this.current)
         };
 
+        // Skip vsemis before checking for ;;
+        while (this.peek().virtualSemi) this.advance();
         // Check for fallthrough (no ;;)
         const fallthrough = !this.match(";;");
 
@@ -899,7 +901,7 @@ export class Parser {
           fallthrough,
           span: this.createSpan(this.current, this.current)
         });
-        
+
         // Also set defaultCase for backward compatibility
         defaultCase = body;
       } else {
@@ -916,16 +918,18 @@ export class Parser {
           const stmt = this.parseTopLevel();
           if (stmt) statements.push(stmt);
         }
-        
+
         const body: AST.Block = {
           kind: "Block",
           statements,
           span: this.createSpan(this.current, this.current)
         };
-        
+
+        // Skip vsemis before checking for ;;
+        while (this.peek().virtualSemi) this.advance();
         // Check for fallthrough (no ;;)
         const fallthrough = !this.match(";;");
-        
+
         cases.push({
           patterns,
           body,
@@ -1848,12 +1852,12 @@ export class Parser {
     
     // Array literal
     if (this.match("[")) {
-      return this.parseArrayLiteral();
+      return this.parsePostfix(this.parseArrayLiteral());
     }
-    
+
     // Object literal
     if (this.match("{")) {
-      return this.parseObjectLiteral();
+      return this.parsePostfix(this.parseObjectLiteral());
     }
     
     // Lambda/arrow function
@@ -3999,8 +4003,28 @@ export class Parser {
       return { kind: "ExprStmt", expression: lambda, span: lambda.span } as any;
     }
 
-    // Parse the block
-    const body = this.parseBlock();
+    // Parse the block — use custom loop that accepts both 'done' (bash) and 'end' (Ruby)
+    let body: AST.Block;
+    if (this.check("{")) {
+      body = this.parseBlock();
+    } else {
+      const stmts: (AST.Decl | AST.Stmt)[] = [];
+      while (!this.check("done") && !this.check("end") && !this.check("while") && !this.isAtEnd()) {
+        if (this.peek().virtualSemi) { this.advance(); continue; }
+        const beforePos = this.current;
+        try {
+          const stmt = this.parseTopLevel();
+          if (stmt) stmts.push(stmt);
+        } catch (error) {
+          if (error instanceof (ParseError as any)) {
+            this.errors.push(error as any);
+            this.synchronize();
+          } else { throw error; }
+        }
+        if (this.current === beforePos) this.advance();
+      }
+      body = { kind: "Block", statements: stmts, span: this.createSpan(start, this.current - 1) };
+    }
 
     // Check what comes after the block
     if (this.match("while")) {
@@ -4028,8 +4052,16 @@ export class Parser {
         statements: body.statements,
         span: this.createSpan(start, this.current - 1)
       };
+    } else if (this.check("end")) {
+      // Ruby-style do-end block (e.g., fork do ... end)
+      this.consume("end", "Expected 'end' to close do block");
+      return {
+        kind: "Block",
+        statements: body.statements,
+        span: this.createSpan(start, this.current - 1)
+      };
     } else {
-      // Error: 'do' must be followed by either 'while' or 'done'
+      // Error: 'do' must be followed by either 'while', 'done', or 'end'
       throw this.error(this.peek(), "Expected 'while' or 'done' after do block");
     }
   }
