@@ -180,6 +180,7 @@ export class Parser {
     
     if (this.isAtEnd()) return null;
 
+
     // Handle closing braces
     // Note: braceDepth only tracks {} blocks (if/for/while/function bodies)
     // It does NOT track braces for classes, interfaces, object literals, etc.
@@ -569,8 +570,9 @@ export class Parser {
       const next = this.peekNext();
       const nextNext = this.peekAt(2);
 
-      // Resource management: using var = expr { ... }
-      if (next?.type === TokenType.Identifier && nextNext?.value === "=") {
+      // Resource management: using var = expr { ... } or using (Type var = expr) { ... }
+      if ((next?.type === TokenType.Identifier && nextNext?.value === "=") ||
+          next?.value === "(") {
         this.advance(); // consume 'using'
         return this.parseUsing();
       }
@@ -1477,7 +1479,9 @@ export class Parser {
   
   private parsePrimary(): AST.Expr {
     // Handle function expressions (including async)
-    if (this.peek().value === "function" || this.peek().value === "func") {
+    // But not when func() looks like a function call (no body follows the parens)
+    if ((this.peek().value === "function" || this.peek().value === "func") &&
+        !this.looksLikeFuncCall()) {
       const start = this.current;
       this.advance(); // consume 'function' or 'func'
 
@@ -1953,12 +1957,16 @@ export class Parser {
       
       // Function call
       if (this.match("(")) {
-        // Special case for make() with channel types
+        // Special case for make() with Go types (channels, slices, maps)
         if (expr.kind === "Identifier" && expr.name === "make") {
-          // Check if the next token suggests a channel type
-          if (this.check("<-") || this.peek().value === "chan") {
-            // Parse as a type
-            const typeNode = this.parseType();
+          // Check if the next token suggests a Go type
+          if (this.check("<-") || this.peek().value === "chan" ||
+              (this.check("[") && this.peekAt(1)?.value === "]") ||
+              this.peek().value === "map") {
+            // Use parseGoTypeAnnotation for Go-specific types (slices, maps)
+            // Use parseType for chan (supports angle bracket generics like chan<T>)
+            const useGoType = (this.check("[") && this.peekAt(1)?.value === "]") || this.peek().value === "map";
+            const typeNode = useGoType ? this.parseGoTypeAnnotation() : this.parseType();
             
             // If it's a GenericType with chan base, keep it as a structured expression
             let typeExpr: AST.Expr;
@@ -2744,6 +2752,11 @@ export class Parser {
 
   private parseVarDecl(): AST.VarDecl {
     const start = this.current - 1;
+
+    // Rust-style: let mut x = ...
+    if (this.peek().value === "mut") {
+      this.advance(); // skip 'mut'
+    }
 
     // Go grouped var: var ( name = value \n name2 = value2 )
     if (this.check("(")) {
@@ -4851,12 +4864,29 @@ export class Parser {
   
   private parseUsing(): AST.Using {
     const start = this.current - 1;
-    
+
     let resource: AST.Expr | AST.Decl;
-    
+
+    // C#/Java-style: using (Type var = expr) { ... }
+    const hasParen = this.match("(");
+
+    // Inside using (...), check for typed declaration: Type Name = Expr
+    if (hasParen && this.peek().type === TokenType.Identifier && this.peekAt(1)?.type === TokenType.Identifier) {
+      // Parse as: Type Name = Expr (e.g., StreamReader sr = new StreamReader("file"))
+      const typeName = this.parseExpression(); // parse the type (may include generics)
+      const varName = this.parseIdentifier();
+      this.consume("=", "Expected '=' in using declaration");
+      const value = this.parseExpression();
+      resource = {
+        kind: "VarDecl",
+        names: [varName],
+        values: [value],
+        span: this.createSpan(start, this.current - 1)
+      } as AST.VarDecl;
+    } else {
     // Parse the resource expression
     const expr = this.parseExpression();
-    
+
     // Check for Python-style 'as' alias
     if (this.match("as")) {
       const alias = this.parseIdentifier();
@@ -4874,7 +4904,13 @@ export class Parser {
     } else {
       resource = expr;
     }
+    }
     
+    // Consume closing paren for using (...) form
+    if (hasParen) {
+      this.consume(")", "Expected ')' after using declaration");
+    }
+
     // Parse body - check for Python-style colon or explicit block
     let body: AST.Block | undefined;
     if (this.match(":")) {
@@ -8543,6 +8579,39 @@ export class Parser {
     }
   }
   
+  /**
+   * Check if `func` or `function` looks like a function call rather than a function expression.
+   * func() with no body following the parens = function call.
+   * func() { ... } or func name() { ... } = function expression.
+   */
+  private looksLikeFuncCall(): boolean {
+    const kw = this.peek();
+    if (kw.value !== "func" && kw.value !== "function") return false;
+    const next = this.peekAt(1);
+    if (!next || next.value !== "(") return false;
+    // func( — scan past matched parens to see if a body follows
+    let depth = 0;
+    let pos = this.current + 1; // start at (
+    while (pos < this.tokens.length) {
+      const t = this.tokens[pos];
+      if (t.value === "(") depth++;
+      else if (t.value === ")") {
+        depth--;
+        if (depth === 0) {
+          // Check what follows the closing paren
+          const after = this.tokens[pos + 1];
+          if (!after) return true; // EOF after func() = call
+          // If body follows, it's a function expression
+          if (after.value === "{" || after.value === ":" || after.value === "->") return false;
+          // Otherwise it's a call
+          return true;
+        }
+      }
+      pos++;
+    }
+    return false;
+  }
+
   private isRightAssociative(token: Token): boolean {
     return token.value === "**" || this.isAssignmentOp(token);
   }
@@ -8672,6 +8741,15 @@ export class Parser {
   
   private peekAt(offset: number): Token | undefined {
     return this.tokens[this.current + offset];
+  }
+
+  /** Peek past consecutive virtualSemi tokens to find the next real token */
+  private peekPastVsemis(): Token | undefined {
+    let pos = this.current;
+    while (pos < this.tokens.length && this.tokens[pos].virtualSemi) {
+      pos++;
+    }
+    return pos < this.tokens.length ? this.tokens[pos] : undefined;
   }
   
   private previous(): Token | undefined {
