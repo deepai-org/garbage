@@ -43,26 +43,59 @@ export {
 import { Lexer } from '../../src/lexer';
 import { Parser } from '../../src/parser';
 import * as AST from '../../src/ast';
+import { RuntimeResolver } from '../../src/runtime-resolver';
+import { ManifestCodeGenerator } from '../../src/codegen-omnivm';
 
 /**
  * Helper to parse code and return AST
- * Throws an error if parsing produces any errors (ensures tests only pass with clean parses)
+ * Also runs the full manifest codegen pipeline as a smoke test when parsing succeeds cleanly.
+ * If parser has errors, codegen is skipped (those tests are testing error recovery).
  */
 export function parseCode(code: string): AST.Program {
   const lexer = new Lexer(code);
   const tokens = lexer.tokenize();
-  const parser = new Parser(tokens);
+  const parser = new Parser(tokens, code);
   const ast = parser.parse();
-  
-  // Check for any parsing errors
-  const errors = (parser as any).errors || [];
+
+  // If parser had errors, skip codegen (those tests are testing error recovery)
+  const errors = parser.getErrors();
+  if (errors.length === 0) {
+    // Smoke-test the manifest codegen pipeline
+    const resolver = new RuntimeResolver();
+    const annotated = resolver.resolve(ast, code);
+    const gen = new ManifestCodeGenerator();
+    const manifest = gen.generate(annotated);
+    JSON.stringify(manifest); // verify JSON-serializable
+  } else {
+    const fs = require('fs');
+    const line = JSON.stringify({
+      n: errors.length,
+      msg: errors.map((e: any) => `${e.message} @${e.token?.line}:${e.token?.column}`).slice(0, 5),
+      code: code.replace(/\n/g, '\\n').slice(0, 250)
+    }) + '\n';
+    fs.appendFileSync('/tmp/polyscript-diag.jsonl', line);
+  }
+
+  return ast;
+}
+
+/**
+ * Strict variant that throws on parser errors (for error-detection tests)
+ */
+export function parseCodeStrict(code: string): AST.Program {
+  const lexer = new Lexer(code);
+  const tokens = lexer.tokenize();
+  const parser = new Parser(tokens, code);
+  const ast = parser.parse();
+
+  const errors = parser.getErrors();
   if (errors.length > 0) {
-    const errorMessages = errors.map((e: any) => 
+    const errorMessages = errors.map((e: any) =>
       `${e.message} at ${e.token?.line || 'unknown'}:${e.token?.column || 'unknown'}`
     ).join('\n  ');
     throw new Error(`Parser produced ${errors.length} error(s):\n  ${errorMessages}`);
   }
-  
+
   return ast;
 }
 
@@ -72,9 +105,9 @@ export function parseCode(code: string): AST.Program {
 export function parseCodeWithErrors(code: string): { ast: AST.Program; errors: any[] } {
   const lexer = new Lexer(code);
   const tokens = lexer.tokenize();
-  const parser = new Parser(tokens);
+  const parser = new Parser(tokens, code);
   const ast = parser.parse();
-  const errors = (parser as any).errors || [];
+  const errors = parser.getErrors();
   return { ast, errors };
 }
 

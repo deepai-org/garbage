@@ -1775,6 +1775,28 @@ export class Parser {
       return switchExpr as any;
     }
 
+    // Go composite literals: map[K]V{...}, []Type{...}
+    if (this.check("map") && this.peekAt(1)?.value === "[") {
+      return this.parsePostfix(this.parseGoCompositeLiteral());
+    }
+    if (this.check("[") && this.peekAt(1)?.value === "]" &&
+        (this.peekAt(2)?.type === TokenType.Identifier ||
+         (this.peekAt(2)?.type === TokenType.Keyword &&
+          ["map", "interface", "struct", "chan"].includes(this.peekAt(2)?.value || "")))) {
+      // Only parse as Go slice literal if { follows the type (lookahead to confirm)
+      const checkpoint = this.current;
+      try {
+        this.advance(); // [
+        this.advance(); // ]
+        this.parseGoTypeAnnotation(); // skip the element type
+        if (this.check("{") || this.check("(")) {
+          this.current = checkpoint;
+          return this.parsePostfix(this.parseGoCompositeLiteral());
+        }
+      } catch {}
+      this.current = checkpoint;
+    }
+
     // Identifiers and sigil identifiers
     // Also allow keywords as identifiers in expression context when they can't start a statement
     if (this.peek().type === TokenType.Identifier ||
@@ -2257,7 +2279,38 @@ export class Parser {
             };
             continue;
           }
-          
+
+          // Go type assertion: expr.(Type) or expr.(type)
+          if (this.check("(")) {
+            this.advance(); // consume (
+            if (this.check("type")) {
+              // Go type switch: expr.(type)
+              this.advance(); // consume 'type'
+              this.consume(")", "Expected ')' after type assertion");
+              expr = {
+                kind: "TypeAssertion",
+                expr,
+                type: {
+                  kind: "SimpleType",
+                  id: { kind: "Identifier", name: "type", span: this.createSpanFrom(expr) },
+                  span: this.createSpanFrom(expr)
+                } as AST.TypeNode,
+                span: this.createSpanFrom(expr)
+              };
+            } else {
+              // Go type assertion: expr.(ConcreteType)
+              const type = this.parseGoTypeAnnotation();
+              this.consume(")", "Expected ')' after type assertion");
+              expr = {
+                kind: "TypeAssertion",
+                expr,
+                type,
+                span: this.createSpanFrom(expr)
+              };
+            }
+            continue;
+          }
+
           // Regular member access, force unwrap, or PHP arrow
           const property = this.parseIdentifier();
           
@@ -3288,8 +3341,9 @@ export class Parser {
     } else if (name.kind === "Identifier" &&
                !this.check(",") && !this.check(")") && !this.check("=") && !this.check("?") && !this.check("|") &&
                (this.peek().type === TokenType.Identifier ||
-                // Go interface{}, chan, *Type, []Type, map[K]V
-                this.check("interface") || this.check("chan") || this.check("*") ||
+                // Go interface{}, struct{}, chan, *Type, []Type, map[K]V
+                this.check("interface") || this.check("struct") || this.check("chan") ||
+                this.check("map") || this.check("*") ||
                 (this.check("[") && this.peekAt(1)?.value === "]"))) {
       // Go-style type annotation: name Type (no colon separator)
       type = this.parseGoTypeAnnotation();
@@ -3382,6 +3436,100 @@ export class Parser {
 
     // Fall back to regular type parsing (handles dotted types, generics, etc.)
     return this.parseType();
+  }
+
+  /**
+   * Parse a Go composite literal: map[K]V{...}, []Type{...}, Type{...}
+   * Returns an ObjectLiteral (for map) or ArrayLiteral (for slice) node.
+   */
+  private parseGoCompositeLiteral(): AST.Expr {
+    const start = this.current;
+    // Parse the Go type
+    const goType = this.parseGoTypeAnnotation();
+
+    // If followed by { ... }, parse the composite literal body
+    if (this.check("{")) {
+      this.advance(); // consume {
+      // Skip virtual semicolons
+      while (this.peek().virtualSemi) this.advance();
+
+      // Check if this is a map-like type (has key-value pairs) or slice-like (has values)
+      const entries: AST.ObjectProperty[] = [];
+      const elements: AST.Expr[] = [];
+      let isMap = false;
+
+      while (!this.check("}") && !this.isAtEnd()) {
+        while (this.peek().virtualSemi) this.advance();
+        if (this.check("}")) break;
+
+        const expr = this.parseAssignmentExpression();
+
+        if (this.match(":")) {
+          // key: value pair (map literal)
+          isMap = true;
+          const value = this.parseAssignmentExpression();
+          entries.push({
+            key: expr,
+            value,
+            span: this.createSpanFrom(expr)
+          });
+        } else {
+          // Just a value (slice literal)
+          elements.push(expr);
+        }
+
+        this.match(","); // optional trailing comma
+        while (this.peek().virtualSemi) this.advance();
+      }
+      this.consume("}", "Expected '}' in Go composite literal");
+
+      if (isMap || entries.length > 0) {
+        return {
+          kind: "ObjectLiteral",
+          properties: entries,
+          span: this.createSpan(start, this.current - 1)
+        } as AST.ObjectLiteral;
+      } else {
+        return {
+          kind: "ArrayLiteral",
+          elements,
+          span: this.createSpan(start, this.current - 1)
+        } as AST.ArrayLiteral;
+      }
+    }
+
+    // No { after type — treat as a type conversion: []byte(data) etc.
+    // Parse it as a call-like expression
+    if (this.check("(")) {
+      this.advance(); // consume (
+      const args: AST.Expr[] = [];
+      if (!this.check(")")) {
+        do {
+          args.push(this.parseExpression());
+        } while (this.match(","));
+      }
+      this.consume(")", "Expected ')' in Go type conversion");
+      const typeName: AST.Identifier = {
+        kind: "Identifier",
+        name: goType.kind === "SimpleType" ? ((goType as any).id?.name || "unknown") :
+              goType.kind === "GenericType" ? ("[]" + ((goType as any).args?.[0]?.id?.name || "")) : "GoType",
+        span: this.createSpan(start, this.current - 1)
+      };
+      return {
+        kind: "Call",
+        callee: typeName,
+        args,
+        span: this.createSpan(start, this.current - 1)
+      } as AST.Call;
+    }
+
+    // Fallback: just return the type name as an identifier
+    const typeName: AST.Identifier = {
+      kind: "Identifier",
+      name: goType.kind === "SimpleType" ? ((goType as any).id?.name || "GoType") : "GoType",
+      span: this.createSpan(start, this.current - 1)
+    };
+    return typeName;
   }
 
   private parseDestructuringPattern(): AST.ArrayPattern | AST.ObjectPattern {
@@ -3508,6 +3656,17 @@ export class Parser {
       test = this.parseExpression();
     }
     
+    // Go-style if with init statement: if init; condition { ... }
+    if (this.check(";") && this.peekNext()?.value !== "then") {
+      // The test we just parsed is actually the init statement; parse the real condition
+      this.advance(); // consume ;
+      if (this.check("[")) {
+        test = this.parseBashTestExpression();
+      } else {
+        test = this.parseExpression();
+      }
+    }
+
     // Check for Python-style colon
     if (this.match(":")) {
       // Indent-based block
@@ -3702,8 +3861,22 @@ export class Parser {
       }
       
       if (this.match("case")) {
-        // Traditional switch case
-        patterns.push(this.parseExpression());
+        // Go type switch case: case []map[string]string: or case map[K]V:
+        if ((this.check("[") && this.peekAt(1)?.value === "]") ||
+            (this.check("map") && this.peekAt(1)?.value === "[")) {
+          const goType = this.parseGoTypeAnnotation();
+          // Convert type to an identifier expression for case matching
+          const typeName = goType.kind === "SimpleType" ? ((goType as any).id?.name || "GoType") :
+                           goType.kind === "GenericType" ? this.typeNodeToString(goType) : "GoType";
+          patterns.push({
+            kind: "Identifier",
+            name: typeName,
+            span: goType.span
+          } as AST.Identifier);
+        } else {
+          // Traditional switch case
+          patterns.push(this.parseExpression());
+        }
         while (this.match(",")) {
           patterns.push(this.parseExpression());
         }
@@ -4241,6 +4414,24 @@ export class Parser {
         };
       }
       
+      // Go-style condition-only for: for condition { body }
+      if (!this.check("(")) {
+        const test = this.parseExpression();
+        let body: AST.Block;
+        if (this.match(":")) {
+          body = this.parseIndentBlock();
+        } else {
+          body = this.parseBlockOrStatement();
+        }
+        return {
+          kind: "Loop",
+          mode: "while",
+          test,
+          body,
+          span: this.createSpan(start, this.current - 1)
+        };
+      }
+
       // Traditional for loop with parentheses
       this.consume("(", "Expected '(' after 'for'");
       
@@ -4965,11 +5156,17 @@ export class Parser {
     if (firstParam >= this.tokens.length) return false;
     // Empty params func() → not Go-typed
     if (this.tokens[firstParam].value === ")") return false;
-    // Check if first param is identifier followed by another identifier (Go-style: name type)
+    // Check if first param is identifier followed by a type token (Go-style: name type)
     if (this.tokens[firstParam].type !== TokenType.Identifier) return false;
     const afterFirst = firstParam + 1;
     if (afterFirst >= this.tokens.length) return false;
-    return this.tokens[afterFirst].type === TokenType.Identifier;
+    const afterTok = this.tokens[afterFirst];
+    // Go type can be: identifier, keyword type (interface, struct, map, chan, func), pointer (*), slice ([])
+    if (afterTok.type === TokenType.Identifier) return true;
+    if (afterTok.type === TokenType.Keyword &&
+        ["interface", "struct", "map", "chan", "func"].includes(afterTok.value)) return true;
+    if (afterTok.value === "*" || afterTok.value === "[") return true;
+    return false;
   }
 
   private parsePass(): AST.Pass {
@@ -7877,7 +8074,29 @@ export class Parser {
         this.advance();
       }
       
-      const hasArrow = this.check("=>") || (this.check(":") && this.peekNext()?.value === "=>");
+      let hasArrow = this.check("=>");
+      if (!hasArrow && this.check(":")) {
+        // Skip return type annotation to find =>
+        // e.g. (mode: string): void => { ... }
+        // e.g. (x: number): Promise<string> => { ... }
+        const savePos = this.current;
+        this.advance(); // skip :
+        let typeDepth = 0;
+        while (!this.isAtEnd()) {
+          if (this.check("<") || this.check("[")) {
+            typeDepth++;
+          } else if (this.check(">") || this.check("]")) {
+            typeDepth--;
+          } else if (typeDepth === 0 && this.check("=>")) {
+            hasArrow = true;
+            break;
+          } else if (typeDepth === 0 && (this.check("{") || this.check(";") || this.check(",") || this.check(")") || this.isAtEnd())) {
+            break;
+          }
+          this.advance();
+        }
+        this.current = savePos;
+      }
       this.current = checkpoint;
       return hasArrow;
     }
@@ -7904,7 +8123,7 @@ export class Parser {
         // Scan ahead to find the closing paren and check for =>
         let depth = 1;
         let pos = this.current + 2; // Skip identifier and :
-        
+
         while (depth > 0 && pos < this.tokens.length) {
           const tok = this.tokens[pos];
           if (tok.value === "(") depth++;
@@ -7913,7 +8132,21 @@ export class Parser {
             if (depth === 0) {
               // Check if followed by =>
               const nextTok = this.tokens[pos + 1];
-              return nextTok && nextTok.value === "=>";
+              if (nextTok && nextTok.value === "=>") return true;
+              // Check for return type annotation: ): Type =>
+              if (nextTok && nextTok.value === ":") {
+                let rpos = pos + 2; // skip ) and :
+                let rtypeDepth = 0;
+                while (rpos < this.tokens.length) {
+                  const rt = this.tokens[rpos];
+                  if (rt.value === "<" || rt.value === "[") rtypeDepth++;
+                  else if (rt.value === ">" || rt.value === "]") rtypeDepth--;
+                  else if (rtypeDepth === 0 && rt.value === "=>") return true;
+                  else if (rtypeDepth === 0 && (rt.value === "{" || rt.value === ";" || rt.value === ",")) break;
+                  rpos++;
+                }
+              }
+              return false;
             }
           }
           pos++;
