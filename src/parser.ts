@@ -1933,6 +1933,11 @@ export class Parser {
       // Check for generic arguments after member access (e.g., React.forwardRef<T1, T2>)
       // This handles cases where generics appear after a member access operation
       if (this.check("<") && !this.check("<-") && !this.check("<<") && !this.check("<=") && expr.kind === "Member") {
+        // Skip if next token after < is a numeric literal — definitely a comparison
+        const afterLt = this.peekAt(1);
+        if (afterLt && afterLt.type === TokenType.NumericLiteral) {
+          // Fall through to binary operator handling below
+        } else {
         const checkpoint = this.current;
         const genericArgs = this.tryParseGenericArgs();
         
@@ -1942,6 +1947,7 @@ export class Parser {
         } else {
           // Not generic arguments, restore position
           this.current = checkpoint;
+        }
         }
       }
       
@@ -8441,17 +8447,18 @@ export class Parser {
   
   private tryParseGenericArgs(): AST.TypeNode[] | null {
     if (!this.check("<")) return null;
-    
+
     const checkpoint = this.current;
-    
+    const errorCheckpoint = this.errors.length;
+
     try {
       this.advance(); // <
       const args: AST.TypeNode[] = [];
-      
+
       do {
         args.push(this.parseType());
       } while (this.match(","));
-      
+
       // Handle >> and >>> as closing brackets
       if (this.check(">>")) {
         // Treat >> as a single > and leave the second > for the next parse
@@ -8476,20 +8483,23 @@ export class Parser {
       } else {
         this.consume(">", "Expected '>' after generic arguments");
       }
-      
+
       // Check if followed by valid continuation
       const next = this.peek();
       if (next.value === "(" || next.value === "[" || next.value === "{" ||
           next.value === ">" || next.value === ">>" || next.value === ">>>" ||
-          next.value === ":" || next.value === "extends" || 
+          next.value === ":" || next.value === "extends" ||
           next.value === "implements" || next.value === "where") {
         return args;
       }
-      
-      // Not a valid generic argument list
+
+      // Not a valid generic argument list — restore errors from failed attempt
+      this.errors.length = errorCheckpoint;
       this.current = checkpoint;
       return null;
     } catch {
+      // Failed to parse as generic args — restore errors from failed attempt
+      this.errors.length = errorCheckpoint;
       this.current = checkpoint;
       return null;
     }
