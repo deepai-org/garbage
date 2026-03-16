@@ -1,6 +1,7 @@
 import { applyMASI } from './lexer-masi';
 import * as LS from './lex-state';
 import { OPERATOR_TRIE } from './operator-trie';
+import { LexerCursor } from './lexer-cursor';
 
 export enum TokenType {
   // Literals
@@ -55,17 +56,7 @@ export interface Token {
   newline?: boolean;
 }
 
-export class Lexer {
-  private source: string;
-  private position = 0;
-  private line = 1;
-  private column = 1;
-  private tokens: Token[] = [];
-  private lastNonWSToken: Token | null = null;
-  private currentIndent = 0;
-  private lineStart = true;
-  private state: LS.LexState;
-  
+export class Lexer extends LexerCursor {
   // HTML tag names for JSX detection per spec
   private readonly htmlTags = new Set([
     'div', 'span', 'p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'li',
@@ -78,10 +69,9 @@ export class Lexer {
     'var', 'time', 'data', 'address', 'cite', 'q', 'abbr', 'dfn', 'ruby', 'rt',
     'rp', 'bdi', 'bdo', 'wbr', 'details', 'summary', 'dialog', 'menu'
   ]);
-  
+
   constructor(source: string) {
-    this.source = source;
-    this.state = LS.createLexState();
+    super(source);
   }
   
   tokenize(): Token[] {
@@ -958,164 +948,7 @@ export class Lexer {
     }
   }
   
-  private advance(): string {
-    const char = this.source[this.position];
-    this.position++;
-    this.column++;
-    return char;
-  }
-  
-  private peek(): string {
-    if (this.isAtEnd()) return '\0';
-    return this.source[this.position];
-  }
-  
-  private peekNext(): string {
-    if (this.position + 1 >= this.source.length) return '\0';
-    return this.source[this.position + 1];
-  }
-  
-  private peekAt(offset: number): string {
-    if (this.position + offset >= this.source.length) return '\0';
-    return this.source[this.position + offset];
-  }
-  
-  private peekIdentifier(): string {
-    let pos = this.position;
-    if (!this.source[pos] || !/[a-zA-Z_]/.test(this.source[pos])) {
-      return '';
-    }
-    
-    let result = '';
-    while (pos < this.source.length && /[a-zA-Z0-9_]/.test(this.source[pos])) {
-      result += this.source[pos];
-      pos++;
-    }
-    return result;
-  }
-  
-  private peekPastGenericParams(startPos: number): number {
-    // Given a position after an identifier followed by '<', 
-    // find the position after the matching '>' of generic params
-    let pos = startPos;
-    if (this.source[pos] !== '<') return pos;
-    
-    let depth = 1;
-    pos++; // Skip initial '<'
-    
-    while (pos < this.source.length && depth > 0) {
-      const char = this.source[pos];
-      if (char === '<') {
-        depth++;
-      } else if (char === '>') {
-        depth--;
-      }
-      pos++;
-    }
-    
-    return pos; // Position after the closing '>'
-  }
-  
   private isHTMLTag(tagName: string): boolean {
     return this.htmlTags.has(tagName.toLowerCase());
-  }
-  
-  private isAtEnd(): boolean {
-    return this.position >= this.source.length;
-  }
-  
-  
-  private peekNextNonWhitespace(): string {
-    let offset = 0;
-    while (this.position + offset < this.source.length) {
-      const char = this.source[this.position + offset];
-      if (!/\s/.test(char)) {
-        return char;
-      }
-      offset++;
-    }
-    return '\0';
-  }
-  
-  private addToken(type: TokenType, value: string, start: number, end: number): void {
-    const token: Token = {
-      type,
-      value,
-      start,
-      end,
-      line: this.line,
-      column: this.column - (end - start)
-    };
-    
-    // Set indentation for tokens at start of line
-    if (this.lineStart && token.type !== TokenType.Whitespace) {
-      token.indentCol = this.currentIndent;
-      token.newline = true;
-      this.lineStart = false;  // Reset line start flag after adding token
-    }
-    
-    this.tokens.push(token);
-    
-    if (type !== TokenType.Whitespace && type !== TokenType.Comment) {
-      this.lastNonWSToken = token;
-      
-      // Update context position based on this token
-      LS.updatePosition(this.state, value);
-    }
-  }
-  
-  private addTokenEx(type: TokenType, value: string, start: number, end: number, line: number, column: number): void {
-    const token: Token = {
-      type,
-      value,
-      start,
-      end,
-      line,
-      column
-    };
-    
-    // Set indentation for tokens at start of line
-    if (this.lineStart && token.type !== TokenType.Whitespace) {
-      token.indentCol = this.currentIndent;
-      token.newline = true;
-      this.lineStart = false;  // Reset line start flag after adding token
-    }
-    
-    this.tokens.push(token);
-    
-    if (type !== TokenType.Whitespace && type !== TokenType.Comment) {
-      this.lastNonWSToken = token;
-      
-      // Update context position based on this token
-      LS.updatePosition(this.state, value);
-      
-      // Handle type context transitions
-      this.updateTypeContext(value, type);
-    }
-  }
-
-  private updateTypeContext(value: string, type: TokenType): void {
-    // Enter type context after these tokens
-    if (value === ':' && !LS.isInJSX(this.state)) {
-      // Type annotation context (but not JSX attributes)
-      LS.enterTypeAnnotation(this.state);
-    } else if (value === '<' && LS.canBeGeneric(this.state)) {
-      // Generic type parameters
-      LS.enterGeneric(this.state);
-    } else if (value === 'extends' || value === 'implements' || 
-               value === 'as' || value === 'typeof' || value === 'keyof') {
-      // TypeScript type contexts
-      LS.enterTypeAnnotation(this.state);
-    }
-    
-    // Exit type context after these tokens
-    if (value === '>' && this.state.genericDepth > 0) {
-      // End of generic parameters
-      LS.exitGeneric(this.state);
-    } else if ((value === ',' || value === ')' || value === ';' || value === '=' || 
-                value === '{' || value === '}') && LS.isInType(this.state)) {
-      // End of type annotation in many contexts
-      LS.exitTypeAnnotation(this.state);
-    }
   }
 }
