@@ -151,6 +151,22 @@ export function parseType(host: TypeHost): AST.TypeNode {
     };
   }
 
+  // Handle intersection types: Type & Type
+  while (host.check("&") && host.peekAt(1)?.value !== "&") {
+    host.advance(); // consume &
+    const types: AST.TypeNode[] = [type];
+    types.push(parseSimpleType(host));
+    while (host.check("&") && host.peekAt(1)?.value !== "&") {
+      host.advance();
+      types.push(parseSimpleType(host));
+    }
+    type = {
+      kind: "IntersectionType",
+      types,
+      span: host.createSpanFrom(types[0])
+    } as any;
+  }
+
   return type;
 }
 
@@ -270,7 +286,19 @@ export function parseSimpleType(host: TypeHost): AST.TypeNode {
       }
 
       let name: string;
-      if (host.peek().type === TokenType.StringLiteral) {
+      if (host.check("[")) {
+        // TypeScript mapped type: [K in T]: ValueType or [K in T as Name]: ValueType
+        host.advance(); // consume [
+        const parts: string[] = [];
+        let depth = 1;
+        while (depth > 0 && !host.isAtEnd()) {
+          if (host.check("[")) depth++;
+          else if (host.check("]")) { depth--; if (depth === 0) break; }
+          parts.push(host.advance().value);
+        }
+        host.consume("]", "Expected ']' after mapped type key");
+        name = `[${parts.join(' ')}]`;
+      } else if (host.peek().type === TokenType.StringLiteral) {
         const token = host.advance();
         name = token.value.slice(1, -1);
       } else if (host.peek().type === TokenType.Keyword) {
@@ -282,6 +310,28 @@ export function parseSimpleType(host: TypeHost): AST.TypeNode {
       let optional = false;
       if (host.match("?")) {
         optional = true;
+      }
+
+      // Skip generic params in method signatures: set<K extends T>(...)
+      if (host.check("<")) {
+        host.advance();
+        let depth = 1;
+        while (depth > 0 && !host.isAtEnd()) {
+          if (host.check("<")) depth++;
+          else if (host.check(">")) depth--;
+          host.advance();
+        }
+      }
+
+      // Skip method params: name(...): ReturnType
+      if (host.check("(")) {
+        host.advance();
+        let depth = 1;
+        while (depth > 0 && !host.isAtEnd()) {
+          if (host.check("(")) depth++;
+          else if (host.check(")")) depth--;
+          host.advance();
+        }
       }
 
       host.consume(":", "Expected ':' after property name in object type");
