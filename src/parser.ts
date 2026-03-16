@@ -4152,18 +4152,35 @@ export class Parser {
   
   private parseCaseBody(): AST.Block {
     const statements: (AST.Decl | AST.Stmt)[] = [];
-    
-    while (!this.check("case") && !this.check("default") && 
-           !this.check("}") && !this.isAtEnd()) {
+
+    while (!this.isAtEnd() && !this.check("}") && !this.check("default")) {
       // Skip virtual semicolons
       while (this.peek().virtualSemi) {
         this.advance();
       }
-      
-      // Check again after skipping virtual semicolons
-      if (this.check("case") || this.check("default") || 
-          this.check("}") || this.isAtEnd()) {
+
+      // Check terminators after skipping vsemis
+      if (this.check("}") || this.check("default") || this.isAtEnd()) {
         break;
+      }
+
+      // Stop at 'case' unless it's a bash case...in statement
+      if (this.check("case")) {
+        // Look ahead: case <pattern> in => bash case statement (parse as body statement)
+        // case <pattern> : => next switch case (stop)
+        let isBashCase = false;
+        const checkpoint = this.current;
+        // Peek past 'case' and the pattern to see 'in' vs ':'
+        let scan = this.current + 1; // skip 'case'
+        // skip the pattern expression tokens until we hit 'in', ':', or '=>'
+        while (scan < this.tokens.length) {
+          const t = this.tokens[scan];
+          if (t.value === "in") { isBashCase = true; break; }
+          if (t.value === ":" || t.value === "=>" || t.value === "}" ||
+              t.type === TokenType.EOF || t.virtualSemi) break;
+          scan++;
+        }
+        if (!isBashCase) break;
       }
       
       // Parse statements directly, not using parseTopLevel
@@ -6051,9 +6068,22 @@ export class Parser {
       this.consume(">", "Expected '>' after type parameters");
     }
 
-    // Parse extends clause
+    // Python-style class inheritance: class Name(Parent, Mixin):
     let extendsType: AST.TypeNode | undefined;
-    if (this.match("extends")) {
+    if (this.check("(") && !typeParams) {
+      this.advance(); // consume '('
+      if (!this.check(")")) {
+        extendsType = this.parseType();
+        // Additional parent classes (mixins) - skip for now
+        while (this.match(",")) {
+          this.parseType();
+        }
+      }
+      this.consume(")", "Expected ')' after parent classes");
+    }
+
+    // Parse extends clause
+    if (!extendsType && this.match("extends")) {
       extendsType = this.parseType();
     }
 
@@ -8795,7 +8825,7 @@ export class Parser {
     const op = token.value;
     return op === "!" || op === "~" || op === "+" || op === "-" ||
            op === "typeof" || op === "void" || op === "delete" ||
-           op === "await" || op === "++" || op === "--" || op === "&" || op === "*";
+           op === "await" || op === "++" || op === "--" || op === "&" || op === "*" || op === "**";
   }
   
   // Utility methods
