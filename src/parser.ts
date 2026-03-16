@@ -2930,8 +2930,22 @@ export class Parser {
 
     // Check if this is a Ruby-style def
     const isRubyDef = declKeywordValue === "def";
-    
-    const name = this.parseIdentifier();
+
+    // Ruby/C++ operator overload: def +(other), operator+(...)
+    let name: AST.Identifier;
+    const isOperatorName = isRubyDef && this.peek().type === TokenType.Operator &&
+      ["+", "-", "*", "/", "%", "==", "!=", "<", ">", "<=", ">=", "<<", ">>",
+       "[]", "[]=", "<=>", "**", "&", "|", "^", "~", "!"].includes(this.peek().value);
+    if (isOperatorName) {
+      const opToken = this.advance();
+      name = {
+        kind: "Identifier",
+        name: opToken.value,
+        span: this.createSpanFrom(opToken)
+      };
+    } else {
+      name = this.parseIdentifier();
+    }
     
     // Parse generic parameters if present
     let genericParams: AST.Identifier[] | undefined;
@@ -4870,10 +4884,17 @@ export class Parser {
     // C#/Java-style: using (Type var = expr) { ... }
     const hasParen = this.match("(");
 
-    // Inside using (...), check for typed declaration: Type Name = Expr
-    if (hasParen && this.peek().type === TokenType.Identifier && this.peekAt(1)?.type === TokenType.Identifier) {
-      // Parse as: Type Name = Expr (e.g., StreamReader sr = new StreamReader("file"))
-      const typeName = this.parseExpression(); // parse the type (may include generics)
+    // Inside using (...), check for typed declaration: Type Name = Expr or var Name = Expr
+    const isUsingDecl = hasParen && (
+      // Type Name = Expr pattern (e.g., StreamReader sr = new StreamReader("file"))
+      (this.peek().type === TokenType.Identifier && this.peekAt(1)?.type === TokenType.Identifier) ||
+      // var/let/const Name = Expr pattern (e.g., var response = await ...)
+      ((this.peek().value === "var" || this.peek().value === "let" || this.peek().value === "const") &&
+       this.peekAt(1)?.type === TokenType.Identifier)
+    );
+    if (isUsingDecl) {
+      // Skip var/let/const or type name
+      const firstToken = this.advance();
       const varName = this.parseIdentifier();
       this.consume("=", "Expected '=' in using declaration");
       const value = this.parseExpression();
@@ -5050,7 +5071,7 @@ export class Parser {
     const start = this.current - 1;
     const values: AST.Expr[] = [];
     
-    if (!this.checkSemicolon() && !this.isAtEnd()) {
+    if (!this.checkSemicolon() && !this.isAtEnd() && !this.check("}")) {
       values.push(...this.parseExpressionList());
     }
     
@@ -6078,7 +6099,30 @@ export class Parser {
           members.push(method as any);
           continue;
         }
-        
+
+        // Handle C++/C# operator overloads: operator+(args) { ... }
+        if (this.peek().value === "operator" && this.peekNext()?.type === TokenType.Operator) {
+          this.advance(); // consume 'operator'
+          const opToken = this.advance(); // consume the operator symbol
+          const opName: AST.Identifier = {
+            kind: "Identifier",
+            name: "operator" + opToken.value,
+            span: this.createSpanFrom(opToken)
+          };
+          // Skip optional `const` qualifier after params (C++ const methods)
+          const params = this.parseParameterList();
+          if (this.peek().value === "const") this.advance();
+          const body = this.parseBlock();
+          members.push({
+            kind: "Method",
+            name: opName,
+            params,
+            body,
+            span: this.createSpan(memberStart, this.current - 1)
+          } as any);
+          continue;
+        }
+
         // Handle async functions
         if (this.match("async")) {
           // Check if followed by function keyword
@@ -6270,6 +6314,32 @@ export class Parser {
             static: true,
             span: this.createSpan(memberStart, this.current - 1)
           } as any);
+          continue;
+        }
+
+        // Handle C#-style operator overloads after modifiers: public static Vec operator +(...)
+        // At this point modifiers have been consumed; check for optional return type + operator keyword
+        if (this.peek().value === "operator" && this.peekNext()?.type === TokenType.Operator) {
+          this.advance(); // consume 'operator'
+          const opToken = this.advance(); // consume the operator symbol
+          const opName: AST.Identifier = {
+            kind: "Identifier",
+            name: "operator" + opToken.value,
+            span: this.createSpanFrom(opToken)
+          };
+          const params = this.parseParameterList();
+          if (this.peek().value === "const") this.advance();
+          const body = this.parseBlock();
+          const member: any = {
+            kind: "Method",
+            name: opName,
+            params,
+            body,
+            static: isStatic,
+            visibility,
+            span: this.createSpan(memberStart, this.current - 1)
+          };
+          members.push(member);
           continue;
         }
 
@@ -7704,17 +7774,39 @@ export class Parser {
           // This is likely an object literal with keyword property
           // Skip the comprehension check
         } else {
+          const errorCheckpoint = this.errors.length;
           const firstExpr = this.parseAssignmentExpression();
-          
+
           // Check for set comprehension: {expr for var in iterable}
           if (this.check("for")) {
             return this.parseSetComprehension(firstExpr, start);
+          }
+
+          // Check for set literal: {expr, expr, ...} or {expr}
+          // A set is detected when the first element is NOT followed by ':'
+          // (which would indicate an object literal key:value pair)
+          if (this.check(",") || this.check("}")) {
+            // This looks like a set literal, not an object
+            const elements: AST.Expr[] = [firstExpr];
+            while (this.match(",")) {
+              while (this.peek().virtualSemi) this.advance();
+              if (this.check("}")) break;
+              elements.push(this.parseAssignmentExpression());
+            }
+            this.consume("}", "Expected '}' after set literal");
+            // Restore errors from speculative parsing
+            this.errors.length = errorCheckpoint;
+            return {
+              kind: "SetLiteral",
+              elements,
+              span: this.createSpan(start, this.current - 1)
+            };
           }
         }
       } catch {
         // Failed to parse as expression, continue as object literal
       }
-      
+
       // Reset for regular object/dict parsing
       this.current = checkpoint;
       
