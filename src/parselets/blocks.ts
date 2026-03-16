@@ -235,13 +235,26 @@ export function parseCaseEsac(host: BlockHost, start: number, discriminant: AST.
     // Check for default case (*)
     if (host.match("*")) {
       host.consume(")", "Expected ')' after case pattern");
-      
+
       // Parse case body — stop at ;;, esac, or new pattern followed by )
       const statements: (AST.Decl | AST.Stmt)[] = [];
-      while (!host.check(";;") && !host.check("esac") && !host.isAtEnd()) {
+      while (!host.isAtEnd()) {
+        while (host.peek().virtualSemi) host.advance();
+        if (host.check(";;") || host.check("esac")) break;
         if (isNewCaseArm(host)) break;
-        const stmt = host.parseTopLevel();
-        if (stmt) statements.push(stmt);
+        const beforePos = host.current;
+        try {
+          const stmt = host.parseTopLevel();
+          if (stmt) statements.push(stmt);
+        } catch (error) {
+          if (error instanceof ParseError) {
+            host.errors.push(error);
+            host.synchronize();
+          } else {
+            throw error;
+          }
+        }
+        if (host.current === beforePos) host.advance();
       }
 
       const body: AST.Block = {
@@ -273,11 +286,24 @@ export function parseCaseEsac(host: BlockHost, start: number, discriminant: AST.
 
       // Parse case body — stop at ;;, esac, or new pattern followed by )
       const statements: (AST.Decl | AST.Stmt)[] = [];
-      while (!host.check(";;") && !host.check("esac") && !host.isAtEnd()) {
+      while (!host.isAtEnd()) {
+        while (host.peek().virtualSemi) host.advance();
+        if (host.check(";;") || host.check("esac")) break;
         // Detect start of a new case arm (implicit arm boundary without ;;)
         if (isNewCaseArm(host)) break;
-        const stmt = host.parseTopLevel();
-        if (stmt) statements.push(stmt);
+        const beforePos = host.current;
+        try {
+          const stmt = host.parseTopLevel();
+          if (stmt) statements.push(stmt);
+        } catch (error) {
+          if (error instanceof ParseError) {
+            host.errors.push(error);
+            host.synchronize();
+          } else {
+            throw error;
+          }
+        }
+        if (host.current === beforePos) host.advance();
       }
 
       const body: AST.Block = {
@@ -407,8 +433,11 @@ export function parseIfThenBlock(host: BlockHost, ): AST.Block {
   const start = host.current;
   const statements: (AST.Decl | AST.Stmt)[] = [];
   
-  while (!host.check("fi") && !host.check("elif") && !host.check("elseif") && 
-         !host.check("else") && !host.isAtEnd()) {
+  while (!host.isAtEnd()) {
+    // Skip virtual semicolons before checking terminators
+    while (host.peek().virtualSemi) host.advance();
+    if (host.check("fi") || host.check("elif") || host.check("elseif") ||
+        host.check("else") || host.isAtEnd()) break;
     const beforePos = host.current;
     try {
       const stmt = host.parseTopLevel();
