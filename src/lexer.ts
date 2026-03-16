@@ -1,4 +1,5 @@
 import { ContextTracker } from './lexer-context';
+import { applyMASI } from './lexer-masi';
 
 export enum TokenType {
   // Literals
@@ -99,8 +100,8 @@ export class Lexer {
     this.addToken(TokenType.EOF, '', this.position, this.position);
     
     // Apply MASI (Max-Accept Semicolon Insertion)
-    this.applyMASI();
-    
+    this.tokens = applyMASI(this.tokens);
+
     return this.tokens;
   }
   
@@ -915,134 +916,7 @@ export class Lexer {
     return keywords.includes(value);
   }
   
-  private applyMASI(): void {
-    const result: Token[] = [];
-    let jsxDepth = 0;
-    let braceDepth = 0;
-    
-    for (let i = 0; i < this.tokens.length; i++) {
-      const token = this.tokens[i];
-      result.push(token);
-      
-      // Track JSX context
-      if (token.value === '<' && i + 1 < this.tokens.length) {
-        const next = this.tokens[i + 1];
-        // Check if this looks like JSX: < followed by identifier, /, or > (fragment)
-        if (next.type === TokenType.Identifier || 
-            next.value === '>' ||  // Fragment <>
-            (next.value === '/' && i + 2 < this.tokens.length && 
-             (this.tokens[i + 2].type === TokenType.Identifier || this.tokens[i + 2].value === '>'))) {
-          jsxDepth++;
-        }
-      } else if (token.value === '>' && jsxDepth > 0) {
-        // Check if this is a self-closing tag />
-        if (i > 0 && this.tokens[i - 1].value === '/') {
-          jsxDepth--;
-        } else if (i > 2 && this.tokens[i - 2].value === '<' && this.tokens[i - 1].value === '/') {
-          // Closing tag </...>
-          jsxDepth--;
-        } else {
-          // Opening tag end
-          // Don't decrement for opening tags
-        }
-      } else if (token.value === '{' && jsxDepth > 0) {
-        braceDepth++;
-      } else if (token.value === '}' && jsxDepth > 0 && braceDepth > 0) {
-        braceDepth--;
-      }
-      
-      // Check if we should insert virtual semicolon after this token
-      if (i < this.tokens.length - 1) {
-        const nextToken = this.tokens[i + 1];
-        
-        // Check if there's a line break between tokens
-        // Use end line of token, not start line, for multi-line tokens (e.g. triple-quoted strings)
-        let tokenEndLine = token.line;
-        if (token.value && token.value.includes('\n')) {
-          tokenEndLine = token.line + (token.value.match(/\n/g) || []).length;
-        }
-        if (nextToken.line > tokenEndLine) {
-          // Suppress virtual semicolons in JSX context
-          // This includes when we're inside JSX elements or when closing a JSX expression
-          const inJSXContext = jsxDepth > 0;
-          
-          // Also suppress after } if we're still within JSX (even at depth 0 of expressions)
-          const isJSXExpressionClose = token.value === '}' && braceDepth >= 0 && jsxDepth > 0;
-          
-          // Check MASI rules (pass previous token for context)
-          const prevToken = i > 0 ? this.tokens[i - 1] : null;
-          if (!this.shouldSuppressVirtualSemi(token, nextToken, inJSXContext || isJSXExpressionClose, prevToken)) {
-            const virtualSemi: Token = {
-              type: TokenType.VirtualSemi,
-              value: ';',
-              start: token.end,
-              end: token.end,
-              line: token.line,
-              column: token.column + token.value.length,
-              virtualSemi: true
-            };
-            result.push(virtualSemi);
-          }
-        }
-      }
-    }
-    
-    this.tokens = result;
-  }
-  
-  private shouldSuppressVirtualSemi(current: Token, next: Token, inJSX: boolean = false, prev: Token | null = null): boolean {
-    // Special case: Some keywords should always have a virtual semicolon after them
-    // when they appear alone on a line (no expression following on same line)
-    // This takes precedence even over JSX context since these keywords can't appear in JSX expressions
-    const alwaysTerminateKeywords = ['return', 'break', 'continue', 'throw', 'yield'];
-    if (current.type === TokenType.Keyword && alwaysTerminateKeywords.includes(current.value)) {
-      // These keywords alone on a line always get a virtual semicolon
-      return false;
-    }
-    
-    // Rule 0: Never insert virtual semicolons inside JSX content
-    if (inJSX) {
-      return true;
-    }
-    
-    // Rule 1: line's last non-space character is one of .,:;+-*/%&|^<>=!~?([{`
-    // Special case: ? after ) or ] is likely the try operator, not ternary start
-    if (current.value === '?' && prev && (prev.value === ')' || prev.value === ']')) {
-      // This is likely the try operator (error propagation) - insert virtual semicolon
-      return false;
-    }
-    
-    const suppressChars = ['.', ',', ':', ';', '+', '-', '*', '/', '%', '&', '|', '^', '<', '>', '=', '!', '~', '?', '(', '[', '{', '`'];
-    if (suppressChars.includes(current.value)) {
-      return true;
-    }
-    
-    // Rule 2: Next line starts with operator that continues expression
-    // Check for operators like ?., |>, .., ::, etc.
-    const continuationOps = ['?.', '|>', '..', '::', '||', '&&', '??', '->'];
-    if (continuationOps.includes(next.value)) {
-      return true;
-    }
-    
-    // Also check single character operators that commonly continue lines
-    const singleCharContinuation = ['.', '?', '|', '&', '+', '-', '*', '/', '%', '^'];
-    if (singleCharContinuation.includes(next.value)) {
-      return true;
-    }
-    
-    // Rule 3: current ()[]{}  depth > 0 (simplified - would need proper tracking)
-    // This is a simplification - real implementation would track depth
-    
-    // Rule 4: next line is strictly more indented
-    // Compare next line's indentation with current line's indentation
-    if (next.indentCol !== undefined && current.indentCol !== undefined) {
-      if (next.indentCol > current.indentCol) {
-        return true;
-      }
-    }
-    
-    return false;
-  }
+  // MASI extracted to src/lexer-masi.ts
   
   // Helper methods
   private skipShebang(): void {
