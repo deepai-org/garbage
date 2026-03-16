@@ -9,16 +9,42 @@
 import { Token, TokenType } from './lexer';
 import * as LS from './lex-state';
 
+/**
+ * ScanHost — the interface scanner functions use to interact with the cursor.
+ * Exposed so extracted scanner modules can read/write position state.
+ */
+export interface ScanHost {
+  source: string;
+  position: number;
+  line: number;
+  column: number;
+  tokens: Token[];
+  lastNonWSToken: Token | null;
+  currentIndent: number;
+  lineStart: boolean;
+  state: LS.LexState;
+  advance(): string;
+  peek(): string;
+  peekNext(): string;
+  peekAt(offset: number): string;
+  isAtEnd(): boolean;
+  peekIdentifier(): string;
+  peekPastGenericParams(startPos: number): number;
+  peekNextNonWhitespace(): string;
+  addToken(type: TokenType, value: string, start: number, end: number): void;
+  addTokenEx(type: TokenType, value: string, start: number, end: number, line: number, column: number): void;
+}
+
 export class LexerCursor {
-  protected source: string;
-  protected position = 0;
-  protected line = 1;
-  protected column = 1;
-  protected tokens: Token[] = [];
-  protected lastNonWSToken: Token | null = null;
-  protected currentIndent = 0;
-  protected lineStart = true;
-  protected state: LS.LexState;
+  source: string;
+  position = 0;
+  line = 1;
+  column = 1;
+  tokens: Token[] = [];
+  lastNonWSToken: Token | null = null;
+  currentIndent = 0;
+  lineStart = true;
+  state: LS.LexState;
 
   constructor(source: string) {
     this.source = source;

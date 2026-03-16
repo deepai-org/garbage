@@ -1,7 +1,10 @@
 import { applyMASI } from './lexer-masi';
 import * as LS from './lex-state';
-import { OPERATOR_TRIE } from './operator-trie';
 import { LexerCursor } from './lexer-cursor';
+import { skipShebang, skipLineComment, skipBlockComment, skipHTMLComment } from './lexer-comments';
+import { scanPrefixedString, scanTemplateLiteral, scanNumber, scanHeredoc, scanRegex } from './lexer-literals';
+import { scanIdentifier, scanSigilIdentifier, isKeyword } from './lexer-identifiers';
+import { scanOperator, shouldBeRegex } from './lexer-operators';
 
 export enum TokenType {
   // Literals
@@ -58,7 +61,7 @@ export interface Token {
 
 export class Lexer extends LexerCursor {
   // HTML tag names for JSX detection per spec
-  private readonly htmlTags = new Set([
+  readonly htmlTags = new Set([
     'div', 'span', 'p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'li',
     'a', 'img', 'input', 'button', 'form', 'section', 'article', 'header', 'footer',
     'nav', 'main', 'aside', 'table', 'tr', 'td', 'th', 'tbody', 'thead', 'tfoot',
@@ -77,22 +80,22 @@ export class Lexer extends LexerCursor {
   tokenize(): Token[] {
     // Skip shebang if present
     if (this.source.startsWith('#!')) {
-      this.skipShebang();
+      skipShebang(this);
     }
-    
+
     while (this.position < this.source.length) {
       this.scanToken();
     }
-    
+
     // Add EOF token
     this.addToken(TokenType.EOF, '', this.position, this.position);
-    
+
     // Apply MASI (Max-Accept Semicolon Insertion)
     this.tokens = applyMASI(this.tokens);
 
     return this.tokens;
   }
-  
+
   private scanToken(): void {
     const start = this.position;
     const startLine = this.line;
@@ -105,32 +108,31 @@ export class Lexer extends LexerCursor {
     
     // Comments
     if (char === '/' && this.peek() === '/') {
-      this.skipLineComment();
+      skipLineComment(this);
       return;
     }
-    
+
     if (char === '/' && this.peek() === '*') {
-      this.skipBlockComment();
+      skipBlockComment(this);
       return;
     }
-    
+
     // Hash comments (Python/Ruby style)
     if (char === '#') {
-      // Check if it's a shebang (at position 1) or regular comment
-      this.skipLineComment();
+      skipLineComment(this);
       return;
     }
-    
+
     // Double-dash comments
-    if (char === '-' && this.peek() === '-' && 
+    if (char === '-' && this.peek() === '-' &&
         (this.position === 1 || /\s/.test(this.source[this.position - 2]))) {
       this.advance(); // consume second -
-      this.skipLineComment();
+      skipLineComment(this);
       return;
     }
-    
+
     if (char === '<' && this.peek() === '!' && this.peekNext() === '-' && this.peekAt(2) === '-') {
-      this.skipHTMLComment();
+      skipHTMLComment(this);
       return;
     }
     
@@ -202,40 +204,40 @@ export class Lexer extends LexerCursor {
       const next = this.peek();
       if (next === '"' || next === "'") {
         this.position--; // Back up to include prefix
-        this.scanPrefixedString();
+        scanPrefixedString(this);
         return;
       }
     }
-    
+
     // C# verbatim strings (@"") or C# interpolated strings ($"")
     if ((char === '@' || char === '$') && this.peek() === '"') {
-      this.position--; // Back up 
-      this.scanPrefixedString();
+      this.position--; // Back up
+      scanPrefixedString(this);
       return;
     }
-    
+
     // String literals
     if (char === '"' || char === "'") {
       this.position--; // Back up
-      this.scanPrefixedString();
+      scanPrefixedString(this);
       return;
     }
-    
+
     // Template literals
     if (char === '`') {
-      this.scanTemplateLiteral();
+      scanTemplateLiteral(this);
       return;
     }
-    
+
     // Numbers
     if (/\d/.test(char)) {
-      this.scanNumber();
+      scanNumber(this);
       return;
     }
-    
+
     // Identifiers and keywords
     if (/[a-zA-Z_]/.test(char)) {
-      this.scanIdentifier();
+      scanIdentifier(this);
       return;
     }
     
@@ -243,7 +245,7 @@ export class Lexer extends LexerCursor {
     if (char === '$') {
       const next = this.peek();
       if (/[a-zA-Z_]/.test(next)) {
-        this.scanSigilIdentifier();
+        scanSigilIdentifier(this);
         return;
       }
       // Bash special variables: $?, $!, $#, $@, $$, $0-$9
@@ -298,654 +300,25 @@ export class Lexer extends LexerCursor {
       // Only treat as heredoc if followed by uppercase letter (common convention)
       if (nextChar && /[A-Z]/.test(nextChar)) {
         this.advance(); // consume second '<'
-        this.scanHeredoc();
+        if (scanHeredoc(this)) return;
+        // No delimiter found — fall through to operator scan
+        scanOperator(this, this.htmlTags);
         return;
       }
     }
     
     // Regex or division
     if (char === '/') {
-      if (this.shouldBeRegex()) {
-        this.scanRegex();
+      if (shouldBeRegex(this)) {
+        scanRegex(this);
       } else {
-        this.scanOperator();
+        scanOperator(this, this.htmlTags);
       }
       return;
     }
-    
-    // Operators and punctuators
-    this.scanOperator();
-  }
-  
-  private scanHeredoc(): void {
-    const start = this.position - 2; // Account for '<<' already consumed
-    const startLine = this.line;
-    const startColumn = this.column - 2;
-    
-    // Read the delimiter (max 20 chars for safety)
-    let delimiter = '';
-    let delimiterCount = 0;
-    while (!this.isAtEnd() && /[A-Z_0-9]/i.test(this.peek()) && delimiterCount < 20) {
-      delimiter += this.advance();
-      delimiterCount++;
-    }
-    
-    if (delimiter === '') {
-      // No delimiter found, treat as operator
-      this.position = start + 2; // Position after <<
-      this.scanOperator();
-      return;
-    }
-    
-    // Skip to next line
-    while (!this.isAtEnd() && this.peek() !== '\n') {
-      this.advance();
-    }
-    if (this.peek() === '\n') {
-      this.advance();
-      this.line++;
-      this.column = 0;
-    }
-    
-    // Collect heredoc content until we find delimiter on its own line
-    let content = '';
-    let currentLine = '';
-    let linesRead = 0;
-    const maxLines = 1000; // Safety limit
-    
-    while (!this.isAtEnd() && linesRead < maxLines) {
-      const char = this.peek();
-      
-      if (char === '\n') {
-        // Check if current line is the delimiter
-        if (currentLine.trim() === delimiter) {
-          // Found end delimiter
-          break;
-        }
-        // Add line to content
-        content += currentLine + '\n';
-        currentLine = '';
-        linesRead++;
-        this.advance();
-        this.line++;
-        this.column = 0;
-      } else {
-        currentLine += char;
-        this.advance();
-      }
-    }
-    
-    // Check final line
-    if (currentLine.trim() === delimiter) {
-      // Consume the delimiter line
-      while (!this.isAtEnd() && this.peek() !== '\n') {
-        this.advance();
-      }
-    }
-    
-    // Create the heredoc token
-    const heredocValue = `<<${delimiter}\n${content}${delimiter}`;
-    this.addTokenEx(TokenType.StringLiteral, heredocValue, start, this.position, startLine, startColumn);
-  }
-  
-  private scanPrefixedString(): void {
-    const start = this.position;
-    const startLine = this.line;
-    const startColumn = this.column;
-    
-    // Collect prefixes - support f, r, b, u, br, rb combinations, plus @ and $
-    let prefixes = '';
-    while (/[rbfuRBFU@$]/.test(this.peek())) {
-      prefixes += this.advance();
-    }
-    
-    const quote = this.advance();
-    if (quote !== '"' && quote !== "'") {
-      // Not a string, backtrack
-      this.position = start;
-      this.scanIdentifier();
-      return;
-    }
-    
-    // Check for triple quotes
-    let isTriple = false;
-    if (this.peek() === quote && this.peekNext() === quote) {
-      isTriple = true;
-      this.advance();
-      this.advance();
-    }
-    
-    let value = prefixes + quote;
-    if (isTriple) value += quote + quote;
-    
-    while (!this.isAtEnd()) {
-      if (isTriple) {
-        if (this.peek() === quote && this.peekNext() === quote && this.peekAt(2) === quote) {
-          value += this.advance() + this.advance() + this.advance();
-          break;
-        }
-      } else {
-        if (this.peek() === quote) {
-          // Count consecutive backslashes before the quote
-          let backslashCount = 0;
-          let checkPos = this.position - 1;
-          while (checkPos >= 0 && this.source[checkPos] === '\\') {
-            backslashCount++;
-            checkPos--;
-          }
-          // If even number of backslashes (including 0), the quote is not escaped
-          if (backslashCount % 2 === 0) {
-            value += this.advance();
-            break;
-          }
-        }
-      }
-      
-      if (this.peek() === '\n') {
-        if (!isTriple) {
-          // Error: unterminated string
-          break;
-        }
-        this.line++;
-        this.column = 1;
-      }
-      
-      value += this.advance();
-    }
-    
-    this.addTokenEx(TokenType.StringLiteral, value, start, this.position, startLine, startColumn);
-  }
-  
-  private scanString(quote: string): void {
-    const start = this.position - 1;
-    const startLine = this.line;
-    const startColumn = this.column - 1;
-    
-    // Check for triple quotes
-    let isTriple = false;
-    if (this.peek() === quote && this.peekNext() === quote) {
-      isTriple = true;
-      this.advance();
-      this.advance();
-    }
-    
-    let value = quote;
-    if (isTriple) value += quote + quote;
-    
-    while (!this.isAtEnd()) {
-      if (isTriple) {
-        if (this.peek() === quote && this.peekNext() === quote && this.peekAt(2) === quote) {
-          value += this.advance() + this.advance() + this.advance();
-          break;
-        }
-      } else {
-        if (this.peek() === quote) {
-          // Count consecutive backslashes before the quote
-          let backslashCount = 0;
-          let checkPos = this.position - 1;
-          while (checkPos >= 0 && this.source[checkPos] === '\\') {
-            backslashCount++;
-            checkPos--;
-          }
-          // If even number of backslashes (including 0), the quote is not escaped
-          if (backslashCount % 2 === 0) {
-            value += this.advance();
-            break;
-          }
-        }
-      }
-      
-      if (this.peek() === '\n') {
-        if (!isTriple) {
-          // Error: unterminated string
-          break;
-        }
-        this.line++;
-        this.column = 1;
-      }
-      
-      value += this.advance();
-    }
-    
-    this.addTokenEx(TokenType.StringLiteral, value, start, this.position, startLine, startColumn);
-  }
-  
-  private scanTemplateLiteral(): void {
-    const start = this.position - 1;
-    const startLine = this.line;
-    const startColumn = this.column - 1;
-    let value = '`';
-    
-    while (!this.isAtEnd() && this.peek() !== '`') {
-      if (this.peek() === '\\') {
-        value += this.advance();
-        if (!this.isAtEnd()) {
-          value += this.advance();
-        }
-      } else if (this.peek() === '$' && this.peekNext() === '{') {
-        // Handle template expression
-        value += this.advance() + this.advance();
-        let depth = 1;
-        while (!this.isAtEnd() && depth > 0) {
-          const char = this.advance();
-          value += char;
-          if (char === '{') depth++;
-          else if (char === '}') depth--;
-        }
-      } else {
-        if (this.peek() === '\n') {
-          this.line++;
-          this.column = 0;
-        }
-        value += this.advance();
-      }
-    }
-    
-    if (this.peek() === '`') {
-      value += this.advance();
-    }
-    
-    this.addTokenEx(TokenType.TemplateLiteral, value, start, this.position, startLine, startColumn);
-  }
-  
-  private scanNumber(): void {
-    const start = this.position - 1;
-    const startLine = this.line;
-    const startColumn = this.column - 1;
-    let value = this.source[start];
-    
-    // Check for hex, octal, binary
-    if (value === '0') {
-      const next = this.peek();
-      if (next === 'x' || next === 'X') {
-        value += this.advance();
-        while (/[0-9a-fA-F_]/.test(this.peek())) {
-          value += this.advance();
-        }
-      } else if (next === 'o' || next === 'O') {
-        value += this.advance();
-        while (/[0-7_]/.test(this.peek())) {
-          value += this.advance();
-        }
-      } else if (next === 'b' || next === 'B') {
-        value += this.advance();
-        while (/[01_]/.test(this.peek())) {
-          value += this.advance();
-        }
-      }
-    }
-    
-    // Decimal number
-    while (/[\d_]/.test(this.peek())) {
-      value += this.advance();
-    }
-    
-    // Float
-    if (this.peek() === '.' && /\d/.test(this.peekNext())) {
-      value += this.advance();
-      while (/[\d_]/.test(this.peek())) {
-        value += this.advance();
-      }
-    }
-    
-    // Exponent
-    if (/[eE]/.test(this.peek())) {
-      value += this.advance();
-      if (/[+-]/.test(this.peek())) {
-        value += this.advance();
-      }
-      while (/\d/.test(this.peek())) {
-        value += this.advance();
-      }
-    }
-    
-    // Suffix
-    if (/[nulfiULFI]/.test(this.peek())) {
-      while (/[a-zA-Z0-9]/.test(this.peek())) {
-        value += this.advance();
-      }
-    }
-    
-    this.addTokenEx(TokenType.NumericLiteral, value, start, this.position, startLine, startColumn);
-  }
-  
-  private scanIdentifier(): void {
-    const start = this.position - 1;
-    const startLine = this.line;
-    const startColumn = this.column - 1;
-    let value = this.source[start];
-    
-    while (/[a-zA-Z0-9_]/.test(this.peek())) {
-      value += this.advance();
-    }
-    
-    // In MemberAccess mode, all keywords become identifiers
-    let type: TokenType;
-    if (this.state.memberAccess) {
-      type = TokenType.Identifier;
-      this.state.memberAccess = false;
-    } else if (this.state.decorator) {
-      type = TokenType.Identifier;
-      this.state.decorator = false;
-    } else {
-      type = this.isKeyword(value) ? TokenType.Keyword : TokenType.Identifier;
-    }
-    
-    this.addTokenEx(type, value, start, this.position, startLine, startColumn);
-  }
-  
-  private scanSigilIdentifier(): void {
-    const start = this.position - 1;
-    const startLine = this.line;
-    const startColumn = this.column - 1;
-    let value = '$';
-    
-    while (/[a-zA-Z0-9_]/.test(this.peek())) {
-      value += this.advance();
-    }
-    
-    this.addTokenEx(TokenType.SigilIdentifier, value, start, this.position, startLine, startColumn);
-  }
-  
-  private scanRegex(): void {
-    const start = this.position - 1;
-    const startLine = this.line;
-    const startColumn = this.column - 1;
-    let value = '/';
-    
-    while (!this.isAtEnd() && this.peek() !== '/') {
-      if (this.peek() === '\\') {
-        value += this.advance();
-        if (!this.isAtEnd()) {
-          value += this.advance();
-        }
-      } else if (this.peek() === '\n') {
-        // Error: unterminated regex
-        break;
-      } else {
-        value += this.advance();
-      }
-    }
-    
-    if (this.peek() === '/') {
-      value += this.advance();
-      
-      // Flags
-      while (/[gimsuy]/.test(this.peek())) {
-        value += this.advance();
-      }
-    }
-    
-    this.addTokenEx(TokenType.RegexLiteral, value, start, this.position, startLine, startColumn);
-  }
-  
-  private scanOperator(): void {
-    const start = this.position - 1;
-    const startLine = this.line;
-    const startColumn = this.column - 1;
-    let value = this.source[start];
-    
-    // Handle JSX context detection for '<' and '>' per spec 10.6
-    if (value === '<') {
-      const nextChar = this.peek();
-      
-      if (nextChar === '/') {
-        // JSX closing tag </tagname> - per spec
-        if (LS.isInJSXText(this.state)) {
-          LS.exitJSXText(this.state);
-        }
-        this.state.inJSXClosingTag = true;
-        LS.enterJSX(this.state);
-        // Emit JSXTagStart for closing tags too
-        this.addTokenEx(TokenType.JSXTagStart, '<', start, this.position, startLine, startColumn);
-        return;
-      } else if (nextChar === '>') {
-        // JSX Fragment <> - per spec
-        if (LS.canBeJSX(this.state)) {
-          this.addTokenEx(TokenType.JSXTagStart, '<', start, this.position, startLine, startColumn);
-          LS.enterJSX(this.state);
-          LS.enterJSXText(this.state);
-          return;
-        }
-      } else if (nextChar && /[A-Z]/.test(nextChar)) {
-        // Capital letter → JSX Component - per spec
-        if (LS.canBeJSX(this.state)) {
-          // Look ahead to check if this is really JSX or a generic type
-          const identifier = this.peekIdentifier();
-          const posAfterIdentifier = this.position + identifier.length;
-          const charAfterIdentifier = this.source[posAfterIdentifier];
-          
-          // If followed by '<', need to look past generic params to determine if JSX
-          if (charAfterIdentifier === '<') {
-            const posAfterGeneric = this.peekPastGenericParams(posAfterIdentifier);
-            const afterGeneric = this.source[posAfterGeneric];
-            
-            // Check for JSX patterns after generic params
-            // JSX: <Component<T> />, <Component<T> attr=, <Component<T>>content
-            // Not JSX: <Result<Vec<T>, Error>>{} (type assertion)
-            // If we see >> after generics, it's likely a type assertion with object literal
-            if (afterGeneric === '>' && this.source[posAfterGeneric + 1] === '{') {
-              // This looks like <Type<...>>{ - type assertion with object literal
-              // Don't treat as JSX
-            } else if (afterGeneric === ' ' || afterGeneric === '/' || afterGeneric === '>' ||
-                (afterGeneric && /[a-zA-Z_]/.test(afterGeneric))) {
-              // This is JSX! Create JSXTagStart token instead of operator
-              this.addTokenEx(TokenType.JSXTagStart, '<', start, this.position, startLine, startColumn);
-              LS.enterJSX(this.state);
-              return; // Don't continue with operator processing
-            }
-            // Else it's a generic type, continue with operator processing
-          } else {
-            // Not followed by '<', so it's regular JSX
-            this.addTokenEx(TokenType.JSXTagStart, '<', start, this.position, startLine, startColumn);
-            LS.enterJSX(this.state);
-            return; // Don't continue with operator processing
-          }
-        }
-      } else if (nextChar && /[a-z]/.test(nextChar)) {
-        // Lowercase identifier → potential HTML element - per spec
-        if (LS.canBeJSX(this.state)) {
-          // Look ahead to see if this is a valid HTML tag name
-          const tagName = this.peekIdentifier();
-          if (this.isHTMLTag(tagName)) {
-            // Additional check: if followed by '<', need to look past generic params
-            const posAfterTag = this.position + tagName.length;
-            const charAfterTag = this.source[posAfterTag];
-            
-            if (charAfterTag === '<') {
-              // HTML elements shouldn't have generic params, but check anyway
-              const posAfterGeneric = this.peekPastGenericParams(posAfterTag);
-              const afterGeneric = this.source[posAfterGeneric];
-              
-              if (afterGeneric === ' ' || afterGeneric === '/' || afterGeneric === '>' ||
-                  (afterGeneric && /[a-zA-Z_]/.test(afterGeneric))) {
-                this.addTokenEx(TokenType.JSXTagStart, '<', start, this.position, startLine, startColumn);
-                LS.enterJSX(this.state);
-                return;
-              }
-            } else {
-              this.addTokenEx(TokenType.JSXTagStart, '<', start, this.position, startLine, startColumn);
-              LS.enterJSX(this.state);
-              return;
-            }
-          }
-        }
-      }
-    } else if (value === '>' && LS.isInJSX(this.state)) {
-      // Handle JSX tag completion
-      if (this.state.inJSXClosingTag) {
-        // This is the end of closing tag like </div> - exit JSX entirely
-        LS.exitJSX(this.state);
-      } else {
-        const prevChar = this.position > 1 ? this.source[this.position - 2] : '';
-        if (prevChar === '/') {
-          // Self-closing element like <Component />
-          LS.exitJSX(this.state);
-        } else {
-          // Opening tag completed, enter JSX text
-          LS.enterJSXText(this.state);
-        }
-      }
-    } else if (value === '{' && LS.isInJSX(this.state)) {
-      // Entering JSX expression container
-      LS.enterJSXExpression(this.state);
-    } else if (value === '}' && this.state.inJSXExpression) {
-      // Exiting JSX expression container
-      LS.exitJSXExpression(this.state);
-    }
-    
-    // Handle mode transitions
-    if (value === '.' && this.peek() !== '.' && this.peek() !== '*') {
-      // After single dot (not .. or .*), push MemberAccess mode
-      this.state.memberAccess = true;
-    } else if (value === '?' && this.peek() === '.') {
-      // After ?. optional chaining, also push MemberAccess mode
-      // Note: We'll handle the full ?. operator below, but set the mode now
-      this.state.memberAccess = true;
-    } else if (value === '[' && !this.state.memberAccess && !this.state.decorator && !this.state.bashCondition) {
-      // Check if this might be a bash conditional
-      // Look for patterns like [ $var, [ "test", [ -f, [ !
-      const nextNonWs = this.peekNextNonWhitespace();
-      if (nextNonWs === '$' || nextNonWs === '"' || nextNonWs === '`' || 
-          nextNonWs === '-' || nextNonWs === '!') {
-        this.state.bashCondition = true;
-        this.state.bashBracketDepth = 1;
-      }
-    } else if (value === ']' && this.state.bashCondition) {
-      this.state.bashBracketDepth--;
-      if (this.state.bashBracketDepth === 0) {
-        this.state.bashCondition = false;
-      }
-    } else if (value === '@' && !this.state.memberAccess && !this.state.decorator && !this.state.bashCondition) {
-      // Check if this is a decorator (@identifier) or verbatim string (@")
-      const next = this.peek();
-      if (/[a-zA-Z_]/.test(next)) {
-        // After @, if followed by identifier, push Decorator mode
-        this.state.decorator = true;
-      }
-      // Otherwise it might be a C# verbatim string, handled elsewhere
-    }
-    
-    // Longest-match via trie
-    value = OPERATOR_TRIE.longestMatch(this.source, start);
-    this.position = start + value.length;
-    this.column = startColumn + value.length;
 
-    this.addTokenEx(TokenType.Operator, value, start, this.position, startLine, startColumn);
-  }
-  
-  private shouldBeRegex(): boolean {
-    if (!this.lastNonWSToken) return true;
-    
-    // Special case: After < followed by identifier and >, we're likely in JSX content
-    // where </div> should be tokenized as <, /, div, > not as < followed by regex /div>
-    if (this.lastNonWSToken.value === '<') {
-      // Don't treat / as regex start after < (could be JSX closing tag)
-      return false;
-    }
-    
-    const canEndExpression = [
-      TokenType.Identifier, TokenType.SigilIdentifier,
-      TokenType.NumericLiteral, TokenType.StringLiteral,
-      TokenType.TemplateLiteral, TokenType.RegexLiteral
-    ];
-    
-    if (canEndExpression.includes(this.lastNonWSToken.type)) {
-      return false;
-    }
-    
-    const endTokens = [']', ')', '}', '++', '--', '>'];
-    if (endTokens.includes(this.lastNonWSToken.value)) {
-      return false;
-    }
-    
-    return true;
-  }
-  
-  private isKeyword(value: string): boolean {
-    const keywords = [
-      'await', 'break', 'case', 'catch', 'class', 'const', 'continue',
-      'default', 'defer', 'def', 'do', 'done', 'elif', 'else', 'end',
-      'enum', 'export', 'extends', 'false', 'fi', 'final', 'for', 'fun', 'func',
-      'function', 'go', 'if', 'import', 'in', 'interface', 'let', 'loop',
-      'match', 'new', 'null', 'nil', 'of', 'package', 'return', 'struct', 'switch',
-      'then', 'this', 'throw', 'trait', 'true', 'try', 'type', 'until',
-      'unsafe', 'using', 'var', 'when', 'while', 'with', 'yield',
-      'typeof', 'void', 'delete', 'instanceof', 'async', 'auto',
-      'immutable', 'require', 'fn', 'foreach', 'echo', 'print',
-      'except', 'rescue', 'finally', 'undefined', 'elseif', 'esac',
-      'begin', 'as', 'from', 'is', 'not', 'or', 'and', 'lambda',
-      'global', 'nonlocal', 'pass', 'raise', 'assert', 'del'
-    ];
-    
-    return keywords.includes(value);
-  }
-  
-  // MASI extracted to src/lexer-masi.ts
-  
-  // Helper methods
-  private skipShebang(): void {
-    while (this.peek() !== '\n' && !this.isAtEnd()) {
-      this.advance();
-    }
-    if (this.peek() === '\n') {
-      this.advance();
-      this.line++;
-      this.column = 1;
-    }
-  }
-  
-  private skipLineComment(): void {
-    while (this.peek() !== '\n' && !this.isAtEnd()) {
-      this.advance();
-    }
-  }
-  
-  private skipBlockComment(): void {
-    this.advance(); // consume second /
-    while (!this.isAtEnd()) {
-      if (this.peek() === '*' && this.peekNext() === '/') {
-        this.advance(); // *
-        this.advance(); // /
-        break;
-      }
-      if (this.peek() === '\n') {
-        this.line++;
-        this.column = 0;
-      }
-      this.advance();
-    }
-  }
-  
-  private skipHTMLComment(): void {
-    this.advance(); // !
-    this.advance(); // -
-    this.advance(); // -
-    
-    while (!this.isAtEnd()) {
-      if (this.peek() === '-' && this.peekNext() === '-' && this.peekAt(2) === '>') {
-        this.advance(); // -
-        this.advance(); // -
-        this.advance(); // >
-        break;
-      }
-      if (this.peek() === '\n') {
-        this.line++;
-        this.column = 0;
-      }
-      this.advance();
-    }
-  }
-  
-  private skipWhitespace(): void {
-    while (/\s/.test(this.peek()) && !this.isAtEnd()) {
-      if (this.peek() === '\n') {
-        this.line++;
-        this.column = 0;
-        this.lineStart = true;
-      }
-      this.advance();
-    }
+    // Operators and punctuators
+    scanOperator(this, this.htmlTags);
   }
   
   private isHTMLTag(tagName: string): boolean {
