@@ -486,13 +486,40 @@ export class Parser extends ParserCursor {
       return { kind: "FuncDecl", name, params: [], body, span: this.createSpanFrom(opToken) } as any;
     }
 
-    // Short declarations (Go-style :=)
+    // Short declarations (Go-style :=) and Python type-annotated assignments (name: Type = value)
     if (this.peek().type === TokenType.Identifier) {
       const checkpoint = this.current;
       this.advance();
       if (this.check(":=")) {
         this.current = checkpoint;
         return this.parseShortDecl() as any;
+      }
+      // Python type-annotated assignment: name: Type = value
+      if (this.check(":") && !this.check("::")) {
+        const colonCheckpoint = this.current;
+        this.advance(); // consume :
+        try {
+          const type = this.parseType();
+          if (this.check("=")) {
+            this.advance(); // consume =
+            const value = this.parseExpression();
+            this.consumeSemicolon();
+            const nameToken = this.tokens[checkpoint];
+            const name: AST.Identifier = {
+              kind: "Identifier",
+              name: nameToken.value,
+              span: this.createSpanFrom(nameToken)
+            };
+            return {
+              kind: "VarDecl",
+              names: [name],
+              values: [value],
+              declType: type,
+              span: this.createSpan(checkpoint, this.current - 1)
+            } as any;
+          }
+        } catch {}
+        this.current = colonCheckpoint;
       }
       this.current = checkpoint;
     }
