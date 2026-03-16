@@ -1,54 +1,12 @@
 import { Token, TokenType } from './lexer';
 import * as AST from './ast';
+import { ParserCursor, ParseError } from './parser-cursor';
 
-export class ParseError extends Error {
-  constructor(
-    message: string,
-    public token: Token,
-    public quickFix?: string
-  ) {
-    super(message);
-    this.name = 'ParseError';
-  }
-}
+export { ParseError } from './parser-cursor';
 
-export class Parser {
-  private tokens: Token[] = [];
-  private current = 0;
-  private errors: ParseError[] = [];
-  
-  // Block delimiter stacks
-  private braceDepth = 0;
-  private indentStack: number[] = [];
-  private keywordStack: ("do" | "case" | "begin" | "if" | "for" | "while" | "function")[] = [];
-  
-  // Error recovery state
-  private syntheticTokenCounter = 0;
-  
-  // Context tracking
-  private insideSwitch = false;
-  private noRubyBlock = false;
-  
-  // Directives
-  private nextStmtGenericMode: "on" | "off" | "auto" = "auto";
-  private fileRuntimeDirective?: string;
-
+export class Parser extends ParserCursor {
   constructor(tokens: Token[], source?: string) {
-    // Scan raw source text for runtime directive (comments are skipped by lexer)
-    if (source) {
-      const match = source.match(/\/\/\s*@runtime\s+(\S+)/);
-      if (match) {
-        this.fileRuntimeDirective = match[1];
-      }
-    }
-    this.tokens = tokens.filter(t =>
-      t.type !== TokenType.Comment &&
-      t.type !== TokenType.Whitespace
-    );
-  }
-  
-  getErrors(): ParseError[] {
-    return this.errors;
+    super(tokens, source);
   }
   
   parse(): AST.Program {
@@ -99,72 +57,7 @@ export class Parser {
       span: this.createSpan(0, this.tokens.length - 1)
     };
   }
-  
-  // Error recovery helpers
-  private createSyntheticToken(type: TokenType, value: string): Token {
-    const pos = this.current > 0 ? this.tokens[this.current - 1].end : 0;
-    return {
-      type,
-      value,
-      start: pos,
-      end: pos,
-      line: this.current > 0 ? this.tokens[this.current - 1].line : 1,
-      column: this.current > 0 ? this.tokens[this.current - 1].column + 1 : 1,
-      synthetic: true
-    } as Token;
-  }
-  
-  private createMissingExpr(): AST.Expr {
-    const span = this.current > 0 ? 
-      this.createSpan(this.current - 1, this.current - 1) :
-      this.createSpan(0, 0);
-    
-    return {
-      kind: "Identifier",
-      name: "__missing__",
-      span
-    };
-  }
-  
-  private createMissingIdentifier(): AST.Identifier {
-    const span = this.current > 0 ? 
-      this.createSpan(this.current - 1, this.current - 1) :
-      this.createSpan(0, 0);
-    
-    return {
-      kind: "Identifier",
-      name: "__missing__",
-      span
-    };
-  }
-  
-  private must(expected: string, options?: { recoverWithSynthetic?: boolean }): boolean {
-    // Skip virtual semicolons before checking for expected token
-    while (this.peek().virtualSemi) {
-      this.advance();
-    }
-    
-    if (this.check(expected)) {
-      this.advance();
-      return true;
-    }
-    
-    if (options?.recoverWithSynthetic) {
-      // Record the error
-      this.errors.push(new ParseError(
-        `Expected '${expected}' but got '${this.peek().value}'`,
-        this.peek(),
-        `Insert '${expected}'`
-      ));
-      
-      // Return true to indicate we're recovering
-      // The caller should handle the missing token appropriately
-      return true;
-    }
-    
-    throw this.error(this.peek(), `Expected '${expected}'`);
-  }
-  
+
   private parseTopLevel(): AST.Decl | AST.Stmt | null {
     this.consumeDirectives();
     
@@ -8872,193 +8765,34 @@ export class Parser {
            op === "typeof" || op === "void" || op === "delete" ||
            op === "await" || op === "++" || op === "--" || op === "&" || op === "*" || op === "**";
   }
-  
-  // Utility methods
-  private consumeDirectives(): void {
-    // Check for directive comments
-    while (this.peek().type === TokenType.Comment) {
-      const comment = this.advance();
-      if (comment.value.startsWith("// @generics")) {
-        this.nextStmtGenericMode = "on";
-      } else if (comment.value.startsWith("// @nogenerics")) {
-        this.nextStmtGenericMode = "off";
-      }
-    }
-  }
-  
-  private consumeSemicolon(): void {
-    if (this.match(";") || this.peek().virtualSemi) {
-      if (this.peek().virtualSemi) {
-        // Don't actually consume virtual semicolon
-        return;
-      }
-    }
-    // Semicolon insertion is handled by MASI
-  }
-  
-  private checkSemicolon(): boolean {
-    return this.check(";") || this.peek().virtualSemi || false;
-  }
-  
-  private skipSemicolons(): void {
-    while (this.check(";") || this.peek().virtualSemi) {
-      this.advance();
-    }
-  }
-  
-  private synchronize(): void {
+
+  // Override synchronize to include isDeclStart() check
+  protected override synchronize(): void {
     this.advance();
-    
+
     while (!this.isAtEnd()) {
-      if (this.previous()?.type === TokenType.Operator && 
+      if (this.previous()?.type === TokenType.Operator &&
           this.previous()?.value === ";") {
         return;
       }
-      
-      // Stop at block/statement endings
+
       const token = this.peek();
-      if (token.value === "fi" || token.value === "esac" || token.value === "done" || 
-          token.value === "end" || token.value === "}" || token.value === "elif" || 
-          token.value === "else" || token.value === "elseif" || token.value === "rescue" || 
+      if (token.value === "fi" || token.value === "esac" || token.value === "done" ||
+          token.value === "end" || token.value === "}" || token.value === "elif" ||
+          token.value === "else" || token.value === "elseif" || token.value === "rescue" ||
           token.value === "ensure" || token.value === "except" || token.value === "finally") {
         return;
       }
-      
+
       if (this.isDeclStart()) {
         return;
       }
-      
+
       this.advance();
     }
   }
-  
-  private error(token: Token, message: string): ParseError {
-    return new ParseError(message, token);
-  }
-  
-  private createSpan(start: number, end: number): AST.Span {
-    const startToken = this.tokens[start] || this.tokens[0];
-    const endToken = this.tokens[end] || this.tokens[this.tokens.length - 1];
-    
-    return {
-      start: startToken.start,
-      end: endToken.end,
-      line: startToken.line,
-      column: startToken.column
-    };
-  }
-  
-  private createSpanFrom(node: { span: AST.Span } | Token): AST.Span {
-    if ('span' in node) {
-      return {
-        ...node.span,
-        end: this.previous()?.end || node.span.end
-      };
-    }
-    
-    return {
-      start: node.start,
-      end: node.end,
-      line: node.line,
-      column: node.column
-    };
-  }
-  
-  // Token navigation
-  private peek(): Token {
-    if (this.isAtEnd()) {
-      return this.tokens[this.tokens.length - 1];
-    }
-    return this.tokens[this.current];
-  }
-  
-  private peekNext(): Token | undefined {
-    return this.tokens[this.current + 1];
-  }
-  
-  private peekAt(offset: number): Token | undefined {
-    return this.tokens[this.current + offset];
-  }
-
-  /** Peek past consecutive virtualSemi tokens to find the next real token */
-  private peekPastVsemis(): Token | undefined {
-    let pos = this.current;
-    while (pos < this.tokens.length && this.tokens[pos].virtualSemi) {
-      pos++;
-    }
-    return pos < this.tokens.length ? this.tokens[pos] : undefined;
-  }
-  
-  private previous(): Token | undefined {
-    return this.tokens[this.current - 1];
-  }
-  
-  private hasWhitespaceBefore(): boolean {
-    // Check if there's whitespace between the previous token and current token
-    const prev = this.previous();
-    const curr = this.peek();
-    
-    if (!prev || !curr) return false;
-    
-    // Check if tokens are adjacent by comparing end position of prev with start position of curr
-    // If prev.end exists, use it; otherwise fall back to checking positions
-    if (prev.end !== undefined && curr.start !== undefined) {
-      return curr.start > prev.end;
-    }
-    
-    // Fallback: assume whitespace if we can't determine positions
-    return false;
-  }
-  
-  private advance(): Token {
-    if (!this.isAtEnd()) this.current++;
-    return this.previous()!;
-  }
-  
-  private isAtEnd(): boolean {
-    if (this.current >= this.tokens.length) return true;
-    const token = this.tokens[this.current];
-    return token && token.type === TokenType.EOF;
-  }
-  
-  private check(value: string): boolean {
-    if (this.isAtEnd()) return false;
-    return this.peek().value === value;
-  }
-  
-  private match(...values: string[]): boolean {
-    for (const value of values) {
-      if (this.check(value)) {
-        this.advance();
-        return true;
-      }
-    }
-    return false;
-  }
-  
-  private consume(expected: TokenType | string, message: string): Token {
-    const token = this.peek();
-    
-    if (typeof expected === "string") {
-      if (token.value === expected) {
-        return this.advance();
-      }
-    } else {
-      if (token.type === expected) {
-        return this.advance();
-      }
-    }
-    
-    throw this.error(token, message);
-  }
 
   // ============ JSX Parsing Methods ============
-
-  // Helper for multi-token lookahead
-  private lookahead(n: number): Token | null {
-    const pos = this.current + n;
-    return pos < this.tokens.length ? this.tokens[pos] : null;
-  }
 
   private isJSXElement(): boolean {
     // JSX disambiguation based on spec 10.6
