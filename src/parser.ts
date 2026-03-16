@@ -11,12 +11,60 @@ import * as ControlFlow from './parselets/control-flow';
 import * as Blocks from './parselets/blocks';
 import * as ExprPrefix from './parselets/expr-prefix';
 import * as ExprPostfix from './parselets/expr-postfix';
+import { ParseletRegistry } from './parselet-registry';
 
 export { ParseError } from './parser-cursor';
 
 export class Parser extends ParserCursor {
+  public registry = new ParseletRegistry<Parser>();
+
   constructor(tokens: Token[], source?: string) {
     super(tokens, source);
+    this.registerParselets();
+  }
+
+  private registerParselets(): void {
+    // ---- Statement parselets (keyword already consumed via match()) ----
+    this.registry
+      .registerStatement("if", (p) => ControlFlow.parseIf(p))
+      .registerStatement("do", (p) => ControlFlow.parseDoStatement(p))
+      .registerStatement("for", (p) => ControlFlow.parseLoop(p))
+      .registerStatement("while", (p) => ControlFlow.parseLoop(p))
+      .registerStatement("until", (p) => ControlFlow.parseLoop(p))
+      .registerStatement("loop", (p) => ControlFlow.parseLoop(p))
+      .registerStatement("foreach", (p) => ControlFlow.parseForeach(p))
+      .registerStatement("try", (p) => ControlFlow.parseTry(p))
+      .registerStatement("with", (p) => ControlFlow.parseUsing(p))
+      .registerStatement("defer", (p) => ControlFlow.parseDefer(p))
+      .registerStatement("break", (p) => ControlFlow.parseBreak(p))
+      .registerStatement("continue", (p) => ControlFlow.parseContinue(p))
+      .registerStatement("return", (p) => ControlFlow.parseReturn(p))
+      .registerStatement("assert", (p) => ControlFlow.parseAssert(p))
+      .registerStatement("echo", (p) => ControlFlow.parseEcho(p))
+      .registerStatement("print", (p) => ControlFlow.parseEcho(p))
+      .registerStatement("throw", (p) => ControlFlow.parseThrow(p))
+      .registerStatement("raise", (p) => ControlFlow.parseThrow(p))
+      .registerStatement("go", (p) => ControlFlow.parseGo(p))
+      .registerStatement("pass", (p) => ControlFlow.parsePass(p))
+      .registerStatement("select", (p) => Blocks.parseSelectStatement(p));
+
+    // ---- Declaration parselets (keyword already consumed via match()) ----
+    this.registry
+      .registerDeclaration("import", (p) => Imports.parseImport(p))
+      .registerDeclaration("require", (p) => Imports.parseImport(p))
+      .registerDeclaration("let", (p) => p.parseVarDecl())
+      .registerDeclaration("var", (p) => p.parseVarDecl())
+      .registerDeclaration("auto", (p) => p.parseVarDecl())
+      .registerDeclaration("const", (p) => p.parseConstDecl())
+      .registerDeclaration("final", (p) => p.parseConstDecl())
+      .registerDeclaration("immutable", (p) => p.parseConstDecl())
+      .registerDeclaration("class", (p) => ClassDecl.parseClassDecl(p))
+      .registerDeclaration("interface", (p) => ClassDecl.parseInterfaceDecl(p))
+      .registerDeclaration("trait", (p) => ClassDecl.parseInterfaceDecl(p))
+      .registerDeclaration("enum", (p) => ClassDecl.parseEnumDecl(p))
+      .registerDeclaration("package", (p) => p.parsePackageDecl())
+      .registerDeclaration("export", (p) => p.parseExportDecl())
+      .registerDeclaration("type", (p) => p.parseTypeDecl());
   }
   
   parse(): AST.Program {
@@ -248,87 +296,59 @@ export class Parser extends ParserCursor {
   }
   
   public parseDeclaration(): AST.Decl {
-    const token = this.peek();
-    
-    // Import statements
-    if (this.match("import", "require")) {
-      return Imports.parseImport(this);
-    }
+    const keyword = this.peek().value;
+
+    // ---- Complex multi-token disambiguation ----
 
     // Python-style: from module import names
-    if (this.peek().value === "from" && this.peek().type === TokenType.Keyword && this.isDeclStart()) {
+    if (keyword === "from" && this.peek().type === TokenType.Keyword && this.isDeclStart()) {
       return Imports.parseFromImport(this);
     }
 
-    // Check if using is for import or resource management
-    if (this.peek().value === "using") {
+    // using — import vs resource management
+    if (keyword === "using") {
       const next = this.peekNext();
-      
-      // Look ahead to distinguish import from resource management
-      // Import: using "module" or using module (but not assignment)
-      if (next?.type === TokenType.StringLiteral || 
+      if (next?.type === TokenType.StringLiteral ||
           (next?.type === TokenType.Identifier && this.peekAt(2)?.value !== "=")) {
-        this.advance(); // consume 'using'
+        this.advance();
         return Imports.parseImport(this);
       }
-      
-      // It's a using statement for resource management
-      // Don't consume it, let parseStatement handle it
       throw this.error(this.peek(), "Expected declaration");
     }
-    
+
     // #include
     if (this.check("#") && this.peekNext()?.value === "include") {
       this.advance(); // #
       this.advance(); // include
       return Imports.parseImport(this);
     }
-    
-    // Variable declarations
-    if (this.match("let", "var", "auto")) {
-      return this.parseVarDecl();
-    }
-    
-    if (this.match("const", "final", "immutable")) {
-      return this.parseConstDecl();
-    }
-    
-    // Check for async/unsafe modifiers
-    if (this.peek().value === "async" || this.peek().value === "unsafe") {
+
+    // async/unsafe modifiers before function decl
+    if (keyword === "async" || keyword === "unsafe") {
       let isAsync = false;
       let isUnsafe = false;
-      
       if (this.match("async")) {
         isAsync = true;
-        if (this.match("unsafe")) {
-          isUnsafe = true;
-        }
+        if (this.match("unsafe")) isUnsafe = true;
       } else if (this.match("unsafe")) {
         isUnsafe = true;
-        if (this.match("async")) {
-          isAsync = true;
-        }
+        if (this.match("async")) isAsync = true;
       }
-      
       if (this.match("def", "fun", "fn", "func", "function")) {
-        // Check for generator function (function*)
         const funcKeyword = this.previous()?.value;
         const isGenerator = funcKeyword === "function" && this.match("*");
         return Functions.parseFuncDecl(this, isAsync, isUnsafe, isGenerator);
       }
-      
-      // Not a function declaration - this would be an error
       throw this.error(this.peek(), "Expected function declaration after async/unsafe");
     }
-    
-    // Function declarations
+
+    // Function declarations (with generator support)
     if (this.match("def", "fun", "fn", "func", "function")) {
-      // Check for generator function (function*)
       const isGenerator = this.previous()?.value === "function" && this.match("*");
       return Functions.parseFuncDecl(this, false, false, isGenerator);
     }
-    
-    // Check for return-type-before-name function declaration
+
+    // Return-type-before-name function declaration (e.g. `int main()`)
     if (Types.isType(this)) {
       const isRetTypeFn = this.attempt(() => {
         this.parseType();
@@ -342,236 +362,144 @@ export class Parser extends ParserCursor {
         return Functions.parseFuncDeclWithReturnTypeBefore(this);
       }
     }
-    
-    // Type declarations
-    if (this.match("type")) {
-      return this.parseTypeDecl();
-    }
-    
-    if (this.match("class")) {
-      return ClassDecl.parseClassDecl(this);
-    }
-    
-    if (this.match("interface", "trait")) {
-      return ClassDecl.parseInterfaceDecl(this);
-    }
-    
-    // Handle Rust-style impl blocks as a special class-like structure
-    if (this.peek().value === "impl" && this.peek().type === TokenType.Identifier) {
+
+    // Rust-style impl blocks
+    if (keyword === "impl" && this.peek().type === TokenType.Identifier) {
       return ClassDecl.parseImplBlock(this);
     }
-    
-    if (this.match("enum")) {
-      return ClassDecl.parseEnumDecl(this);
+
+    // ---- Registry-driven simple keyword dispatch ----
+    const declParselet = this.registry.getDeclaration(keyword);
+    if (declParselet) {
+      this.advance(); // consume the keyword
+      return declParselet(this);
     }
-    
-    if (this.match("package")) {
-      return this.parsePackageDecl();
-    }
-    
-    if (this.match("export")) {
-      return this.parseExportDecl();
-    }
-    
-    // Check for short declaration
+
+    // Short declaration (Go-style :=)
     if (this.peek().type === TokenType.Identifier) {
       const checkpoint = this.current;
-      const id = this.advance();
+      this.advance();
       if (this.match(":=")) {
         this.current = checkpoint;
         return this.parseShortDecl();
       }
       this.current = checkpoint;
     }
-    
+
     throw this.error(this.peek(), "Expected declaration");
   }
   
   public parseStatement(): AST.Stmt {
-    // Handle async for
-    if (this.peek().value === "async" && this.peekNext()?.value === "for") {
+    const keyword = this.peek().value;
+
+    // ---- Complex multi-token disambiguation (cannot be registry-driven) ----
+
+    // async for → for-await loop
+    if (keyword === "async" && this.peekNext()?.value === "for") {
       this.advance(); // consume async
       this.advance(); // consume for
-      // Now parse as a for-await loop
       return ControlFlow.parseLoop(this);
     }
-    
-    // Control flow
-    if (this.match("if")) {
-      return ControlFlow.parseIf(this);
-    }
-    
+
+    // switch/match/when → parseSwitch
     if (this.check("switch")) {
       this.advance();
       return Blocks.parseSwitch(this) as AST.Stmt;
     }
-    // match keyword — but not when followed by = or { (assignment or variable reference)
     if (this.check("match") && !this.isAssignmentOp(this.peekAt(1)!) && this.peekAt(1)?.value !== "{") {
       this.advance();
       return Blocks.parseSwitch(this) as AST.Stmt;
     }
-    // Kotlin-style `when` as match expression
-    if (this.peek().value === "when" &&
-        (this.peekAt(1)?.value === "(" || this.peekAt(1)?.value === "{")) {
-      this.advance(); // consume 'when'
+    if (keyword === "when" && (this.peekAt(1)?.value === "(" || this.peekAt(1)?.value === "{")) {
+      this.advance();
       return Blocks.parseSwitch(this) as AST.Stmt;
     }
-    
-    // Bash-style case...in...esac — allowed even inside switch (distinguishes from switch case)
-    if (this.peek().value === "case") {
-      // Bash case: `case expr in ... esac` — detect by looking for `in` after expr
+
+    // Bash case...in...esac
+    if (keyword === "case") {
       if (!this.insideSwitch) {
         this.advance();
         return Blocks.parseCaseStatement(this);
       } else {
-        // Inside a switch, only allow if it looks like bash case (has `in` or `when` nearby)
         const cp = this.current;
-        this.advance(); // case
-        const expr = this.parsePrimary(); // consume discriminant
+        this.advance();
+        const expr = this.parsePrimary();
         if (this.check("in") || this.check("when")) {
-          this.advance(); // consume 'in' or 'when'
+          this.advance();
           return Blocks.parseCaseEsac(this, cp, expr);
         }
-        // Not bash case — restore and let switch handle it
         this.current = cp;
       }
     }
-    
-    if (this.match("select")) {
-      // Go-style select statement for channels
-      return Blocks.parseSelectStatement(this);
-    }
-    
-    if (this.match("do")) {
-      // Check if this is a do-while loop or bash-style do-done
-      return ControlFlow.parseDoStatement(this);
-    }
-    
-    if (this.match("for", "while", "until", "loop")) {
-      return ControlFlow.parseLoop(this);
-    }
-    
-    if (this.match("foreach")) {
-      return ControlFlow.parseForeach(this);
-    }
-    
-    if (this.match("try")) {
-      return ControlFlow.parseTry(this);
-    }
-    
-    if (this.match("with")) {
-      return ControlFlow.parseUsing(this);
-    }
-    
-    // Check if using is for resource management
-    if (this.peek().value === "using") {
+
+    // using — resource management (not import)
+    if (keyword === "using") {
       const next = this.peekNext();
       const nextNext = this.peekAt(2);
-
-      // Resource management: using var = expr { ... } or using (Type var = expr) { ... }
       if ((next?.type === TokenType.Identifier && nextNext?.value === "=") ||
           next?.value === "(") {
-        this.advance(); // consume 'using'
+        this.advance();
         return ControlFlow.parseUsing(this);
       }
     }
-    
-    if (this.match("defer")) {
-      return ControlFlow.parseDefer(this);
+
+    // ---- Registry-driven simple keyword dispatch ----
+    const stmtParselet = this.registry.getStatement(keyword);
+    if (stmtParselet) {
+      this.advance(); // consume the keyword
+      return stmtParselet(this);
     }
-    
-    if (this.match("break")) {
-      return ControlFlow.parseBreak(this);
-    }
-    
-    if (this.match("continue")) {
-      return ControlFlow.parseContinue(this);
-    }
-    
-    if (this.match("return")) {
-      return ControlFlow.parseReturn(this);
-    }
-    
-    if (this.match("assert")) {
-      return ControlFlow.parseAssert(this);
-    }
-    
-    if (this.match("echo", "print")) {
-      return ControlFlow.parseEcho(this);
-    }
-    
-    // New statements
-    if (this.match("throw", "raise")) {
-      return ControlFlow.parseThrow(this);
-    }
-    
-    
-    if (this.match("go")) {
-      return ControlFlow.parseGo(this);
-    }
-    
-    if (this.match("pass")) {
-      return ControlFlow.parsePass(this);
-    }
-    
+
     // Begin/end blocks (Ruby-style with rescue/ensure)
     if (this.match("begin")) {
       return Blocks.parseBeginBlock(this);
     }
-    
+
     // Rust `use path::to::module`, Ruby `include Module`
     if (this.peek().type === TokenType.Identifier &&
-        (this.peek().value === "use" || this.peek().value === "include") &&
+        (keyword === "use" || keyword === "include") &&
         this.peekAt(1) && (this.peekAt(1)!.type === TokenType.Identifier ||
                            this.peekAt(1)!.type === TokenType.StringLiteral)) {
-      this.advance(); // consume 'use' or 'include'
+      this.advance();
       return Imports.parseImport(this) as any;
     }
 
     // Rust `mod name;` module declaration
-    if (this.peek().type === TokenType.Identifier && this.peek().value === "mod" &&
+    if (this.peek().type === TokenType.Identifier && keyword === "mod" &&
         this.peekAt(1)?.type === TokenType.Identifier) {
-      this.advance(); // consume 'mod'
+      this.advance();
       const modName = this.parseIdentifier();
       this.consumeSemicolon();
       return { kind: "Import", path: modName.name, span: modName.span } as any;
     }
 
-    // Check for short declarations (Go-style :=)
+    // Short declarations (Go-style :=)
     if (this.peek().type === TokenType.Identifier) {
       const checkpoint = this.current;
       this.advance();
       if (this.check(":=")) {
         this.current = checkpoint;
-        return this.parseShortDecl() as any; // ShortDecl can be used as a statement
+        return this.parseShortDecl() as any;
       }
       this.current = checkpoint;
     }
-    
-    // Block statements - but could also be object destructuring
+
+    // Block statements vs object destructuring
     if (this.check("{")) {
-      // Look ahead to see if this is object destructuring
       const checkpoint = this.current;
       try {
-        this.advance(); // consume {
-        
-        // Check if it looks like object destructuring
+        this.advance();
         let isDestructuring = false;
         if (this.peek().type === TokenType.Identifier) {
           this.advance();
           if (this.check(",") || this.check("}")) {
-            // Looks like {x, y} or {x}
             isDestructuring = true;
           }
         }
-        
         this.current = checkpoint;
-        
         if (isDestructuring) {
-          // Parse as expression statement (which will parse object literal)
           return this.parseExprStmt();
         } else {
-          // Parse as block
           return Blocks.parseBlock(this);
         }
       } catch {
@@ -579,8 +507,7 @@ export class Parser extends ParserCursor {
         return Blocks.parseBlock(this);
       }
     }
-    
-    // Expression statement
+
     return this.parseExprStmt();
   }
   
