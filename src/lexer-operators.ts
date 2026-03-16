@@ -19,11 +19,12 @@ export function scanOperator(h: ScanHost, htmlTags: Set<string>): void {
 
     if (nextChar === '/') {
       // JSX closing tag </tagname> - per spec
+      // Don't enterJSX — the opening tag already incremented jsxDepth.
+      // Just mark as closing tag so '>' knows to exitJSX.
       if (LS.isInJSXText(h.state)) {
         LS.exitJSXText(h.state);
       }
       h.state.inJSXClosingTag = true;
-      LS.enterJSX(h.state);
       // Emit JSXTagStart for closing tags too
       h.addTokenEx(TokenType.JSXTagStart, '<', start, h.position, startLine, startColumn);
       return;
@@ -48,11 +49,21 @@ export function scanOperator(h: ScanHost, htmlTags: Set<string>): void {
 
           if (afterGeneric === '>' && h.source[posAfterGeneric + 1] === '{') {
             // <Type<...>>{ — type assertion with object literal, not JSX
-          } else if (afterGeneric === ' ' || afterGeneric === '/' || afterGeneric === '>' ||
+          } else if (afterGeneric === '/' || afterGeneric === '>' ||
               (afterGeneric && /[a-zA-Z_]/.test(afterGeneric))) {
             h.addTokenEx(TokenType.JSXTagStart, '<', start, h.position, startLine, startColumn);
             LS.enterJSX(h.state);
             return;
+          } else if (afterGeneric === ' ') {
+            // Peek past whitespace: JSX has attribute names, not = or operators
+            let peekPos = posAfterGeneric;
+            while (peekPos < h.source.length && h.source[peekPos] === ' ') peekPos++;
+            const afterSpace = h.source[peekPos];
+            if (afterSpace && /[a-zA-Z_/>{]/.test(afterSpace)) {
+              h.addTokenEx(TokenType.JSXTagStart, '<', start, h.position, startLine, startColumn);
+              LS.enterJSX(h.state);
+              return;
+            }
           }
         } else {
           h.addTokenEx(TokenType.JSXTagStart, '<', start, h.position, startLine, startColumn);

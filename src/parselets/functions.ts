@@ -77,9 +77,10 @@ export function parseFuncDecl(
     name = host.parseIdentifier();
   }
 
-  // Parse generic parameters if present
+  // Parse generic parameters if present (<T> or Python 3.12+ [T])
   let genericParams: AST.Identifier[] | undefined;
-  if (host.match("<")) {
+  const genericOpen = host.match("<") ? ">" : host.match("[") ? "]" : null;
+  if (genericOpen) {
     genericParams = [];
     do {
       genericParams.push(host.parseIdentifier());
@@ -93,7 +94,7 @@ export function parseFuncDecl(
         }
       }
     } while (host.match(","));
-    host.consume(">", "Expected '>' after generic parameters");
+    host.consume(genericOpen, `Expected '${genericOpen}' after generic parameters`);
   }
 
   // For Ruby def, parameters are optional
@@ -459,6 +460,20 @@ export function parseParameter(host: FunctionHost): AST.Param {
               host.check("map") || host.check("*") ||
               (host.check("[") && host.peekAt(1)?.value === "]"))) {
     type = Types.parseGoTypeAnnotation(host);
+  }
+
+  // C++ reference type: `const Vec& other` or `Vec& other`
+  // After parsing name=const type=Vec, if next is `&` + identifier, re-interpret
+  if (type && host.check("&") && host.peekAt(1)?.type === TokenType.Identifier) {
+    host.advance(); // consume &
+    const realName = host.advance(); // consume actual param name
+    name = {
+      kind: "Identifier",
+      name: realName.value,
+      originalSpelling: realName.value,
+      span: host.createSpanFrom(realName)
+    };
+    // type stays as-is (the C++ type before &)
   }
 
   let defaultValue: AST.Expr | undefined;

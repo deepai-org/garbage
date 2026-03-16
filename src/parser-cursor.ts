@@ -193,7 +193,7 @@ export class ParserCursor {
     return this.tokens[this.current - 1];
   }
 
-  protected hasWhitespaceBefore(): boolean {
+  public hasWhitespaceBefore(): boolean {
     const prev = this.previous();
     const curr = this.peek();
 

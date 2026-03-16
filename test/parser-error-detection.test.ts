@@ -1,4 +1,4 @@
-import { parseCode, parseCodeWithErrors } from './helpers';
+import { parseCode, parseCodeStrict, parseCodeWithErrors } from './helpers';
 
 describe('Parser Error Detection', () => {
 
@@ -28,7 +28,7 @@ describe('Parser Error Detection', () => {
     expect(errors.length).toBeGreaterThan(0);
     
     // parseCode should throw on this code
-    expect(() => parseCode(code)).toThrow(/Parser produced/);
+    expect(() => parseCodeStrict(code)).toThrow(/Parser produced/);
   });
 
   test('detects missing closing brackets', () => {
@@ -43,7 +43,7 @@ describe('Parser Error Detection', () => {
     expect(errors.length).toBeGreaterThan(0);
     
     // parseCode should throw on this code
-    expect(() => parseCode(code)).toThrow(/Parser produced/);
+    expect(() => parseCodeStrict(code)).toThrow(/Parser produced/);
   });
 
   test('detects invalid token sequences', () => {
@@ -55,7 +55,7 @@ describe('Parser Error Detection', () => {
     expect(errors.length).toBeGreaterThan(0);
     
     // parseCode should throw on this code
-    expect(() => parseCode(code)).toThrow(/Parser produced/);
+    expect(() => parseCodeStrict(code)).toThrow(/Parser produced/);
   });
 
   test('complex valid code should have no errors', () => {
@@ -101,6 +101,6 @@ describe('Parser Error Detection', () => {
     expect(errors.length).toBeGreaterThanOrEqual(1);
     
     // parseCode should throw on this code
-    expect(() => parseCode(code)).toThrow(/Parser produced/);
+    expect(() => parseCodeStrict(code)).toThrow(/Parser produced/);
   });
 });

@@ -1071,7 +1071,8 @@ export function parseImplBlock(host: ClassHost): AST.ImplDecl {
     whereClause = parseWhereClause(host);
   }
 
-  // Parse impl body
+  // Parse impl body — skip vsemis before opening brace
+  while (host.peek().virtualSemi) host.advance();
   host.consume("{", "Expected '{' before impl body");
   const members: AST.ImplMember[] = [];
 

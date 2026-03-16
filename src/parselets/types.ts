@@ -87,6 +87,26 @@ export function parseType(host: TypeHost): AST.TypeNode {
         index: indexToken.value,
         span: host.createSpanFrom(type)
       } as any;
+    } else if (type.kind === "SimpleType" || type.kind === "GenericType") {
+      // Python-style generic: Result[List[T], str]
+      try {
+        const args: AST.TypeNode[] = [];
+        args.push(parseType(host));
+        while (host.check(",")) {
+          host.advance();
+          args.push(parseType(host));
+        }
+        host.consume("]", "Expected ']' after type arguments");
+        type = {
+          kind: "GenericType",
+          base: type.kind === "SimpleType" ? (type as any).id : (type as any).base,
+          args,
+          span: host.createSpanFrom(type)
+        };
+      } catch {
+        host.current = checkpoint;
+        break;
+      }
     } else {
       host.current = checkpoint;
       break;
