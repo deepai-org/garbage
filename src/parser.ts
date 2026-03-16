@@ -47,7 +47,8 @@ export class Parser extends ParserCursor {
       .registerStatement("raise", (p) => ControlFlow.parseThrow(p))
       .registerStatement("go", (p) => ControlFlow.parseGo(p))
       .registerStatement("pass", (p) => ControlFlow.parsePass(p))
-      .registerStatement("select", (p) => Blocks.parseSelectStatement(p));
+      .registerStatement("select", (p) => Blocks.parseSelectStatement(p))
+      .registerStatement("begin", (p) => Blocks.parseBeginBlock(p));
 
     // ---- Declaration parselets (keyword already consumed via match()) ----
     this.registry
@@ -449,11 +450,6 @@ export class Parser extends ParserCursor {
     if (stmtParselet) {
       this.advance(); // consume the keyword
       return stmtParselet(this);
-    }
-
-    // Begin/end blocks (Ruby-style with rescue/ensure)
-    if (this.match("begin")) {
-      return Blocks.parseBeginBlock(this);
     }
 
     // Rust `use path::to::module`, Ruby `include Module`
