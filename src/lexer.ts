@@ -1,5 +1,5 @@
-import { ContextTracker } from './lexer-context';
 import { applyMASI } from './lexer-masi';
+import * as LS from './lex-state';
 
 export enum TokenType {
   // Literals
@@ -63,10 +63,7 @@ export class Lexer {
   private lastNonWSToken: Token | null = null;
   private currentIndent = 0;
   private lineStart = true;
-  private modeStack: LexerMode[] = [LexerMode.Normal];
-  private bashBracketDepth = 0;
-  private jsxDepth = 0;  // Track JSX nesting depth for virtual semicolon suppression
-  private context: ContextTracker;  // New context tracker
+  private state: LS.LexState;
   
   // HTML tag names for JSX detection per spec
   private readonly htmlTags = new Set([
@@ -83,7 +80,7 @@ export class Lexer {
   
   constructor(source: string) {
     this.source = source;
-    this.context = new ContextTracker();  // Initialize context tracker
+    this.state = LS.createLexState();
   }
   
   tokenize(): Token[] {
@@ -149,7 +146,7 @@ export class Lexer {
     // Whitespace
     if (/\s/.test(char)) {
       // In JSX text, preserve whitespace as text tokens
-      if (this.context.shouldPreserveWhitespace()) {
+      if (LS.shouldPreserveWhitespace(this.state)) {
         let whitespaceValue = char;
         const start = this.position - 1;
         const startLine = this.line;
@@ -633,14 +630,12 @@ export class Lexer {
     
     // In MemberAccess mode, all keywords become identifiers
     let type: TokenType;
-    if (this.inMode(LexerMode.MemberAccess)) {
+    if (this.state.memberAccess) {
       type = TokenType.Identifier;
-      // Pop the mode after consuming the identifier
-      this.popMode();
-    } else if (this.inMode(LexerMode.Decorator)) {
+      this.state.memberAccess = false;
+    } else if (this.state.decorator) {
       type = TokenType.Identifier;
-      // Pop decorator mode after identifier
-      this.popMode();
+      this.state.decorator = false;
     } else {
       type = this.isKeyword(value) ? TokenType.Keyword : TokenType.Identifier;
     }
@@ -705,25 +700,25 @@ export class Lexer {
       
       if (nextChar === '/') {
         // JSX closing tag </tagname> - per spec
-        if (this.context.isInJSXText()) {
-          this.context.exitJSXText();
+        if (LS.isInJSXText(this.state)) {
+          LS.exitJSXText(this.state);
         }
-        this.context.push({ inJSXClosingTag: true });
-        this.context.enterJSX();
+        this.state.inJSXClosingTag = true;
+        LS.enterJSX(this.state);
         // Emit JSXTagStart for closing tags too
         this.addTokenEx(TokenType.JSXTagStart, '<', start, this.position, startLine, startColumn);
         return;
       } else if (nextChar === '>') {
         // JSX Fragment <> - per spec
-        if (this.context.canBeJSX()) {
+        if (LS.canBeJSX(this.state)) {
           this.addTokenEx(TokenType.JSXTagStart, '<', start, this.position, startLine, startColumn);
-          this.context.enterJSX();
-          this.context.enterJSXText();
+          LS.enterJSX(this.state);
+          LS.enterJSXText(this.state);
           return;
         }
       } else if (nextChar && /[A-Z]/.test(nextChar)) {
         // Capital letter → JSX Component - per spec
-        if (this.context.canBeJSX()) {
+        if (LS.canBeJSX(this.state)) {
           // Look ahead to check if this is really JSX or a generic type
           const identifier = this.peekIdentifier();
           const posAfterIdentifier = this.position + identifier.length;
@@ -745,20 +740,20 @@ export class Lexer {
                 (afterGeneric && /[a-zA-Z_]/.test(afterGeneric))) {
               // This is JSX! Create JSXTagStart token instead of operator
               this.addTokenEx(TokenType.JSXTagStart, '<', start, this.position, startLine, startColumn);
-              this.context.enterJSX();
+              LS.enterJSX(this.state);
               return; // Don't continue with operator processing
             }
             // Else it's a generic type, continue with operator processing
           } else {
             // Not followed by '<', so it's regular JSX
             this.addTokenEx(TokenType.JSXTagStart, '<', start, this.position, startLine, startColumn);
-            this.context.enterJSX();
+            LS.enterJSX(this.state);
             return; // Don't continue with operator processing
           }
         }
       } else if (nextChar && /[a-z]/.test(nextChar)) {
         // Lowercase identifier → potential HTML element - per spec
-        if (this.context.canBeJSX()) {
+        if (LS.canBeJSX(this.state)) {
           // Look ahead to see if this is a valid HTML tag name
           const tagName = this.peekIdentifier();
           if (this.isHTMLTag(tagName)) {
@@ -774,68 +769,68 @@ export class Lexer {
               if (afterGeneric === ' ' || afterGeneric === '/' || afterGeneric === '>' ||
                   (afterGeneric && /[a-zA-Z_]/.test(afterGeneric))) {
                 this.addTokenEx(TokenType.JSXTagStart, '<', start, this.position, startLine, startColumn);
-                this.context.enterJSX();
+                LS.enterJSX(this.state);
                 return;
               }
             } else {
               this.addTokenEx(TokenType.JSXTagStart, '<', start, this.position, startLine, startColumn);
-              this.context.enterJSX();
+              LS.enterJSX(this.state);
               return;
             }
           }
         }
       }
-    } else if (value === '>' && this.context.isInJSX()) {
+    } else if (value === '>' && LS.isInJSX(this.state)) {
       // Handle JSX tag completion
-      if (this.context.getContext().inJSXClosingTag) {
+      if (this.state.inJSXClosingTag) {
         // This is the end of closing tag like </div> - exit JSX entirely
-        this.context.exitJSX();
+        LS.exitJSX(this.state);
       } else {
         const prevChar = this.position > 1 ? this.source[this.position - 2] : '';
         if (prevChar === '/') {
           // Self-closing element like <Component />
-          this.context.exitJSX();
+          LS.exitJSX(this.state);
         } else {
           // Opening tag completed, enter JSX text
-          this.context.enterJSXText();
+          LS.enterJSXText(this.state);
         }
       }
-    } else if (value === '{' && this.context.isInJSX()) {
+    } else if (value === '{' && LS.isInJSX(this.state)) {
       // Entering JSX expression container
-      this.context.enterJSXExpression();
-    } else if (value === '}' && this.context.getContext().inJSXExpression) {
+      LS.enterJSXExpression(this.state);
+    } else if (value === '}' && this.state.inJSXExpression) {
       // Exiting JSX expression container
-      this.context.exitJSXExpression();
+      LS.exitJSXExpression(this.state);
     }
     
     // Handle mode transitions
     if (value === '.' && this.peek() !== '.' && this.peek() !== '*') {
       // After single dot (not .. or .*), push MemberAccess mode
-      this.pushMode(LexerMode.MemberAccess);
+      this.state.memberAccess = true;
     } else if (value === '?' && this.peek() === '.') {
       // After ?. optional chaining, also push MemberAccess mode
       // Note: We'll handle the full ?. operator below, but set the mode now
-      this.pushMode(LexerMode.MemberAccess);
-    } else if (value === '[' && this.inMode(LexerMode.Normal)) {
+      this.state.memberAccess = true;
+    } else if (value === '[' && !this.state.memberAccess && !this.state.decorator && !this.state.bashCondition) {
       // Check if this might be a bash conditional
       // Look for patterns like [ $var, [ "test", [ -f, [ !
       const nextNonWs = this.peekNextNonWhitespace();
       if (nextNonWs === '$' || nextNonWs === '"' || nextNonWs === '`' || 
           nextNonWs === '-' || nextNonWs === '!') {
-        this.pushMode(LexerMode.BashCondition);
-        this.bashBracketDepth = 1;
+        this.state.bashCondition = true;
+        this.state.bashBracketDepth = 1;
       }
-    } else if (value === ']' && this.inMode(LexerMode.BashCondition)) {
-      this.bashBracketDepth--;
-      if (this.bashBracketDepth === 0) {
-        this.popMode();
+    } else if (value === ']' && this.state.bashCondition) {
+      this.state.bashBracketDepth--;
+      if (this.state.bashBracketDepth === 0) {
+        this.state.bashCondition = false;
       }
-    } else if (value === '@' && this.inMode(LexerMode.Normal)) {
+    } else if (value === '@' && !this.state.memberAccess && !this.state.decorator && !this.state.bashCondition) {
       // Check if this is a decorator (@identifier) or verbatim string (@")
       const next = this.peek();
       if (/[a-zA-Z_]/.test(next)) {
         // After @, if followed by identifier, push Decorator mode
-        this.pushMode(LexerMode.Decorator);
+        this.state.decorator = true;
       }
       // Otherwise it might be a C# verbatim string, handled elsewhere
     }
@@ -1049,24 +1044,6 @@ export class Lexer {
     return this.position >= this.source.length;
   }
   
-  private currentMode(): LexerMode {
-    return this.modeStack[this.modeStack.length - 1];
-  }
-  
-  private pushMode(mode: LexerMode): void {
-    this.modeStack.push(mode);
-  }
-  
-  private popMode(): LexerMode | undefined {
-    if (this.modeStack.length > 1) {
-      return this.modeStack.pop();
-    }
-    return undefined;
-  }
-  
-  private inMode(mode: LexerMode): boolean {
-    return this.currentMode() === mode;
-  }
   
   private peekNextNonWhitespace(): string {
     let offset = 0;
@@ -1103,7 +1080,7 @@ export class Lexer {
       this.lastNonWSToken = token;
       
       // Update context position based on this token
-      this.context.updatePosition(value, type);
+      LS.updatePosition(this.state, value);
     }
   }
   
@@ -1130,7 +1107,7 @@ export class Lexer {
       this.lastNonWSToken = token;
       
       // Update context position based on this token
-      this.context.updatePosition(value, type);
+      LS.updatePosition(this.state, value);
       
       // Handle type context transitions
       this.updateTypeContext(value, type);
@@ -1139,26 +1116,26 @@ export class Lexer {
 
   private updateTypeContext(value: string, type: TokenType): void {
     // Enter type context after these tokens
-    if (value === ':' && !this.context.isInJSX()) {
+    if (value === ':' && !LS.isInJSX(this.state)) {
       // Type annotation context (but not JSX attributes)
-      this.context.enterTypeAnnotation();
-    } else if (value === '<' && this.context.canBeGeneric()) {
+      LS.enterTypeAnnotation(this.state);
+    } else if (value === '<' && LS.canBeGeneric(this.state)) {
       // Generic type parameters
-      this.context.enterGeneric();
+      LS.enterGeneric(this.state);
     } else if (value === 'extends' || value === 'implements' || 
                value === 'as' || value === 'typeof' || value === 'keyof') {
       // TypeScript type contexts
-      this.context.enterTypeAnnotation();
+      LS.enterTypeAnnotation(this.state);
     }
     
     // Exit type context after these tokens
-    if (value === '>' && this.context.getContext().genericDepth > 0) {
+    if (value === '>' && this.state.genericDepth > 0) {
       // End of generic parameters
-      this.context.exitGeneric();
+      LS.exitGeneric(this.state);
     } else if ((value === ',' || value === ')' || value === ';' || value === '=' || 
-                value === '{' || value === '}') && this.context.isInType()) {
+                value === '{' || value === '}') && LS.isInType(this.state)) {
       // End of type annotation in many contexts
-      this.context.exitTypeAnnotation();
+      LS.exitTypeAnnotation(this.state);
     }
   }
 }
