@@ -180,7 +180,6 @@ export class Parser {
     
     if (this.isAtEnd()) return null;
 
-
     // Handle closing braces
     // Note: braceDepth only tracks {} blocks (if/for/while/function bodies)
     // It does NOT track braces for classes, interfaces, object literals, etc.
@@ -2426,15 +2425,16 @@ export class Parser {
         // - Closing bracket/paren
         // - Comma
         // - Binary operators (but not :)
-        const isPostfix = !next || 
+        const isPostfix = !next ||
                          next.type === TokenType.EOF ||
-                         next.value === ";" || 
-                         next.value === ")" || 
-                         next.value === "]" || 
+                         next.value === ";" ||
+                         next.value === ")" ||
+                         next.value === "]" ||
                          next.value === "}" ||
                          next.value === "," ||
                          next.virtualSemi ||
-                         (this.isBinaryOp(next) && next.value !== ":" && next.value !== "<");
+                         (this.isBinaryOp(next) && next.value !== ":" && next.value !== "<") ||
+                         (next.type === TokenType.Keyword && this.isStatementKeyword(next.value));
         
         if (isPostfix) {
           this.advance(); // consume ?
