@@ -11,6 +11,7 @@ import * as ControlFlow from './parselets/control-flow';
 import * as Blocks from './parselets/blocks';
 import * as ExprPrefix from './parselets/expr-prefix';
 import * as ExprPostfix from './parselets/expr-postfix';
+import * as Decls from './parselets/declarations';
 import { ParseletRegistry } from './parselet-registry';
 
 export { ParseError } from './parser-cursor';
@@ -52,19 +53,19 @@ export class Parser extends ParserCursor {
     this.registry
       .registerDeclaration("import", (p) => Imports.parseImport(p))
       .registerDeclaration("require", (p) => Imports.parseImport(p))
-      .registerDeclaration("let", (p) => p.parseVarDecl())
-      .registerDeclaration("var", (p) => p.parseVarDecl())
-      .registerDeclaration("auto", (p) => p.parseVarDecl())
-      .registerDeclaration("const", (p) => p.parseConstDecl())
-      .registerDeclaration("final", (p) => p.parseConstDecl())
-      .registerDeclaration("immutable", (p) => p.parseConstDecl())
+      .registerDeclaration("let", (p) => Decls.parseVarDecl(p))
+      .registerDeclaration("var", (p) => Decls.parseVarDecl(p))
+      .registerDeclaration("auto", (p) => Decls.parseVarDecl(p))
+      .registerDeclaration("const", (p) => Decls.parseConstDecl(p))
+      .registerDeclaration("final", (p) => Decls.parseConstDecl(p))
+      .registerDeclaration("immutable", (p) => Decls.parseConstDecl(p))
       .registerDeclaration("class", (p) => ClassDecl.parseClassDecl(p))
       .registerDeclaration("interface", (p) => ClassDecl.parseInterfaceDecl(p))
       .registerDeclaration("trait", (p) => ClassDecl.parseInterfaceDecl(p))
       .registerDeclaration("enum", (p) => ClassDecl.parseEnumDecl(p))
-      .registerDeclaration("package", (p) => p.parsePackageDecl())
-      .registerDeclaration("export", (p) => p.parseExportDecl())
-      .registerDeclaration("type", (p) => p.parseTypeDecl());
+      .registerDeclaration("package", (p) => Decls.parsePackageDecl(p))
+      .registerDeclaration("export", (p) => Decls.parseExportDecl(p))
+      .registerDeclaration("type", (p) => Decls.parseTypeDecl(p));
   }
   
   parse(): AST.Program {
@@ -657,274 +658,13 @@ export class Parser extends ParserCursor {
   
   
   // Helper methods for specific constructs
-  private parseVarDecl(): AST.VarDecl {
-    const start = this.current - 1;
-
-    // Rust-style: let mut x = ...
-    if (this.peek().value === "mut") {
-      this.advance(); // skip 'mut'
-    }
-
-    // Go grouped var: var ( name = value \n name2 = value2 )
-    if (this.check("(")) {
-      this.advance(); // consume '('
-      const allNames: AST.Identifier[] = [];
-      const allValues: AST.Expr[] = [];
-      while (!this.check(")") && !this.isAtEnd()) {
-        while (this.peek().virtualSemi) this.advance();
-        if (this.check(")")) break;
-        const name = this.parseIdentifier();
-        allNames.push(name);
-        if (this.match("=")) {
-          allValues.push(this.parseAssignmentExpression());
-        }
-        while (this.peek().virtualSemi) this.advance();
-      }
-      this.consume(")", "Expected ')' after grouped var declarations");
-      this.consumeSemicolon();
-      return {
-        kind: "VarDecl",
-        names: allNames,
-        values: allValues.length > 0 ? allValues : undefined,
-        span: this.createSpan(start, this.current - 1)
-      };
-    }
-
-    const names = this.parseIdentifierList();
-    
-    let type: AST.TypeNode | undefined;
-    if (this.match(":")) {
-      type = this.parseType();
-    }
-    
-    let values: AST.Expr[] | undefined;
-    if (this.match("=")) {
-      values = this.parseExpressionList();
-    }
-    
-    this.consumeSemicolon();
-    
-    return {
-      kind: "VarDecl",
-      names,
-      type,
-      values,
-      span: this.createSpan(start, this.current - 1)
-    };
-  }
-  
-  private parseConstDecl(): AST.ConstDecl {
-    const start = this.current - 1;
-    const names = this.parseIdentifierList();
-    
-    let type: AST.TypeNode | undefined;
-    if (this.match(":")) {
-      type = this.parseType();
-    }
-    
-    this.consume("=", "Const declaration requires initialization");
-    const values = this.parseExpressionList();
-    
-    this.consumeSemicolon();
-    
-    return {
-      kind: "ConstDecl",
-      names,
-      type,
-      values,
-      span: this.createSpan(start, this.current - 1)
-    };
-  }
-  
-  private peekAhead(value: string): boolean {
-    // Look ahead to see if a specific token appears after destructuring pattern
-    const checkpoint = this.current;
-    let depth = 0;
-    
-    // Skip the destructuring pattern
-    if (this.peek().value === "{" || this.peek().value === "[") {
-      const openBracket = this.peek().value;
-      const closeBracket = openBracket === "{" ? "}" : "]";
-      this.advance();
-      depth = 1;
-      
-      while (depth > 0 && !this.isAtEnd()) {
-        if (this.peek().value === openBracket) depth++;
-        else if (this.peek().value === closeBracket) depth--;
-        this.advance();
-      }
-      
-      // Check if the next token is what we're looking for
-      const found = this.peek().value === value;
-      this.current = checkpoint;
-      return found;
-    }
-    
-    this.current = checkpoint;
-    return false;
-  }
-  
-  private parseDestructuringShortDecl(): AST.ShortDecl {
-    const start = this.current;
-    
-    // Parse the destructuring pattern
-    const pattern = this.parseDestructuringPattern();
-    
-    this.consume(":=", "Expected ':=' in destructuring declaration");
-    
-    const value = this.parseExpression();
-    
-    this.consumeSemicolon();
-    
-    return {
-      kind: "ShortDecl",
-      targets: [pattern],
-      value,
-      span: this.createSpan(start, this.current - 1)
-    };
-  }
-  
-  private parseShortDecl(): AST.ShortDecl {
-    const start = this.current;
-    const targets: (AST.Identifier | AST.ArrayPattern | AST.ObjectPattern)[] = [];
-    
-    // Parse targets (can be identifiers or destructuring patterns)
-    do {
-      if (this.check("[") || this.check("{")) {
-        // Destructuring pattern
-        targets.push(this.parseDestructuringPattern());
-      } else if (this.peek().type === TokenType.Identifier) {
-        // Simple identifier
-        targets.push(this.parseIdentifier());
-      } else {
-        throw this.error(this.peek(), "Expected identifier or destructuring pattern");
-      }
-    } while (this.match(","));
-    
-    this.consume(":=", "Expected ':=' in short declaration");
-    
-    // Parse the value expression
-    const value = this.parseExpression();
-    
-    this.consumeSemicolon();
-    
-    // If it's a simple single-identifier case, use the old format for compatibility
-    if (targets.length === 1 && targets[0].kind === "Identifier") {
-      return {
-        kind: "ShortDecl",
-        pairs: [{ name: targets[0], expr: value }],
-        span: this.createSpan(start, this.current - 1)
-      };
-    }
-    
-    // For destructuring or multiple targets
-    return {
-      kind: "ShortDecl",
-      targets,
-      value,
-      span: this.createSpan(start, this.current - 1)
-    };
-  }
-  
-
-  /**
-   * Parse a Go composite literal: map[K]V{...}, []Type{...}, Type{...}
-   * Returns an ObjectLiteral (for map) or ArrayLiteral (for slice) node.
-   */
-  public parseDestructuringPattern(): AST.ArrayPattern | AST.ObjectPattern {
-    const start = this.current;
-    const token = this.peek();
-    
-    if (token.value === "[") {
-      // Array destructuring pattern
-      this.advance(); // consume [
-      const elements: (AST.Identifier | AST.ArrayPattern | AST.ObjectPattern | null)[] = [];
-      
-      while (!this.check("]") && !this.isAtEnd()) {
-        // Skip virtual semicolons
-        while (this.peek().virtualSemi) this.advance();
-        
-        // Check for hole in array pattern (e.g., [a, , c])
-        if (this.check(",")) {
-          elements.push(null);
-          this.advance();
-          continue;
-        }
-        
-        // Parse nested pattern or identifier
-        if (this.check("[") || this.check("{")) {
-          elements.push(this.parseDestructuringPattern());
-        } else if (this.peek().type === TokenType.Identifier) {
-          const name = this.parseIdentifier();
-          elements.push(name);
-        } else {
-          break;
-        }
-        
-        // Skip virtual semicolons before comma
-        while (this.peek().virtualSemi) this.advance();
-        
-        if (!this.match(",")) {
-          break;
-        }
-      }
-      
-      this.consume("]", "Expected ']' after array pattern");
-      
-      return {
-        kind: "ArrayPattern",
-        elements,
-        span: this.createSpan(start, this.current - 1)
-      };
-    } else {
-      // Object destructuring pattern
-      this.advance(); // consume {
-      const properties: AST.ObjectPatternProperty[] = [];
-      
-      while (!this.check("}") && !this.isAtEnd()) {
-        // Skip virtual semicolons
-        while (this.peek().virtualSemi) this.advance();
-        
-        const propStart = this.current;
-        const key = this.parseIdentifier();
-        
-        let value: AST.Identifier | AST.ArrayPattern | AST.ObjectPattern = key;
-        let shorthand = true;
-        
-        if (this.match(":")) {
-          shorthand = false;
-          // Parse nested pattern or identifier
-          if (this.check("[") || this.check("{")) {
-            value = this.parseDestructuringPattern();
-          } else {
-            value = this.parseIdentifier();
-          }
-        }
-        
-        properties.push({
-          key,
-          value,
-          shorthand,
-          span: this.createSpan(propStart, this.current - 1)
-        });
-        
-        // Skip virtual semicolons before comma
-        while (this.peek().virtualSemi) this.advance();
-        
-        if (!this.match(",")) {
-          break;
-        }
-      }
-      
-      this.consume("}", "Expected '}' after object pattern");
-      
-      return {
-        kind: "ObjectPattern",
-        properties,
-        span: this.createSpan(start, this.current - 1)
-      };
-    }
-  }
+  // Variable/const/short declarations — delegated to src/parselets/declarations.ts
+  public parseVarDecl(): AST.VarDecl { return Decls.parseVarDecl(this); }
+  public parseConstDecl(): AST.ConstDecl { return Decls.parseConstDecl(this); }
+  private parseShortDecl(): AST.ShortDecl { return Decls.parseShortDecl(this); }
+  private parseDestructuringShortDecl(): AST.ShortDecl { return Decls.parseDestructuringShortDecl(this); }
+  public parseDestructuringPattern(): AST.ArrayPattern | AST.ObjectPattern { return Decls.parseDestructuringPattern(this); }
+  private peekAhead(value: string): boolean { return Decls.peekAhead(this, value); }
   
   public parseExpressionBody(): AST.Block {
     const expr = this.parseExpression();
@@ -1018,201 +758,10 @@ export class Parser extends ParserCursor {
   
   
   
-  // Other declaration parsing
-  private parseTypeDecl(): AST.TypeDecl {
-    const start = this.current - 1;
-    const name = this.parseIdentifier();
-    
-    // Parse generic parameters if present
-    let genericParams: AST.Identifier[] | undefined;
-    if (this.match("<")) {
-      genericParams = [];
-      do {
-        genericParams.push(this.parseIdentifier());
-      } while (this.match(","));
-      this.consume(">", "Expected '>' after generic parameters");
-    }
-    
-    this.consume("=", "Expected '=' in type declaration");
-    const definition = this.parseType();
-    this.consumeSemicolon();
-    
-    return {
-      kind: "TypeDecl",
-      name,
-      genericParams,
-      definition,
-      span: this.createSpan(start, this.current - 1)
-    };
-  }
-
-  private parsePackageDecl(): AST.PackageDecl {
-    const start = this.current - 1;
-    const nameToken = this.peek().type === TokenType.Identifier ?
-      this.advance() :
-      this.consume(TokenType.StringLiteral, "Expected package name");
-
-    const name: AST.Identifier = {
-      kind: "Identifier",
-      name: nameToken.value,
-      span: this.createSpanFrom(nameToken)
-    };
-
-    this.consumeSemicolon();
-
-    return {
-      kind: "PackageDecl",
-      name,
-      span: this.createSpan(start, this.current - 1)
-    };
-  }
-
-  private parseExportDecl(): AST.ExportDecl {
-    const start = this.current - 1;
-
-    // Handle 'export default'
-    if (this.match("default")) {
-      let declaration: AST.Decl | undefined;
-
-      // Check if it's a declaration (class, function, etc.)
-      if (this.isDeclStart()) {
-        declaration = this.parseDeclaration();
-      } else {
-        // It's an expression - wrap it in an ExprStmt for now
-        const expr = this.parseExpression();
-        this.consumeSemicolon();
-        // We'll store the expression as-is - could extend AST later
-      }
-
-      return {
-        kind: "ExportDecl",
-        declaration,
-        isDefault: true,
-        span: this.createSpan(start, this.current - 1)
-      };
-    }
-
-    // Handle 'export type'
-    if (this.match("type")) {
-      // Check if it's export type { ... } or export type Name = ...
-      if (this.check("{")) {
-        // export type { ... }
-        const specifiers = this.parseExportSpecifiers();
-
-        let source: string | undefined;
-        if (this.match("from")) {
-          if (this.peek().type === TokenType.StringLiteral) {
-            source = this.advance().value.slice(1, -1);
-          }
-        }
-
-        this.consumeSemicolon();
-
-        return {
-          kind: "ExportDecl",
-          specifiers,
-          source,
-          span: this.createSpan(start, this.current - 1)
-        };
-      } else {
-        // export type Name = ...
-        // Parse as type declaration
-        const declaration = this.parseTypeDecl();
-        return {
-          kind: "ExportDecl",
-          declaration,
-          span: this.createSpan(start, this.current - 1)
-        };
-      }
-    }
-
-    // Check for export declaration (export function foo() {})
-    if (this.isDeclStart()) {
-      const declaration = this.parseDeclaration();
-      return {
-        kind: "ExportDecl",
-        declaration,
-        span: this.createSpan(start, this.current - 1)
-      };
-    }
-
-    // Check for export specifiers (export { foo, bar })
-    if (this.check("{")) {
-      const specifiers = this.parseExportSpecifiers();
-
-      let source: string | undefined;
-      if (this.match("from")) {
-        if (this.peek().type === TokenType.StringLiteral) {
-          source = this.advance().value.slice(1, -1);
-        }
-      }
-
-      this.consumeSemicolon();
-
-      return {
-        kind: "ExportDecl",
-        specifiers,
-        source,
-        span: this.createSpan(start, this.current - 1)
-      };
-    }
-
-    // Handle simple export: export Parser or export * from
-    if (this.check("*")) {
-      this.advance();
-      if (this.match("from")) {
-        let source: string | undefined;
-        if (this.peek().type === TokenType.StringLiteral) {
-          source = this.advance().value.slice(1, -1);
-        }
-        this.consumeSemicolon();
-
-        return {
-          kind: "ExportDecl",
-          source,
-          span: this.createSpan(start, this.current - 1)
-        };
-      }
-    }
-
-    // Try to consume as identifier
-    if (this.peek().type === TokenType.Identifier) {
-      this.advance();
-      this.consumeSemicolon();
-
-      return {
-        kind: "ExportDecl",
-        span: this.createSpan(start, this.current - 1)
-      };
-    }
-
-    throw this.error(this.peek(), "Invalid export declaration");
-  }
-
-  private parseExportSpecifiers(): AST.ExportSpecifier[] {
-    this.consume("{", "Expected '{'");
-    const specifiers: AST.ExportSpecifier[] = [];
-
-    if (!this.check("}")) {
-      do {
-        const local = this.parseIdentifier();
-        let exported: AST.Identifier | undefined;
-
-        if (this.match("as")) {
-          exported = this.parseIdentifier();
-        }
-
-        specifiers.push({
-          local,
-          exported,
-          span: this.createSpanFrom(local)
-        });
-      } while (this.match(","));
-    }
-
-    this.consume("}", "Expected '}'");
-    return specifiers;
-  }
+  // Type/package/export declarations — delegated to src/parselets/declarations.ts
+  private parseTypeDecl(): AST.TypeDecl { return Decls.parseTypeDecl(this); }
+  private parsePackageDecl(): AST.PackageDecl { return Decls.parsePackageDecl(this); }
+  private parseExportDecl(): AST.ExportDecl { return Decls.parseExportDecl(this); }
 
   // Literal parsing
   // Literals extracted to src/parselets/literals.ts (Chunk 6)
@@ -1263,16 +812,6 @@ export class Parser extends ParserCursor {
     // Return missing identifier instead of throwing
     this.errors.push(new ParseError("Expected identifier", token));
     return this.createMissingIdentifier();
-  }
-  
-  private parseIdentifierList(): AST.Identifier[] {
-    const ids: AST.Identifier[] = [this.parseIdentifier()];
-    
-    while (this.match(",")) {
-      ids.push(this.parseIdentifier());
-    }
-    
-    return ids;
   }
   
   public parseExpressionList(): AST.Expr[] {
