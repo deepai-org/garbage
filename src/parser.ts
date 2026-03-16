@@ -1368,7 +1368,7 @@ export class Parser {
         this.advance();
       }
       
-      const body = this.check("{") ? this.parseBlock() : this.parseExpression();
+      const body = this.check("{") ? this.parseBlock() : this.parseAssignmentExpression();
       return {
         kind: "Lambda",
         params: [{
@@ -8224,9 +8224,9 @@ export class Parser {
       this.advance();
     }
     
-    // Parse body
-    const body = this.check("{") ? this.parseBlock() : this.parseExpression();
-    
+    // Parse body — use parseAssignmentExpression to stop at comma (not parseExpression)
+    const body = this.check("{") ? this.parseBlock() : this.parseAssignmentExpression();
+
     return {
       kind: "Lambda",
       params,
@@ -8235,7 +8235,7 @@ export class Parser {
       span: this.createSpan(start, this.current - 1)
     };
   }
-  
+
   private parseAsyncLambda(start: number): AST.Lambda {
     // Check for async block (no parameters, just a block)
     if (this.check("{")) {
@@ -8280,9 +8280,9 @@ export class Parser {
     
     // Parse arrow
     this.consume("=>", "Expected '=>' in async lambda");
-    
-    // Parse body
-    const body = this.check("{") ? this.parseBlock() : this.parseExpression();
+
+    // Parse body — use parseAssignmentExpression to stop at comma
+    const body = this.check("{") ? this.parseBlock() : this.parseAssignmentExpression();
     
     return {
       kind: "Lambda",
