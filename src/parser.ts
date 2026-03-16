@@ -6562,7 +6562,7 @@ export class Parser {
             span: this.createSpanFrom(nameToken)
           };
           
-          // Check for generic parameters on methods: methodName<T, U>()
+          // Check for generic parameters on methods: methodName<T, U>() or methodName<K extends T>()
           let genericParams: AST.Identifier[] | undefined;
           if (this.check("<") && !this.check("<=") && !this.check("<<") && !this.check("<-")) {
             const checkpoint = this.current;
@@ -6571,6 +6571,16 @@ export class Parser {
               genericParams = [];
               do {
                 genericParams.push(this.parseIdentifier());
+                // Skip type constraints: extends Type, : Type
+                if (this.match("extends", "super")) {
+                  this.parseType();
+                } else if (this.check(":") && !this.check("::")) {
+                  this.advance();
+                  this.parseType();
+                  while (this.match("+")) {
+                    this.parseType();
+                  }
+                }
               } while (this.match(","));
               this.consume(">", "Expected '>' after generic parameters");
               
