@@ -6,6 +6,8 @@ import * as Types from './parselets/types';
 import * as Functions from './parselets/functions';
 import * as Imports from './parselets/imports';
 import * as Literals from './parselets/literals';
+import * as ClassDecl from './parselets/class-decl';
+import * as ControlFlow from './parselets/control-flow';
 
 export { ParseError } from './parser-cursor';
 
@@ -117,7 +119,7 @@ export class Parser extends ParserCursor {
       // After decorators, we expect a declaration (function or class)
       // Check for class first since Python can have 'def' inside class
       if (this.match("class")) {
-        const cls = this.parseClassDecl(decorators);
+        const cls = ClassDecl.parseClassDecl(this, decorators);
         return cls;
       } else if (this.match("async", "unsafe")) {
         // Handle async/unsafe before function
@@ -172,7 +174,7 @@ export class Parser extends ParserCursor {
            keyword === "go" || keyword === "echo";
   }
   
-  private isDeclStart(): boolean {
+  public isDeclStart(): boolean {
     const type = this.peek().type;
     const value = this.peek().value;
     
@@ -242,7 +244,7 @@ export class Parser extends ParserCursor {
     );
   }
   
-  private parseDeclaration(): AST.Decl {
+  public parseDeclaration(): AST.Decl {
     const token = this.peek();
     
     // Import statements
@@ -344,20 +346,20 @@ export class Parser extends ParserCursor {
     }
     
     if (this.match("class")) {
-      return this.parseClassDecl();
+      return ClassDecl.parseClassDecl(this);
     }
     
     if (this.match("interface", "trait")) {
-      return this.parseInterfaceDecl();
+      return ClassDecl.parseInterfaceDecl(this);
     }
     
     // Handle Rust-style impl blocks as a special class-like structure
     if (this.peek().value === "impl" && this.peek().type === TokenType.Identifier) {
-      return this.parseImplBlock();
+      return ClassDecl.parseImplBlock(this);
     }
     
     if (this.match("enum")) {
-      return this.parseEnumDecl();
+      return ClassDecl.parseEnumDecl(this);
     }
     
     if (this.match("package")) {
@@ -388,12 +390,12 @@ export class Parser extends ParserCursor {
       this.advance(); // consume async
       this.advance(); // consume for
       // Now parse as a for-await loop
-      return this.parseLoop();
+      return ControlFlow.parseLoop(this);
     }
     
     // Control flow
     if (this.match("if")) {
-      return this.parseIf();
+      return ControlFlow.parseIf(this);
     }
     
     if (this.check("switch")) {
@@ -439,23 +441,23 @@ export class Parser extends ParserCursor {
     
     if (this.match("do")) {
       // Check if this is a do-while loop or bash-style do-done
-      return this.parseDoStatement();
+      return ControlFlow.parseDoStatement(this);
     }
     
     if (this.match("for", "while", "until", "loop")) {
-      return this.parseLoop();
+      return ControlFlow.parseLoop(this);
     }
     
     if (this.match("foreach")) {
-      return this.parseForeach();
+      return ControlFlow.parseForeach(this);
     }
     
     if (this.match("try")) {
-      return this.parseTry();
+      return ControlFlow.parseTry(this);
     }
     
     if (this.match("with")) {
-      return this.parseUsing();
+      return ControlFlow.parseUsing(this);
     }
     
     // Check if using is for resource management
@@ -467,50 +469,50 @@ export class Parser extends ParserCursor {
       if ((next?.type === TokenType.Identifier && nextNext?.value === "=") ||
           next?.value === "(") {
         this.advance(); // consume 'using'
-        return this.parseUsing();
+        return ControlFlow.parseUsing(this);
       }
     }
     
     if (this.match("defer")) {
-      return this.parseDefer();
+      return ControlFlow.parseDefer(this);
     }
     
     if (this.match("break")) {
-      return this.parseBreak();
+      return ControlFlow.parseBreak(this);
     }
     
     if (this.match("continue")) {
-      return this.parseContinue();
+      return ControlFlow.parseContinue(this);
     }
     
     if (this.match("return")) {
-      return this.parseReturn();
+      return ControlFlow.parseReturn(this);
     }
     
     if (this.match("assert")) {
-      return this.parseAssert();
+      return ControlFlow.parseAssert(this);
     }
     
     if (this.match("echo", "print")) {
-      return this.parseEcho();
+      return ControlFlow.parseEcho(this);
     }
     
     // New statements
     if (this.match("throw", "raise")) {
-      return this.parseThrow();
+      return ControlFlow.parseThrow(this);
     }
     
     
     if (this.match("go")) {
-      return this.parseGo();
+      return ControlFlow.parseGo(this);
     }
     
     if (this.match("defer")) {
-      return this.parseDefer();
+      return ControlFlow.parseDefer(this);
     }
     
     if (this.match("pass")) {
-      return this.parsePass();
+      return ControlFlow.parsePass(this);
     }
     
     // Begin/end blocks (Ruby-style with rescue/ensure)
@@ -669,7 +671,7 @@ export class Parser extends ParserCursor {
     throw this.error(this.peek(), "Expected block");
   }
   
-  private checkIndentBlock(): boolean {
+  public checkIndentBlock(): boolean {
     // Check if previous token was a header ending with ':'
     if (this.current > 0) {
       const prev = this.tokens[this.current - 1];
@@ -872,7 +874,7 @@ export class Parser extends ParserCursor {
     return false;
   }
 
-  private parseBashTestExpression(): AST.Expr {
+  public parseBashTestExpression(): AST.Expr {
     // Parse [ ... ] as a special test expression
     const start = this.current;
     this.consume("[", "Expected '[' for bash test");
@@ -936,7 +938,7 @@ export class Parser extends ParserCursor {
     };
   }
   
-  private parseIfThenBlock(): AST.Block {
+  public parseIfThenBlock(): AST.Block {
     // Parse statements until we hit fi, elif, or else
     const start = this.current;
     const statements: (AST.Decl | AST.Stmt)[] = [];
@@ -1180,7 +1182,7 @@ export class Parser extends ParserCursor {
     };
   }
   
-  private parseKeywordBlock(keyword?: string): AST.Block {
+  public parseKeywordBlock(keyword?: string): AST.Block {
     const start = this.current;
     const actualKeyword = keyword || this.previous()?.value || "do";
     this.keywordStack.push(actualKeyword as any);
@@ -1486,7 +1488,7 @@ export class Parser extends ParserCursor {
     
     // Handle yield expression
     if (this.match("yield")) {
-      return this.parseYieldExpression();
+      return ControlFlow.parseYieldExpression(this);
     }
     
     // Handle channel receive operator
@@ -2785,115 +2787,6 @@ export class Parser extends ParserCursor {
   }
   
   // Control flow parsing
-  private parseIf(): AST.If {
-    const start = this.current - 1;
-    const arms: AST.IfArm[] = [];
-    let isBashStyle = false;
-    
-    // First if condition
-    // Check if this is a bash-style test expression with [ ... ]
-    let test: AST.Expr;
-    if (this.check("[")) {
-      // Bash test expression
-      test = this.parseBashTestExpression();
-    } else {
-      test = this.parseExpression();
-    }
-    
-    // Go-style if with init statement: if init; condition { ... }
-    if (this.check(";") && this.peekNext()?.value !== "then") {
-      // The test we just parsed is actually the init statement; parse the real condition
-      this.advance(); // consume ;
-      if (this.check("[")) {
-        test = this.parseBashTestExpression();
-      } else {
-        test = this.parseExpression();
-      }
-    }
-
-    // Check for Python-style colon
-    if (this.match(":")) {
-      // Indent-based block
-      const body = this.parseIndentBlock();
-      arms.push({ test, body, span: this.createSpan(start, this.current - 1) });
-    } else if (this.check(";") && this.peekNext()?.value === "then") {
-      // Bash-style: if condition; then ... fi
-      this.advance(); // consume ;
-      this.consume("then", "Expected 'then' after if condition in bash-style");
-      const body = this.parseIfThenBlock();
-      arms.push({ test, body, span: this.createSpan(start, this.current - 1) });
-      isBashStyle = true;
-    } else if (this.match("then")) {
-      // Bash-style without semicolon: if condition then ... fi
-      const body = this.parseIfThenBlock();
-      arms.push({ test, body, span: this.createSpan(start, this.current - 1) });
-      isBashStyle = true;
-    } else {
-      // Regular block or single statement
-      const body = this.parseBlockOrStatement();
-      arms.push({ test, body, span: this.createSpan(start, this.current - 1) });
-    }
-    
-    // elif/elseif clauses
-    while (this.match("elif", "elseif")) {
-      const elifTest = this.parseExpression();
-      
-      let elifBody: AST.Block;
-      if (this.match(":")) {
-        elifBody = this.parseIndentBlock();
-      } else if (isBashStyle && (this.match(";") || this.match("then"))) {
-        if (this.previous()?.value === ";") {
-          this.consume("then", "Expected 'then' after elif condition");
-        }
-        elifBody = this.parseIfThenBlock();
-      } else {
-        // Block or single statement
-        elifBody = this.parseBlockOrStatement();
-      }
-      
-      arms.push({ 
-        test: elifTest, 
-        body: elifBody, 
-        span: this.createSpan(this.current - 1, this.current) 
-      });
-    }
-    
-    // else clause
-    let elseBody: AST.Block | undefined;
-    if (this.match("else")) {
-      // Check for 'else if' (two separate keywords)
-      if (this.match("if")) {
-        // Handle 'else if' as another if statement
-        // parseIf expects 'if' to have been already matched
-        const elseIf = this.parseIf();
-        // Wrap the else-if in a block
-        elseBody = {
-          kind: "Block",
-          statements: [elseIf],
-          span: elseIf.span
-        };
-      } else if (this.match(":")) {
-        elseBody = this.parseIndentBlock();
-      } else if (isBashStyle) {
-        elseBody = this.parseIfThenBlock();
-      } else {
-        // Block or single statement
-        elseBody = this.parseBlockOrStatement();
-      }
-    }
-    
-    // Consume 'fi' for bash-style if statements
-    if (isBashStyle) {
-      this.consume("fi", "Expected 'fi' to close if statement");
-    }
-    
-    return {
-      kind: "If",
-      arms,
-      elseBody,
-      span: this.createSpan(start, this.current - 1)
-    };
-  }
   
   public parseSwitch(): AST.Switch | AST.Match {
     const start = this.current - 1;
@@ -3314,1078 +3207,8 @@ export class Parser extends ParserCursor {
     return false;
   }
   
-  private parseDoStatement(): AST.Stmt {
-    const start = this.current - 1;
-    const startToken = this.tokens[start - 1]; // The 'do' token
-
-    // Ruby-style block: do |params| body end
-    if (this.check("|")) {
-      this.advance(); // consume '|'
-      const params: AST.Param[] = [];
-      if (!this.check("|")) {
-        do {
-          params.push(Functions.parseParameter(this));
-        } while (this.match(","));
-      }
-      this.consume("|", "Expected '|' after block parameters");
-      // Parse body until 'end' or 'done'
-      const stmts: AST.Stmt[] = [];
-      while (!this.check("end") && !this.check("done") && !this.isAtEnd()) {
-        while (this.peek().virtualSemi) this.advance();
-        if (this.check("end") || this.check("done")) break;
-        stmts.push(this.parseTopLevel() as AST.Stmt);
-      }
-      if (!this.match("end") && !this.match("done")) {
-        throw this.error(this.peek(), "Expected 'end' to close do block");
-      }
-      const body: AST.Block = { kind: "Block", statements: stmts, span: this.createSpan(start, this.current - 1) };
-      // Emit as a Lambda expression statement (the block is a Ruby block/lambda)
-      const lambda: AST.Lambda = {
-        kind: "Lambda",
-        params,
-        body,
-        span: this.createSpan(start, this.current - 1)
-      };
-      return { kind: "ExprStmt", expression: lambda, span: lambda.span } as any;
-    }
-
-    // Parse the block — use custom loop that accepts both 'done' (bash) and 'end' (Ruby)
-    let body: AST.Block;
-    if (this.check("{")) {
-      body = this.parseBlock();
-    } else {
-      const stmts: (AST.Decl | AST.Stmt)[] = [];
-      while (!this.check("done") && !this.check("end") && !this.check("while") && !this.isAtEnd()) {
-        if (this.peek().virtualSemi) { this.advance(); continue; }
-        const beforePos = this.current;
-        try {
-          const stmt = this.parseTopLevel();
-          if (stmt) stmts.push(stmt);
-        } catch (error) {
-          if (error instanceof (ParseError as any)) {
-            this.errors.push(error as any);
-            this.synchronize();
-          } else { throw error; }
-        }
-        if (this.current === beforePos) this.advance();
-      }
-      body = { kind: "Block", statements: stmts, span: this.createSpan(start, this.current - 1) };
-    }
-
-    // Check what comes after the block
-    if (this.match("while")) {
-      // This is a JavaScript-style do-while loop
-      this.consume("(", "Expected '(' after 'while' in do-while loop");
-      const test = this.parseExpression();
-      this.consume(")", "Expected ')' after condition in do-while loop");
-
-      // Optional semicolon after do-while
-      this.consumeSemicolon();
-
-      return {
-        kind: "Loop",
-        mode: "do-while",
-        body,
-        test,
-        span: this.createSpan(start, this.current - 1)
-      };
-    } else if (this.check("done")) {
-      // This would be a bash-style do-done block
-      // For now, treat it as a simple block statement
-      this.consume("done", "Expected 'done' to close do block");
-      return {
-        kind: "Block",
-        statements: body.statements,
-        span: this.createSpan(start, this.current - 1)
-      };
-    } else if (this.check("end")) {
-      // Ruby-style do-end block (e.g., fork do ... end)
-      this.consume("end", "Expected 'end' to close do block");
-      return {
-        kind: "Block",
-        statements: body.statements,
-        span: this.createSpan(start, this.current - 1)
-      };
-    } else {
-      // Error: 'do' must be followed by either 'while', 'done', or 'end'
-      throw this.error(this.peek(), "Expected 'while' or 'done' after do block");
-    }
-  }
   
-  private parseLoop(): AST.Loop {
-    const start = this.current - 1;
-    const keyword = this.previous()?.value || "";
-    
-    if (keyword === "loop") {
-      // Infinite loop
-      const body = this.parseBlock();
-      return {
-        kind: "Loop",
-        mode: "infinite",
-        body,
-        span: this.createSpan(start, this.current - 1)
-      };
-    }
-    
-    if (keyword === "for") {
-      // Check for await
-      const isAwait = this.match("await");
-      
-      // Check for foreach-style
-      if (this.peek().type === TokenType.Identifier || (isAwait && this.check("("))) {
-        if (isAwait) {
-          // for await (const item of stream)
-          this.consume("(", "Expected '(' after 'for await'");
-          
-          // Parse variable declaration (const/let/var item)
-          let variable: AST.Identifier;
-          if (this.match("const", "let", "var")) {
-            variable = this.parseIdentifier();
-          } else {
-            variable = this.parseIdentifier();
-          }
-          
-          this.consume("of", "Expected 'of' in for-await loop");
-          const iterable = this.parseExpression();
-          this.consume(")", "Expected ')' after for-await");
-          const body = this.parseBlock();
-          
-          return {
-            kind: "Loop",
-            mode: "foreach",
-            variable,
-            iterable,
-            body,
-            await: true,
-            span: this.createSpan(start, this.current - 1)
-          };
-        } else {
-          const checkpoint = this.current;
-          const id = this.advance();
-          if (this.match(",")) {
-            // Multi-variable: for key, value of/in ...
-            const firstVar: AST.Identifier = {
-              kind: "Identifier",
-              name: id.value,
-              span: this.createSpanFrom(id)
-            };
-            const secondId = this.peek();
-            if (secondId.type === TokenType.Identifier || secondId.type === TokenType.Keyword) {
-              this.advance();
-              const secondVar: AST.Identifier = {
-                kind: "Identifier",
-                name: secondId.value,
-                span: this.createSpanFrom(secondId)
-              };
-              if (this.match("of", "in")) {
-                const variable: AST.ArrayPattern = {
-                  kind: "ArrayPattern",
-                  elements: [firstVar, secondVar],
-                  span: this.createSpan(checkpoint, this.current - 1)
-                };
-                const iterable = this.parseExpression();
-                this.match(":");
-                const body = this.parseBlockOrStatement();
-                return {
-                  kind: "Loop",
-                  mode: "foreach",
-                  variable,
-                  iterable,
-                  body,
-                  span: this.createSpan(start, this.current - 1)
-                };
-              }
-            }
-            // Didn't match multi-variable pattern, backtrack
-            this.current = checkpoint;
-          } else if (this.match("in")) {
-            // foreach style: for x in collection
-            const variable: AST.Identifier = {
-              kind: "Identifier",
-              name: id.value,
-              span: this.createSpanFrom(id)
-            };
-            this.noRubyBlock = true;
-            const iterable = this.parseExpression();
-            this.noRubyBlock = false;
-            // Consume optional Python-style colon (for x in items:)
-            let body: AST.Block;
-            if (this.match(":")) {
-              body = this.parseIndentBlock();
-            } else if (this.match("do")) {
-              body = this.parseKeywordBlock("do");
-            } else {
-              body = this.parseBlockOrStatement();
-            }
-            return {
-              kind: "Loop",
-              mode: "foreach",
-              variable,
-              iterable,
-              body,
-              span: this.createSpan(start, this.current - 1)
-            };
-          }
-          this.current = checkpoint;
-        }
-      }
-      
-      // Check for Go-style for loop (without parentheses)
-      // Look for pattern: identifier :=
-      if (this.peek().type === TokenType.Identifier && this.peekAt(1)?.value === ":=") {
-        // Go-style for loop without parentheses
-        // Parse init statement manually to avoid consuming semicolon
-        const initStart = this.current;
-        const name = this.parseIdentifier();
-        this.consume(":=", "Expected ':=' in for init");
-
-        // Check for Go for-range: `for task := range iterable { ... }`
-        if (this.peek().type === TokenType.Identifier && this.peek().value === "range") {
-          this.advance(); // consume 'range'
-          const iterable = this.parseExpression();
-          const body = this.parseBlockOrStatement();
-          return {
-            kind: "Loop",
-            mode: "foreach",
-            variable: name,
-            iterable,
-            body,
-            span: this.createSpan(start, this.current - 1)
-          };
-        }
-
-        const expr = this.parseExpression();
-        const init: AST.ShortDecl = {
-          kind: "ShortDecl",
-          pairs: [{ name, expr }],
-          span: this.createSpan(initStart, this.current - 1)
-        };
-
-        this.consume(";", "Expected ';' after init");
-        
-        let test: AST.Expr | undefined;
-        if (!this.check(";")) {
-          test = this.parseExpression();
-        }
-        this.consume(";", "Expected ';' after loop condition");
-        
-        let step: AST.Expr | undefined;
-        if (!this.check("{")) {
-          step = this.parseExpression();
-        }
-        
-        const body = this.parseBlockOrStatement();
-        
-        return {
-          kind: "Loop",
-          mode: "for",
-          init,
-          test,
-          step,
-          body,
-          span: this.createSpan(start, this.current - 1)
-        };
-      }
-      
-      // Go-style condition-only for: for condition { body }
-      if (!this.check("(")) {
-        const test = this.parseExpression();
-        let body: AST.Block;
-        if (this.match(":")) {
-          body = this.parseIndentBlock();
-        } else {
-          body = this.parseBlockOrStatement();
-        }
-        return {
-          kind: "Loop",
-          mode: "while",
-          test,
-          body,
-          span: this.createSpan(start, this.current - 1)
-        };
-      }
-
-      // Traditional for loop with parentheses
-      this.consume("(", "Expected '(' after 'for'");
-      
-      // Check for for-of/for-in loops with const/let/var
-      if (this.check("const") || this.check("let") || this.check("var")) {
-        const checkpoint = this.current;
-        const declKeyword = this.advance(); // consume const/let/var
-        
-        if (this.peek().type === TokenType.Identifier) {
-          const variable = this.parseIdentifier();
-          
-          // Check for 'of' or 'in'
-          if (this.match("of", "in")) {
-            const iterType = this.previous()?.value; // "of" or "in"
-            const iterable = this.parseExpression();
-            this.consume(")", "Expected ')' after for-of/for-in");
-            const body = this.parseBlockOrStatement();
-            
-            return {
-              kind: "Loop",
-              mode: "foreach",
-              variable,
-              iterable,
-              body,
-              span: this.createSpan(start, this.current - 1)
-            };
-          }
-        }
-        
-        // Not a for-of/for-in, restore position and parse normally
-        this.current = checkpoint;
-      }
-      
-      // Check for for-of/for-in without const/let/var (just identifier or destructuring)
-      if (this.peek().type === TokenType.Identifier) {
-        const checkpoint = this.current;
-        
-        // Check if this might be a destructuring pattern
-        const firstId = this.parseIdentifier();
-        
-        // Check for destructuring pattern like a, b (note: we're already inside parentheses)
-        if (this.check(",")) {
-          // This is a destructuring pattern
-          const elements: AST.Identifier[] = [firstId];
-          while (this.match(",")) {
-            elements.push(this.parseIdentifier());
-          }
-          
-          // Check if followed by 'in' or 'of'
-          if (this.check(")") && (this.peekNext()?.value === "in" || this.peekNext()?.value === "of")) {
-            this.advance(); // consume )
-            this.advance(); // consume in/of
-            const iterType = this.previous()?.value; // "in" or "of"
-            const iterable = this.parseExpression();
-            const body = this.parseBlockOrStatement();
-            
-            // Create a pseudo-identifier for the destructured pattern
-            const variable: AST.Identifier = {
-              kind: "Identifier",
-              name: `(${elements.map(e => e.name).join(", ")})`,
-              originalSpelling: `(${elements.map(e => e.name).join(", ")})`,
-              span: this.createSpan(checkpoint, checkpoint + elements.length - 1)
-            };
-            
-            return {
-              kind: "Loop",
-              mode: "foreach",
-              variable,
-              iterable,
-              body,
-              span: this.createSpan(start, this.current - 1)
-            };
-          }
-        } else if (this.match("of", "in")) {
-          // Simple identifier with in/of
-          const iterType = this.previous()?.value; // "of" or "in"
-          const iterable = this.parseExpression();
-          this.consume(")", "Expected ')' after for-of/for-in");
-          const body = this.parseBlockOrStatement();
-          
-          return {
-            kind: "Loop",
-            mode: "foreach",
-            variable: firstId,
-            iterable,
-            body,
-            span: this.createSpan(start, this.current - 1)
-          };
-        }
-        
-        // Not a for-of/for-in, restore position
-        this.current = checkpoint;
-      }
-      
-      let init: AST.Stmt | AST.Decl | undefined;
-      if (!this.check(";")) {
-        if (this.isDeclStart()) {
-          init = this.parseDeclaration();
-        } else {
-          init = this.parseExprStmt();
-        }
-      } else {
-        this.advance(); // consume ';'
-      }
-      
-      // Skip virtual semicolons that might appear
-      while (this.peek().virtualSemi) {
-        this.advance();
-      }
-      
-      let test: AST.Expr | undefined;
-      if (!this.check(";")) {
-        test = this.parseExpression();
-      }
-      this.consume(";", "Expected ';' after loop condition");
-      
-      let step: AST.Expr | undefined;
-      if (!this.check(")")) {
-        step = this.parseExpression();
-      }
-      
-      this.consume(")", "Expected ')' after for clauses");
-      const body = this.parseBlockOrStatement();
-      
-      return {
-        kind: "Loop",
-        mode: "for",
-        init,
-        test,
-        step,
-        body,
-        span: this.createSpan(start, this.current - 1)
-      };
-    }
-    
-    if (keyword === "while") {
-      // Check if this is a bash-style test expression with [ ... ]
-      let test: AST.Expr;
-      if (this.check("[")) {
-        // Bash test expression
-        test = this.parseBashTestExpression();
-      } else {
-        test = this.parseExpression();
-      }
-      
-      // Skip optional semicolon before do (bash style: while [ test ]; do)
-      if (this.check(";") && this.peekNext()?.value === "do") {
-        this.advance(); // consume semicolon
-      }
-      
-      // Check for keyword block (do...done)
-      let body: AST.Block;
-      if (this.match("do")) {
-        body = this.parseKeywordBlock("do");
-      } else if (this.match(":")) {
-        // Python-style colon block
-        body = this.parseIndentBlock();
-      } else if (this.peek().virtualSemi && !this.check("{")) {
-        // Ruby-style: while cond \n body \n end
-        body = this.parseKeywordBlock("while");
-      } else {
-        body = this.parseBlockOrStatement();
-      }
-
-      return {
-        kind: "Loop",
-        mode: "while",
-        test,
-        body,
-        span: this.createSpan(start, this.current - 1)
-      };
-    }
-    
-    if (keyword === "until") {
-      // Check if this is a bash-style test expression with [ ... ]
-      let test: AST.Expr;
-      if (this.check("[")) {
-        // Bash test expression
-        test = this.parseBashTestExpression();
-      } else {
-        test = this.parseExpression();
-      }
-      
-      // Skip optional semicolon before do (bash style: until [ test ]; do)
-      if (this.check(";") && this.peekNext()?.value === "do") {
-        this.advance(); // consume semicolon
-      }
-      
-      // Check for keyword block (do...done)
-      let body: AST.Block;
-      if (this.match("do")) {
-        body = this.parseKeywordBlock("do");
-      } else {
-        body = this.parseBlockOrStatement();
-      }
-      return {
-        kind: "Loop",
-        mode: "until",
-        test,
-        body,
-        span: this.createSpan(start, this.current - 1)
-      };
-    }
-    
-    throw this.error(this.peek(), "Invalid loop type");
-  }
-  
-  private parseForeach(): AST.Loop {
-    const start = this.current - 1;
-    const variable = this.parseIdentifier();
-    this.consume("in", "Expected 'in' in foreach loop");
-    // Suppress Ruby block consumption so factory.deps do ... done doesn't
-    // get parsed as Ruby method call (items.each do |x| ... end)
-    this.noRubyBlock = true;
-    const iterable = this.parseExpression();
-    this.noRubyBlock = false;
-
-    // Check for do/done keyword block
-    let body: AST.Block;
-    if (this.match("do")) {
-      body = this.parseKeywordBlock("do");
-    } else {
-      body = this.parseBlockOrStatement();
-    }
-    
-    return {
-      kind: "Loop",
-      mode: "foreach",
-      variable,
-      iterable,
-      body,
-      span: this.createSpan(start, this.current - 1)
-    };
-  }
-  
-  private parseTry(): AST.Try {
-    const start = this.current - 1;
-    
-    // Check for Python-style try with colon
-    let body: AST.Block;
-    if (this.match(":")) {
-      // Python-style - parse single statement or indented block
-      if (this.checkIndentBlock()) {
-        body = this.parseIndentBlock();
-      } else {
-        // Single statement on same line
-        const stmt = this.parseStatement();
-        body = {
-          kind: "Block",
-          statements: [stmt],
-          span: stmt.span
-        };
-      }
-    } else if (this.check("(")) {
-      // Java-style try-with-resources: try (resource = expr) { body }
-      // Skip the resource declaration and parse as regular try body
-      this.advance(); // consume '('
-      // Parse resource declarations (skip until closing paren)
-      let parenDepth = 1;
-      while (parenDepth > 0 && !this.isAtEnd()) {
-        if (this.check("(")) parenDepth++;
-        if (this.check(")")) parenDepth--;
-        if (parenDepth > 0) this.advance();
-      }
-      this.consume(")", "Expected ')' after try-with-resources");
-      body = this.parseBlock();
-    } else {
-      body = this.parseBlock();
-    }
-
-    const catches: AST.CatchClause[] = [];
-    
-    while (this.match("catch", "except", "rescue")) {
-      const clauseType = this.previous()?.value; // Remember which keyword we matched
-      let param: AST.Identifier | undefined;
-      let type: AST.TypeNode | undefined;
-      
-      // Python-style except: except Type: except Type as var:
-      // But NOT except (e) { ... } which uses parenthesized catch below
-      if (clauseType === "except" && !this.check("(") && !this.check("{")) {
-        // Parse optional exception type(s) and binding
-        if (this.peek().type === TokenType.Identifier && !this.check(":")) {
-          type = this.parseType();
-          if (this.match("as")) {
-            param = this.parseIdentifier();
-          }
-        }
-        // Expect colon for Python-style, or handle brace-style
-        if (this.match(":")) {
-          let catchBody: AST.Block;
-          if (this.checkIndentBlock()) {
-            catchBody = this.parseIndentBlock();
-          } else {
-            const stmt = this.parseStatement();
-            catchBody = {
-              kind: "Block",
-              statements: [stmt],
-              span: stmt.span
-            };
-          }
-          catches.push({
-            param,
-            type,
-            body: catchBody,
-            span: this.createSpan(this.current - 1, this.current)
-          });
-        } else {
-          // Fall through to brace-style catch body
-          const catchBody = this.parseBlock();
-          catches.push({ param, type, body: catchBody, span: this.createSpan(this.current - 1, this.current) });
-        }
-      } else if (clauseType === "rescue") {
-        // Ruby-style rescue Type => var or just rescue
-        if (this.peek().type === TokenType.Identifier && !this.check("=>")) {
-          type = this.parseType();
-        }
-        
-        if (this.match("=>")) {
-          param = this.parseIdentifier();
-        }
-        
-        // Parse rescue body (statements until next rescue/ensure/end)
-        const rescueStatements: (AST.Decl | AST.Stmt)[] = [];
-        while (!this.check("rescue") && !this.check("ensure") && !this.check("end") && 
-               !this.check("finally") && !this.check("except") && !this.isAtEnd()) {
-          if (this.peek().virtualSemi) {
-            this.advance();
-            continue;
-          }
-          const beforePos = this.current;
-          try {
-            const stmt = this.parseTopLevel();
-            if (stmt) rescueStatements.push(stmt);
-          } catch (error) {
-            if (error instanceof ParseError) {
-              this.errors.push(error);
-              this.synchronize();
-            } else {
-              throw error;
-            }
-          }
-          // Prevent infinite loop - if we didn't advance, force advance
-          if (this.current === beforePos) {
-            this.advance();
-          }
-        }
-        
-        catches.push({
-          param,
-          type,
-          body: {
-            kind: "Block",
-            statements: rescueStatements,
-            span: this.createSpan(this.current - 1, this.current)
-          },
-          span: this.createSpan(this.current - 1, this.current)
-        });
-      } else if (this.match("(")) {
-        // Traditional catch with parentheses
-        if (!this.check(")")) {
-          param = this.parseIdentifier();
-          if (this.match(":")) {
-            type = this.parseType();
-          }
-        }
-        this.consume(")", "Expected ')' after catch clause");
-        
-        const catchBody = this.parseBlock();
-        catches.push({
-          param,
-          type,
-          body: catchBody,
-          span: this.createSpan(this.current - 1, this.current)
-        });
-      } else {
-        // No parentheses or colon, parse block directly
-        const catchBody = this.parseBlock();
-        catches.push({
-          param,
-          type,
-          body: catchBody,
-          span: this.createSpan(this.current - 1, this.current)
-        });
-      }
-    }
-    
-    let finallyBody: AST.Block | undefined;
-    if (this.match("finally")) {
-      // Check for Python-style finally with colon
-      if (this.match(":")) {
-        if (this.checkIndentBlock()) {
-          finallyBody = this.parseIndentBlock();
-        } else {
-          const stmt = this.parseStatement();
-          finallyBody = {
-            kind: "Block",
-            statements: [stmt],
-            span: stmt.span
-          };
-        }
-      } else {
-        finallyBody = this.parseBlock();
-      }
-    }
-    
-    return {
-      kind: "Try",
-      body,
-      catches,
-      finallyBody,
-      span: this.createSpan(start, this.current - 1)
-    };
-  }
-  
-  private parseUsing(): AST.Using {
-    const start = this.current - 1;
-
-    let resource: AST.Expr | AST.Decl;
-
-    // C#/Java-style: using (Type var = expr) { ... }
-    const hasParen = this.match("(");
-
-    // Inside using (...), check for typed declaration: Type Name = Expr or var Name = Expr
-    const isUsingDecl = hasParen && (
-      // Type Name = Expr pattern (e.g., StreamReader sr = new StreamReader("file"))
-      (this.peek().type === TokenType.Identifier && this.peekAt(1)?.type === TokenType.Identifier) ||
-      // var/let/const Name = Expr pattern (e.g., var response = await ...)
-      ((this.peek().value === "var" || this.peek().value === "let" || this.peek().value === "const") &&
-       this.peekAt(1)?.type === TokenType.Identifier)
-    );
-    if (isUsingDecl) {
-      // Skip var/let/const or type name
-      const firstToken = this.advance();
-      const varName = this.parseIdentifier();
-      this.consume("=", "Expected '=' in using declaration");
-      const value = this.parseExpression();
-      resource = {
-        kind: "VarDecl",
-        names: [varName],
-        values: [value],
-        span: this.createSpan(start, this.current - 1)
-      } as AST.VarDecl;
-    } else {
-    // Parse the resource expression
-    const expr = this.parseExpression();
-
-    // Check for Python-style 'as' alias
-    if (this.match("as")) {
-      const alias = this.parseIdentifier();
-      // Create a variable declaration for the alias
-      resource = {
-        kind: "VarDecl",
-        names: [alias],
-        values: [expr],
-        span: this.createSpan(start, this.current - 1)
-      } as AST.VarDecl;
-    } else if (this.isDeclStart()) {
-      // Rewind and parse as declaration
-      this.current = start + 1;
-      resource = this.parseDeclaration();
-    } else {
-      resource = expr;
-    }
-    }
-    
-    // Consume closing paren for using (...) form
-    if (hasParen) {
-      this.consume(")", "Expected ')' after using declaration");
-    }
-
-    // Parse body - check for Python-style colon or explicit block
-    let body: AST.Block | undefined;
-    if (this.match(":")) {
-      if (this.checkIndentBlock()) {
-        body = this.parseIndentBlock();
-      } else {
-        // Single statement on same line
-        const stmt = this.parseStatement();
-        body = {
-          kind: "Block",
-          statements: [stmt],
-          span: stmt.span
-        };
-      }
-    } else if (this.check("{")) {
-      // Explicit block
-      body = this.parseBlock();
-    } else {
-      // C#-style using without explicit body - applies to rest of scope
-      // Create an empty block placeholder
-      body = {
-        kind: "Block",
-        statements: [],
-        span: this.createSpan(this.current, this.current)
-      };
-    }
-    
-    return {
-      kind: "Using",
-      resource,
-      body,
-      span: this.createSpan(start, this.current - 1)
-    };
-  }
-  
-  private parseDefer(): AST.Defer {
-    const start = this.current - 1;
-    let body: AST.Block | AST.Expr;
-    
-    if (this.check("{")) {
-      body = this.parseBlock();
-    } else {
-      body = this.parseExpression();
-      this.consumeSemicolon();
-    }
-    
-    return {
-      kind: "Defer",
-      body,
-      span: this.createSpan(start, this.current - 1)
-    };
-  }
-  
-  private parseBreak(): AST.Break {
-    const start = this.current - 1;
-    let label: AST.Identifier | undefined;
-    
-    // Check if next token is an identifier that could be a label
-    // Don't treat keywords like "default", "case", "}", etc. as labels
-    const next = this.peek();
-    if (next.type === TokenType.Identifier && !this.check(";")) {
-      // Parse as label identifier
-      const token = this.advance();
-      label = {
-        kind: "Identifier",
-        name: token.value,
-        span: this.createSpanFrom(token)
-      };
-    } else if (next.type === TokenType.Keyword && 
-               !this.check(";") &&
-               !this.check("default") && 
-               !this.check("case") &&
-               !this.check("}") &&
-               !this.check("else") &&
-               !this.check("catch") &&
-               !this.check("finally")) {
-      // Only treat certain keywords as potential labels, not control flow keywords
-      const token = this.advance();
-      label = {
-        kind: "Identifier",
-        name: token.value,
-        span: this.createSpanFrom(token)
-      };
-    }
-    
-    this.consumeSemicolon();
-    
-    return {
-      kind: "Break",
-      label,
-      span: this.createSpan(start, this.current - 1)
-    };
-  }
-  
-  private parseContinue(): AST.Continue {
-    const start = this.current - 1;
-    let label: AST.Identifier | undefined;
-    
-    // Check if next token is an identifier that could be a label
-    // Don't treat keywords like "default", "case", "}", etc. as labels
-    const next = this.peek();
-    if (next.type === TokenType.Identifier && !this.check(";")) {
-      // Parse as label identifier
-      const token = this.advance();
-      label = {
-        kind: "Identifier",
-        name: token.value,
-        span: this.createSpanFrom(token)
-      };
-    } else if (next.type === TokenType.Keyword && 
-               !this.check(";") &&
-               !this.check("default") && 
-               !this.check("case") &&
-               !this.check("}") &&
-               !this.check("else") &&
-               !this.check("catch") &&
-               !this.check("finally")) {
-      // Only treat certain keywords as potential labels, not control flow keywords
-      const token = this.advance();
-      label = {
-        kind: "Identifier",
-        name: token.value,
-        span: this.createSpanFrom(token)
-      };
-    }
-    
-    this.consumeSemicolon();
-    
-    return {
-      kind: "Continue",
-      label,
-      span: this.createSpan(start, this.current - 1)
-    };
-  }
-  
-  private parseReturn(): AST.Return {
-    const start = this.current - 1;
-    const values: AST.Expr[] = [];
-    
-    if (!this.checkSemicolon() && !this.isAtEnd() && !this.check("}")) {
-      values.push(...this.parseExpressionList());
-    }
-    
-    this.consumeSemicolon();
-    
-    return {
-      kind: "Return",
-      values,
-      span: this.createSpan(start, this.current - 1)
-    };
-  }
-  
-  private parseAssert(): AST.ExprStmt {
-    const start = this.current - 1;
-    
-    // Parse the condition expression
-    const condition = this.parseExpression();
-    
-    // Optional: parse comma and message (Python style: assert x == 1, "message")
-    let message: AST.Expr | undefined;
-    if (this.match(",")) {
-      message = this.parseExpression();
-    }
-    
-    this.consumeSemicolon();
-    
-    // Create an assert as a call expression wrapped in an expression statement
-    const assertCall: AST.Call = {
-      kind: "Call",
-      callee: {
-        kind: "Identifier",
-        name: "assert",
-        span: this.createSpan(start, start)
-      },
-      args: message ? [condition, message] : [condition],
-      span: this.createSpan(start, this.current - 1)
-    };
-    
-    return {
-      kind: "ExprStmt",
-      expr: assertCall,
-      span: this.createSpan(start, this.current - 1)
-    };
-  }
-  
-  private parseEcho(): AST.Echo {
-    const start = this.current - 1;
-    const values = this.parseExpressionList();
-    this.consumeSemicolon();
-    
-    return {
-      kind: "Echo",
-      values,
-      span: this.createSpan(start, this.current - 1)
-    };
-  }
-  
-  private parseThrow(): AST.Throw {
-    const start = this.current - 1;
-    const value = this.parseExpression();
-    this.consumeSemicolon();
-    
-    return {
-      kind: "Throw",
-      value,
-      span: this.createSpan(start, this.current - 1)
-    };
-  }
-  
-  private parseYield(): AST.Yield {
-    const start = this.current - 1;
-    let value: AST.Expr | undefined;
-    let delegate = false;
-    
-    if (this.match("*")) {
-      delegate = true;
-    }
-    
-    if (!this.checkSemicolon() && !this.isAtEnd()) {
-      value = this.parseExpression();
-    }
-    
-    this.consumeSemicolon();
-    
-    return {
-      kind: "Yield",
-      value,
-      delegate,
-      span: this.createSpan(start, this.current - 1)
-    };
-  }
-  
-  private parseYieldExpression(): AST.Yield {
-    const start = this.current - 1;
-    let value: AST.Expr | undefined;
-    let delegate = false;
-    
-    // Check for yield* or yield from
-    if (this.match("*")) {
-      delegate = true;
-    } else if (this.match("from")) {
-      delegate = true;
-    }
-    
-    // In expression context, parse the value if there is one
-    if (!this.check(";") && !this.check(",") && !this.check(")") && 
-        !this.check("]") && !this.check("}") && !this.isAtEnd()) {
-      value = this.parseAssignmentExpression();
-    }
-    
-    return {
-      kind: "Yield",
-      value,
-      delegate,
-      span: this.createSpan(start, this.current - 1)
-    };
-  }
-  
-  private parseGo(): AST.Go {
-    const start = this.current - 1;
-    const expr = this.parseExpression();
-    this.consumeSemicolon();
-    
-    return {
-      kind: "Go",
-      expr,
-      span: this.createSpan(start, this.current - 1)
-    };
-  }
-  
-  /**
-   * Check if 'func' keyword is followed by Go-style typed params: func(name type, ...)
-   * or func Name(name type, ...). Peeks ahead without consuming tokens.
-   */
-  private hasGoTypedParams(): boolean {
-    // Current token is 'func'. Skip optional name identifier to find '('
-    let idx = this.current + 1;
-    // Skip function name if present: func Name(...)
-    if (idx < this.tokens.length && this.tokens[idx].type === TokenType.Identifier) {
-      idx++;
-    }
-    // Must have '(' next
-    if (idx >= this.tokens.length || this.tokens[idx].value !== "(") return false;
-    const firstParam = idx + 1;
-    if (firstParam >= this.tokens.length) return false;
-    // Empty params func() → not Go-typed
-    if (this.tokens[firstParam].value === ")") return false;
-    // Check if first param is identifier followed by a type token (Go-style: name type)
-    if (this.tokens[firstParam].type !== TokenType.Identifier) return false;
-    const afterFirst = firstParam + 1;
-    if (afterFirst >= this.tokens.length) return false;
-    const afterTok = this.tokens[afterFirst];
-    // Go type can be: identifier, keyword type (interface, struct, map, chan, func), pointer (*), slice ([])
-    if (afterTok.type === TokenType.Identifier) return true;
-    if (afterTok.type === TokenType.Keyword &&
-        ["interface", "struct", "map", "chan", "func"].includes(afterTok.value)) return true;
-    if (afterTok.value === "*" || afterTok.value === "[") return true;
-    return false;
-  }
-
-  private parsePass(): AST.Pass {
-    const start = this.current - 1;
-    this.consumeSemicolon();
-    
-    return {
-      kind: "Pass",
-      span: this.createSpan(start, this.current - 1)
-    };
-  }
-  
-  private parseExprStmt(): AST.ExprStmt | AST.If {
+  public parseExprStmt(): AST.ExprStmt | AST.If {
     const expr = this.parseExpression();
     
     // Check for reassignment operator :=:
@@ -4487,1278 +3310,35 @@ export class Parser extends ParserCursor {
       span: this.createSpan(start, this.current - 1)
     };
   }
-  
-  private parseClassDecl(decorators?: AST.Expr[]): AST.ClassDecl {
-    const start = this.current - 1;
-    const name = this.parseIdentifier();
-    
-    // Parse type parameters
-    let typeParams: AST.Identifier[] | undefined;
-    if (this.match("<")) {
-      typeParams = [];
-      do {
-        typeParams.push(this.parseIdentifier());
-        // Skip type constraints: extends Type, super Type, : Type
-        if (this.match("extends", "super")) {
-          this.parseType();
-        } else if (this.check(":") && !this.check("::")) {
-          this.advance();
-          this.parseType();
-          // Handle multiple constraints with + (e.g., <T: Clone + Debug>)
-          while (this.match("+")) {
-            this.parseType();
-          }
-        }
-      } while (this.match(","));
-      this.consume(">", "Expected '>' after type parameters");
-    }
 
-    // Python-style class inheritance: class Name(Parent, Mixin):
-    let extendsType: AST.TypeNode | undefined;
-    if (this.check("(") && !typeParams) {
-      this.advance(); // consume '('
-      if (!this.check(")")) {
-        extendsType = this.parseType();
-        // Additional parent classes (mixins) - skip for now
-        while (this.match(",")) {
-          this.parseType();
-        }
-      }
-      this.consume(")", "Expected ')' after parent classes");
-    }
-
-    // Parse extends clause
-    if (!extendsType && this.match("extends")) {
-      extendsType = this.parseType();
-    }
-
-    // Parse implements clause
-    let implementsTypes: AST.TypeNode[] | undefined;
-    if (this.match("implements")) {
-      implementsTypes = [];
-      do {
-        implementsTypes.push(this.parseType());
-      } while (this.match(","));
-    }
-    
-    // Parse with clause (mixins/traits)
-    let withTypes: AST.TypeNode[] | undefined;
-    if (this.match("with")) {
-      withTypes = [];
-      do {
-        withTypes.push(this.parseType());
-      } while (this.match(","));
-    }
-    
-    // Parse class body - handle both { } and Python-style :
-    const members: AST.ClassMember[] = [];
-    let isPythonStyle = false;
-    let classIndent = -1;
-    
-    if (this.match(":")) {
-      // Python-style class with colon
-      isPythonStyle = true;
-      // Skip virtual semicolons after colon
-      while (this.peek().virtualSemi) {
-        this.advance();
-      }
-      // Record the indentation level of the class body
-      classIndent = this.peek().indentCol ?? 0;
-    } else {
-      // Traditional braces style
-      this.consume("{", "Expected '{' before class body");
-    }
-    
-    while (!this.isAtEnd()) {
-      // For Python style, check if we've dedented out of the class
-      if (isPythonStyle) {
-        const currentIndent = this.peek().indentCol ?? 0;
-        if (currentIndent < classIndent) {
-          // We've dedented out of the class
-          break;
-        }
-      } else if (this.check("}")) {
-        // For brace style, check for closing brace
-        break;
-      }
-      // Skip virtual semicolons and regular semicolons
-      while (this.check(";") || this.peek().virtualSemi) {
-        this.advance();
-      }
-      
-      if (this.check("}")) break;
-      
-      try {
-        // Parse class member
-        const memberStart = this.current;
-        
-        // Parse member decorators (e.g., @Input, @Output, @HostListener)
-        const memberDecorators: AST.Decorator[] = [];
-        while (this.check("@")) {
-          const decoratorStart = this.current;
-          this.advance(); // consume @
-          
-          // Parse the decorator name
-          if (this.peek().type === TokenType.Identifier) {
-            const name = this.parseIdentifier();
-            let args: AST.Expr[] | undefined;
-            
-            // Parse decorator arguments if present
-            if (this.check("(")) {
-              this.advance(); // consume (
-              args = [];
-              
-              if (!this.check(")")) {
-                do {
-                  args.push(this.parseExpression());
-                } while (this.match(","));
-              }
-              
-              this.consume(")", "Expected ')' after decorator arguments");
-            }
-            
-            memberDecorators.push({
-              kind: "Decorator",
-              name,
-              args,
-              span: this.createSpan(decoratorStart, this.current - 1)
-            });
-          }
-          
-          // Skip virtual semicolons after decorators
-          while (this.peek().virtualSemi) {
-            this.advance();
-          }
-        }
-        
-        // Handle Ruby-style def...end methods
-        if (this.match("def")) {
-          const method = Functions.parseFuncDecl(this, );
-          members.push(method as any);
-          continue;
-        }
-        
-        // Handle regular function declarations
-        if (this.match("fn", "fun", "function", "func")) {
-          const method = Functions.parseFuncDecl(this, );
-          members.push(method as any);
-          continue;
-        }
-
-        // Handle C++/C# operator overloads: operator+(args) { ... }
-        if (this.peek().value === "operator" && this.peekNext()?.type === TokenType.Operator) {
-          this.advance(); // consume 'operator'
-          const opToken = this.advance(); // consume the operator symbol
-          const opName: AST.Identifier = {
-            kind: "Identifier",
-            name: "operator" + opToken.value,
-            span: this.createSpanFrom(opToken)
-          };
-          // Skip optional `const` qualifier after params (C++ const methods)
-          const params = Functions.parseParameterList(this);
-          if (this.peek().value === "const") this.advance();
-          const body = this.parseBlock();
-          members.push({
-            kind: "Method",
-            name: opName,
-            params,
-            body,
-            span: this.createSpan(memberStart, this.current - 1)
-          } as any);
-          continue;
-        }
-
-        // Handle async functions
-        if (this.match("async")) {
-          // Check if followed by function keyword
-          if (this.match("fn", "fun", "function", "func", "def")) {
-            const method = Functions.parseFuncDecl(this, true);
-            members.push(method as any);
-            continue;
-          }
-          
-          // Check if followed by identifier (async method without function keyword)
-          // e.g., async handle<T>() { }
-          if (this.peek().type === TokenType.Identifier) {
-            const methodName = this.parseIdentifier();
-            
-            // Parse generic parameters if present
-            let genericParams: AST.Identifier[] | undefined;
-            if (this.match("<")) {
-              genericParams = [];
-              do {
-                genericParams.push(this.parseIdentifier());
-                if (this.match("extends", "super")) {
-                  this.parseType();
-                } else if (this.check(":") && !this.check("::")) {
-                  this.advance();
-                  this.parseType();
-                  while (this.match("+")) this.parseType();
-                }
-              } while (this.match(","));
-              this.consume(">", "Expected '>' after generic parameters");
-            }
-
-            // Parse parameters
-            const params = Functions.parseParameterList(this);
-            
-            // Parse return type if present
-            let returnType: AST.TypeNode | undefined;
-            if (this.match(":")) {
-              returnType = this.parseType();
-            }
-            
-            // Parse method body
-            const body = this.parseBlock();
-            
-            const member: any = {
-              kind: "Method",
-              name: methodName,
-              params,
-              type: returnType,
-              body,
-              async: true,
-              genericParams,
-              span: this.createSpan(memberStart, this.current - 1)
-            };
-            if (memberDecorators.length > 0) {
-              member.decorators = memberDecorators;
-            }
-            members.push(member);
-            continue;
-          }
-          
-          // If not followed by function keyword or identifier, restore position
-          this.current = memberStart;
-        }
-        
-        // Handle constructor
-        if (this.peek().value === "constructor") {
-          const name = this.parseIdentifier();
-          
-          // Constructor with parentheses
-          if (this.check("(")) {
-            const params = Functions.parseParameterList(this);
-            
-            // Constructor body
-            const body = this.parseBlock();
-            
-            members.push({
-              kind: "Constructor",
-              params,
-              body,
-              span: this.createSpan(memberStart, this.current - 1)
-            } as any);
-            continue;
-          }
-        }
-        
-        // Handle TypeScript-style getters and setters
-        // But only if get/set is not followed immediately by ( (then it's a method name)
-        if ((this.peek().value === "get" || this.peek().value === "set") && 
-            this.peekNext()?.value !== "(") {
-          const isGetter = this.peek().value === "get";
-          this.advance(); // consume get/set
-          
-          // Parse the accessor name
-          const accessorName = this.parseIdentifier();
-          
-          // Parse parameters (setters have one parameter)
-          const params = Functions.parseParameterList(this);
-          
-          // Parse return type if present
-          let returnType: AST.TypeNode | undefined;
-          if (this.match(":")) {
-            returnType = this.parseType();
-          }
-          
-          // Parse the body
-          const body = this.parseBlock();
-          
-          const accessorMember: any = {
-            kind: isGetter ? "Getter" : "Setter",
-            name: accessorName,
-            params,
-            type: returnType,
-            body,
-            span: this.createSpan(memberStart, this.current - 1)
-          };
-          
-          if (memberDecorators.length > 0) {
-            accessorMember.decorators = memberDecorators;
-          }
-          
-          members.push(accessorMember);
-          continue;
-        }
-        
-        // Collect all modifiers (known and unknown)
-        let visibility: "public" | "private" | "protected" | undefined;
-        let isStatic = false;
-        let isReadonly = false;
-        let unknownModifiers: string[] = [];
-        
-        // Keep collecting modifiers until we hit something that's definitely not a modifier
-        while (this.peek().type === TokenType.Identifier || this.peek().type === TokenType.Keyword) {
-          const token = this.peek();
-          const value = token.value;
-          
-          // Check for known modifiers
-          if (value === "public" || value === "private" || value === "protected") {
-            visibility = value as any;
-            this.advance();
-          } else if (value === "static") {
-            isStatic = true;
-            this.advance();
-          } else if (value === "readonly") {
-            isReadonly = true;
-            this.advance();
-          } else if (value === "async" || value === "const" || value === "final") {
-            // These are handled elsewhere, stop collecting modifiers
-            break;
-          } else {
-            // Check if this looks like it could be a modifier or a member name
-            // If the next token is another identifier or a known type starter, it might be a modifier
-            const next = this.peekNext();
-            if (next && (next.type === TokenType.Identifier || 
-                        next.value === ":" || next.value === "(" || next.value === "{" ||
-                        next.value === "<" || next.value === "[")) {
-              // Could be a modifier if followed by another identifier/type
-              // or could be the member name if followed by : ( { < [
-              if (next.type === TokenType.Identifier) {
-                // Before treating as modifier, check for C# property pattern: type name { get/set }
-                const twoAhead = this.peekAt(2);
-                const threeAhead = this.peekAt(3);
-                if (twoAhead?.value === "{" &&
-                    (threeAhead?.value === "get" || threeAhead?.value === "set")) {
-                  // This is a type name, not a modifier - leave for C# property detection
-                  break;
-                }
-                // Likely a modifier (e.g., "volatile x")
-                unknownModifiers.push(value);
-                this.advance();
-              } else {
-                // Likely the member name, stop collecting modifiers
-                break;
-              }
-            } else {
-              // Probably the member name, stop collecting
-              break;
-            }
-          }
-        }
-        
-        // ES2022 static initializer block: static { ... }
-        if (isStatic && this.check("{")) {
-          const body = this.parseBlock();
-          members.push({
-            kind: "Method",
-            name: { kind: "Identifier", name: "__static_init__", span: body.span } as AST.Identifier,
-            params: [],
-            body,
-            static: true,
-            span: this.createSpan(memberStart, this.current - 1)
-          } as any);
-          continue;
-        }
-
-        // Handle C#-style operator overloads after modifiers: public static Vec operator +(...)
-        // At this point modifiers have been consumed; check for optional return type + operator keyword
-        if (this.peek().value === "operator" && this.peekNext()?.type === TokenType.Operator) {
-          this.advance(); // consume 'operator'
-          const opToken = this.advance(); // consume the operator symbol
-          const opName: AST.Identifier = {
-            kind: "Identifier",
-            name: "operator" + opToken.value,
-            span: this.createSpanFrom(opToken)
-          };
-          const params = Functions.parseParameterList(this);
-          if (this.peek().value === "const") this.advance();
-          const body = this.parseBlock();
-          const member: any = {
-            kind: "Method",
-            name: opName,
-            params,
-            body,
-            static: isStatic,
-            visibility,
-            span: this.createSpan(memberStart, this.current - 1)
-          };
-          members.push(member);
-          continue;
-        }
-
-        // Handle property declarations and methods
-        // Allow keywords as method names (e.g., 'match' can be a method name)
-        // Process any identifier or keyword as a potential field/method name
-        if (this.peek().type === TokenType.Identifier || this.peek().type === TokenType.Keyword) {
-          // Check if this might be a C# property with type first: public Type Name { get; set; }
-          // We need to look ahead to distinguish between:
-          // - public string Title { get; set; }  (C# property)
-          // - public Title { ... }  (field/method named Title)
-          
-          let fieldType: AST.TypeNode | undefined;
-          let name: AST.Identifier;
-          
-          // Save position for potential backtracking
-          const checkpoint = this.current;
-          
-          // Try to parse as type + name pattern
-          if (visibility) {
-            // After visibility modifier, check if next two tokens could be type + name
-            const firstToken = this.peek();
-            const secondToken = this.peekNext();
-            
-            if (firstToken && secondToken && 
-                (firstToken.type === TokenType.Identifier || firstToken.type === TokenType.Keyword) &&
-                secondToken.type === TokenType.Identifier &&
-                this.peekAt(2)?.value === "{") {
-              // Check if the third token is { and fourth is "get" or "set"
-              const thirdToken = this.peekAt(2);
-              const fourthToken = this.peekAt(3);
-              
-              if (thirdToken?.value === "{" && 
-                  (fourthToken?.value === "get" || fourthToken?.value === "set")) {
-                // This looks like a C# property: type name { get/set; }
-                // Parse the type
-                fieldType = this.parseType();
-                // Parse the name
-                name = this.parseIdentifier();
-                
-                // Now handle the { get; set; } part
-                if (this.match("{")) {
-                  // Parse property accessors
-                  let getter: AST.PropertyAccessor | undefined;
-                  let setter: AST.PropertyAccessor | undefined;
-                  
-                  while (!this.check("}") && !this.isAtEnd()) {
-                    const accessorStart = this.current;
-                    let accessorVisibility: "public" | "private" | "protected" | undefined;
-                    
-                    // Check for visibility modifier on accessor
-                    if (this.match("public", "private", "protected")) {
-                      accessorVisibility = this.previous()!.value as any;
-                    }
-                    
-                    if (this.match("get")) {
-                      // Parse getter
-                      if (this.match(";")) {
-                        // Auto-property getter
-                        getter = {
-                          visibility: accessorVisibility,
-                          span: this.createSpan(accessorStart, this.current - 1)
-                        };
-                      } else if (this.check("{")) {
-                        // Getter with body
-                        const body = this.parseBlock();
-                        getter = {
-                          visibility: accessorVisibility,
-                          body,
-                          span: this.createSpan(accessorStart, this.current - 1)
-                        };
-                      }
-                    } else if (this.match("set")) {
-                      // Parse setter
-                      if (this.match(";")) {
-                        // Auto-property setter
-                        setter = {
-                          visibility: accessorVisibility,
-                          span: this.createSpan(accessorStart, this.current - 1)
-                        };
-                      } else if (this.check("{")) {
-                        // Setter with body
-                        const body = this.parseBlock();
-                        setter = {
-                          visibility: accessorVisibility,
-                          body,
-                          span: this.createSpan(accessorStart, this.current - 1)
-                        };
-                      }
-                    } else if (!accessorVisibility) {
-                      // Skip unexpected tokens (but we already consumed visibility)
-                      this.advance();
-                    }
-                  }
-                  this.consume("}", "Expected '}' after property accessors");
-                  
-                  // Create a property with accessors
-                  members.push({
-                    kind: "Property",
-                    name,
-                    type: fieldType,
-                    getter,
-                    setter,
-                    span: this.createSpan(memberStart, this.current - 1)
-                  } as any);
-                  continue;
-                }
-              } else {
-                // Not a C# property, parse normally
-                this.current = checkpoint;
-              }
-            }
-          }
-          
-          // Parse method/field name - allow keywords as identifiers in this context
-          const nameToken = this.advance();
-          name = {
-            kind: "Identifier",
-            name: nameToken.value,
-            span: this.createSpanFrom(nameToken)
-          };
-          
-          // Check for generic parameters on methods: methodName<T, U>() or methodName<K extends T>()
-          let genericParams: AST.Identifier[] | undefined;
-          if (this.check("<") && !this.check("<=") && !this.check("<<") && !this.check("<-")) {
-            genericParams = this.attempt(() => {
-              this.advance(); // consume <
-              const params: AST.Identifier[] = [];
-              do {
-                params.push(this.parseIdentifier());
-                if (this.match("extends", "super")) {
-                  this.parseType();
-                } else if (this.check(":") && !this.check("::")) {
-                  this.advance();
-                  this.parseType();
-                  while (this.match("+")) {
-                    this.parseType();
-                  }
-                }
-              } while (this.match(","));
-              this.consume(">", "Expected '>' after generic parameters");
-              if (!this.check("(")) return null;
-              return params;
-            }) ?? undefined;
-          }
-          
-          // Method with parentheses: methodName(params): returnType { body }
-          if (this.check("(")) {
-            const params = Functions.parseParameterList(this);
-            
-            // Optional return type
-            let returnType: AST.TypeNode | undefined;
-            if (this.match(":")) {
-              try {
-                returnType = this.parseType();
-              } catch (error) {
-                // If parsing the return type fails, skip to the opening brace
-                if (error instanceof ParseError) {
-                  this.errors.push(error);
-                  // Skip to the opening brace of the method body
-                  while (!this.isAtEnd() && !this.check("{") && !this.check("}")) {
-                    this.advance();
-                  }
-                } else {
-                  throw error;
-                }
-              }
-            }
-            
-            // Method body - handle both block and arrow function  
-            // But first check if this is just a signature (ends with semicolon)
-            let body: AST.Block | undefined;
-            
-            if (this.check(";") || (this.checkSemicolon() && !this.check("{"))) {
-              // Method signature without implementation
-              this.consumeSemicolon();
-              body = undefined;
-            } else {
-              try {
-                if (this.match("=>")) {
-                  // Arrow function body
-                  const expr = this.parseExpression();
-                  body = {
-                    kind: "Block",
-                    statements: [{
-                      kind: "Return",
-                      values: [expr],
-                      span: expr.span
-                    }],
-                    span: expr.span
-                  };
-                } else {
-                  body = this.parseBlock();
-                }
-              } catch (error) {
-                // If parsing the method body fails, create an empty block
-                // and try to skip to the closing brace
-                if (error instanceof ParseError) {
-                this.errors.push(error);
-                
-                // Skip to the matching closing brace
-                let depth = 1; // We're inside the method body
-                while (depth > 0 && !this.isAtEnd()) {
-                  if (this.peek().value === "{") depth++;
-                  else if (this.peek().value === "}") {
-                    depth--;
-                    if (depth === 0) {
-                      this.advance(); // consume the closing }
-                      break;
-                    }
-                  }
-                  this.advance();
-                }
-                
-                // Skip any trailing semicolons or virtual semicolons after the method
-                while (this.check(";") || this.peek().virtualSemi) {
-                  this.advance();
-                }
-                
-                body = {
-                  kind: "Block",
-                  statements: [],
-                  span: this.createSpan(memberStart, this.current - 1)
-                };
-              } else {
-                  throw error;
-                }
-              }
-            }
-            
-            const methodMember: any = {
-              kind: "Method",
-              name,
-              params,
-              type: returnType,
-              body,
-              genericParams,
-              span: this.createSpan(memberStart, this.current - 1)
-            };
-            if (visibility) methodMember.visibility = visibility;
-            if (isStatic) methodMember.static = isStatic;
-            if (isReadonly) methodMember.readonly = isReadonly;
-            if (memberDecorators.length > 0) {
-              methodMember.decorators = memberDecorators;
-            }
-            if (unknownModifiers.length > 0) {
-              methodMember.unknownModifiers = unknownModifiers;
-            }
-            members.push(methodMember);
-            continue;
-          }
-          
-          // Short declaration: name := value
-          if (this.match(":=")) {
-            const value = this.parseExpression();
-            const member: any = {
-              kind: "Field",
-              name,
-              value,
-              span: this.createSpan(memberStart, this.current - 1)
-            };
-            if (memberDecorators.length > 0) {
-              member.decorators = memberDecorators;
-            }
-            if (unknownModifiers.length > 0) {
-              member.unknownModifiers = unknownModifiers;
-            }
-            members.push(member);
-            continue;
-          }
-          
-          // Type annotation: name: Type = value or name: Type;
-          if (this.match(":")) {
-            const type = this.parseType();
-            let value: AST.Expr | undefined;
-            if (this.match("=")) {
-              value = this.parseExpression();
-            }
-            
-            // Check if this might be a method signature without implementation
-            if (this.check("(")) {
-              // It's actually a method signature like: methodName: ReturnType(params)
-              // But this is an unusual syntax - normally it would be methodName(params): ReturnType
-              // For now, treat it as a field with a function type
-              // Note: This might need adjustment based on language spec
-            }
-            
-            // Create the field member
-            const member: any = {
-              kind: "Field",
-              name,
-              type,
-              value,
-              span: this.createSpan(memberStart, this.current - 1)
-            };
-            if (visibility) member.visibility = visibility;
-            if (isStatic) member.static = isStatic;
-            if (isReadonly) member.readonly = isReadonly;
-            if (memberDecorators.length > 0) {
-              member.decorators = memberDecorators;
-            }
-            if (unknownModifiers.length > 0) {
-              member.unknownModifiers = unknownModifiers;
-            }
-            members.push(member);
-            continue;
-          }
-          
-          // Simple assignment: name = value
-          if (this.match("=")) {
-            const value = this.parseExpression();
-            const member: any = {
-              kind: "Field",
-              name,
-              value,
-              span: this.createSpan(memberStart, this.current - 1)
-            };
-            if (memberDecorators.length > 0) {
-              member.decorators = memberDecorators;
-            }
-            if (unknownModifiers.length > 0) {
-              member.unknownModifiers = unknownModifiers;
-            }
-            members.push(member);
-            continue;
-          }
-          
-          // Field without value
-          const fieldMember: any = {
-            kind: "Field",
-            name,
-            span: this.createSpan(memberStart, this.current - 1)
-          };
-          if (memberDecorators.length > 0) {
-            fieldMember.decorators = memberDecorators;
-          }
-          members.push(fieldMember);
-          
-          // Consume semicolon if present
-          this.consumeSemicolon();
-        } else {
-          // Unknown member type - skip this token
-          this.advance();
-        }
-        
-      } catch (error) {
-        if (error instanceof ParseError) {
-          this.errors.push(error);
-          // More aggressive error recovery - skip to next potential member
-          // Look for visibility modifiers, method/field declarations, or closing brace
-          let braceDepth = 0;
-          while (!this.isAtEnd() && !this.check("}")) {
-            const token = this.peek();
-            
-            // Track brace depth to skip nested blocks
-            if (token.value === "{") {
-              braceDepth++;
-              this.advance();
-              continue;
-            } else if (token.value === "}" && braceDepth > 0) {
-              braceDepth--;
-              this.advance();
-              continue;
-            }
-            
-            // Only look for next member at brace depth 0
-            if (braceDepth === 0) {
-              // Check if we've reached what looks like the next member
-              if (token.value === "public" || token.value === "private" || 
-                  token.value === "protected" || token.value === "static" ||
-                  token.value === "readonly" || token.value === "async" ||
-                  token.value === "constructor" || token.value === "override" ||
-                  token.value === "abstract" || token.value === "get" ||
-                  token.value === "set" || token.value === "declare") {
-                // Found a potential next member
-                break;
-              }
-              
-              // Also check if we see "private methodName()" pattern
-              if (token.value === "private" || token.value === "public" || 
-                  token.value === "protected") {
-                // Look ahead one token
-                const savedPos = this.current;
-                this.advance();
-                const next = this.peek();
-                this.current = savedPos; // Restore position
-                
-                if (next?.type === TokenType.Identifier) {
-                  break; // This is likely a member declaration
-                }
-              }
-            }
-            
-            // Also break if we see an identifier after a newline/semicolon
-            // (could be a method/field without visibility modifier)
-            if (this.checkSemicolon() || token.virtualSemi) {
-              this.advance(); // consume the semicolon
-              if (this.peek().type === TokenType.Identifier && !this.isAtEnd()) {
-                break; // Next token could be a member
-              }
-            } else {
-              this.advance();
-            }
-          }
-        } else {
-          throw error;
-        }
-      }
-    }
-    
-    // Only consume closing brace for non-Python style
-    if (!isPythonStyle) {
-      this.consume("}", "Expected '}' after class body");
-    }
-    
-    // Merge withTypes into implementsTypes since AST doesn't have separate field
-    if (withTypes && withTypes.length > 0) {
-      if (!implementsTypes) {
-        implementsTypes = [];
-      }
-      implementsTypes.push(...withTypes);
-    }
-    
-    const classDecl: AST.ClassDecl = {
-      kind: "ClassDecl",
-      name,
-      typeParams,
-      genericParams: typeParams, // Provide both for compatibility
-      extends: extendsType,
-      implements: implementsTypes,
-      members,
-      span: this.createSpan(start, this.current - 1)
-    };
-    
-    // Add decorators if provided
-    if (decorators && decorators.length > 0) {
-      classDecl.decorators = decorators.map(expr => ({
-        kind: "Decorator" as const,
-        name: expr.kind === "Identifier" ? expr : 
-              expr.kind === "Call" && expr.callee.kind === "Identifier" ? expr.callee :
-              { kind: "Identifier", name: "unknown", span: expr.span } as AST.Identifier,
-        args: expr.kind === "Call" ? expr.args : undefined,
-        span: expr.span
-      }));
-    }
-    
-    return classDecl;
-  }
-  
-  private parseInterfaceDecl(): AST.InterfaceDecl {
-    const start = this.current - 1;
-    const name = this.parseIdentifier();
-    
-    // Parse type parameters
-    let typeParams: AST.Identifier[] | undefined;
-    if (this.match("<")) {
-      typeParams = [];
-      do {
-        typeParams.push(this.parseIdentifier());
-      } while (this.match(","));
-      this.consume(">", "Expected '>' after type parameters");
-    }
-    
-    // Parse extends clause
-    let extendsTypes: AST.TypeNode[] | undefined;
-    if (this.match("extends")) {
-      extendsTypes = [];
-      do {
-        extendsTypes.push(this.parseType());
-      } while (this.match(","));
-    }
-    
-    // Parse interface body
-    this.consume("{", "Expected '{' before interface body");
-    const members: AST.InterfaceMember[] = [];
-    
-    while (!this.check("}") && !this.isAtEnd()) {
-      // Skip virtual semicolons and commas
-      while (this.peek().virtualSemi || this.check(",")) {
-        this.advance();
-      }
-      
-      if (this.check("}")) break;
-      
-      // Parse interface member
-      const memberStart = this.current;
-
-      // Skip modifier keywords (async, static, readonly, etc.) before member name
-      while (this.peek().type === TokenType.Keyword &&
-             (this.peek().value === "async" || this.peek().value === "static" ||
-              this.peek().value === "readonly" || this.peek().value === "abstract" ||
-              this.peek().value === "fn" || this.peek().value === "def" ||
-              this.peek().value === "fun" || this.peek().value === "func")) {
-        this.advance();
-      }
-
-      // Parse member name (allow keywords as identifiers here)
-      let memberName: AST.Identifier;
-      if (this.peek().type === TokenType.Keyword) {
-        const kw = this.advance();
-        memberName = { kind: "Identifier", name: kw.value, span: this.createSpanFrom(kw) };
-      } else {
-        memberName = this.parseIdentifier();
-      }
-      
-      // Check for generic parameters on methods
-      let genericParams: AST.Identifier[] | undefined;
-      if (this.check("<")) {
-        this.advance(); // consume <
-        genericParams = [];
-        do {
-          genericParams.push(this.parseIdentifier());
-          if (this.match("extends", "super")) {
-            this.parseType();
-          } else if (this.check(":") && !this.check("::")) {
-            this.advance();
-            this.parseType();
-            while (this.match("+")) this.parseType();
-          }
-        } while (this.match(","));
-        this.consume(">", "Expected '>' after generic parameters");
-      }
-      
-      // Check if it's a method (has parentheses) or property
-      if (this.check("(")) {
-        // It's a method signature
-        const params = Functions.parseParameterList(this);
-
-        // Parse return type — but not if ':' is followed by a statement keyword (Python block)
-        let returnType: AST.TypeNode | undefined;
-        if (this.check(":") && this.peekNext()?.type === TokenType.Keyword &&
-            (this.peekNext()?.value === "pass" || this.peekNext()?.value === "return" ||
-             this.peekNext()?.value === "break" || this.peekNext()?.value === "continue")) {
-          // Python-style colon block — skip the colon and block
-          this.advance(); // consume ':'
-          // Just skip the body statement
-          while (this.peek().virtualSemi) this.advance();
-          if (!this.check("}")) this.advance(); // skip the keyword (pass, etc.)
-        } else if (this.match(":")) {
-          returnType = this.parseType();
-        } else if (this.match("->")) {
-          returnType = this.parseType();
-        }
-
-        // Store as a method member with full signature
-        members.push({
-          name: memberName,
-          kind: "Method",
-          params,
-          returnType,
-          genericParams,
-          optional: false,
-          span: this.createSpan(memberStart, this.current - 1)
-        });
-      } else {
-        // It's a property
-        const optional = this.match("?");
-        
-        // Expect colon for type annotation
-        this.consume(":", "Expected ':' after member name");
-        
-        // Parse the type
-        const memberType = this.parseType();
-        
-        members.push({
-          name: memberName,
-          kind: "Property",
-          type: memberType,
-          optional,
-          span: this.createSpan(memberStart, this.current - 1)
-        });
-      }
-      
-      // Skip optional comma or semicolon
-      this.match(",") || this.match(";");
-    }
-    
-    this.consume("}", "Expected '}' after interface body");
-    
-    return {
-      kind: "InterfaceDecl",
-      name,
-      typeParams,
-      extends: extendsTypes,
-      members,
-      span: this.createSpan(start, this.current - 1)
-    };
-  }
-  
-  private parseImplBlock(): AST.ImplDecl {
-    // Parse Rust-style impl blocks
-    // impl<T> Container<T> where T: Display { ... }
-    // impl<T> Display for Container<T> where T: Display { ... }
-    const start = this.current;
-    this.advance(); // consume 'impl'
-    
-    // Parse generic parameters if present
-    let typeParams: AST.Identifier[] | undefined;
-    if (this.match("<")) {
-      typeParams = [];
-      do {
-        typeParams.push(this.parseIdentifier());
-        if (this.match("extends", "super")) {
-          this.parseType();
-        } else if (this.check(":") && !this.check("::")) {
-          this.advance();
-          this.parseType();
-          while (this.match("+")) this.parseType();
-        }
-      } while (this.match(","));
-      this.consume(">", "Expected '>' after generic parameters");
-    }
-
-    // Parse either "Type" or "Trait for Type"
-    let trait: AST.TypeNode | undefined;
-    let type: AST.TypeNode;
-    
-    // Parse the first type/identifier
-    const firstType = this.parseType();
-    
-    // Check if this is "Trait for Type" pattern
-    if (this.match("for")) {
-      trait = firstType;
-      type = this.parseType();
-    } else {
-      // Just "Type" without trait
-      type = firstType;
-    }
-    
-    // Parse where clause if present
-    let whereClause: AST.WhereClause | undefined;
-    if (this.peek().value === "where") {
-      whereClause = this.parseWhereClause();
-    }
-    
-    // Parse impl body
-    this.consume("{", "Expected '{' before impl body");
-    const members: AST.ImplMember[] = [];
-    
-    while (!this.check("}") && !this.isAtEnd()) {
-      // Skip semicolons and virtual semicolons
-      while (this.check(";") || this.peek().virtualSemi) {
-        this.advance();
-      }
-      
-      if (this.check("}")) break;
-      
-      const memberStart = this.current;
-      
-      // Parse visibility modifiers
-      let visibility: "public" | "private" | "protected" | undefined;
-      if (this.match("pub", "public")) {
-        visibility = "public";
-      } else if (this.match("private", "priv")) {
-        visibility = "private";
-      } else if (this.match("protected")) {
-        visibility = "protected";
-      }
-      
-      // Parse impl members (methods, associated types, associated constants)
-      if (this.match("const")) {
-        // Check if this is "const fn" (const function)
-        if (this.peek().value === "fn") {
-          this.advance(); // consume 'fn'
-          const func = Functions.parseFuncDecl(this, false, false, false);
-          members.push({
-            kind: "Method",
-            name: func.name!,
-            params: func.params,
-            type: func.returnType,
-            body: func.body,
-            isConst: true,
-            visibility,
-            span: func.span
-          });
-        } else {
-          // Associated constant: const SIZE: usize = 10;
-          const name = this.parseIdentifier();
-          let type: AST.TypeNode | undefined;
-          if (this.match(":")) {
-            type = this.parseType();
-          }
-          let value: AST.Expr | undefined;
-          if (this.match("=")) {
-            value = this.parseExpression();
-          }
-          this.consumeSemicolon();
-          members.push({
-            kind: "AssociatedConst",
-            name,
-            type,
-            value,
-            visibility,
-            span: this.createSpan(memberStart, this.current - 1)
-          });
-        }
-      } else if (this.match("fn", "fun", "func", "function")) {
-        const isGenerator = this.previous()?.value === "function" && this.match("*");
-        const func = Functions.parseFuncDecl(this, false, false, isGenerator);
-        members.push({
-          kind: "Method",
-          name: func.name!,
-          params: func.params,
-          type: func.returnType,
-          body: func.body,
-          visibility,
-          span: func.span
-        });
-      } else if (this.match("type")) {
-        // Associated type: type Item = T;
-        const name = this.parseIdentifier();
-        let type: AST.TypeNode | undefined;
-        if (this.match("=")) {
-          type = this.parseType();
-        }
-        this.consumeSemicolon();
-        members.push({
-          kind: "AssociatedType",
-          name,
-          type,
-          visibility,
-          span: this.createSpan(memberStart, this.current - 1)
-        });
-      } else if (this.peek().type === TokenType.Identifier) {
-        // Try to parse as a method without fn keyword or as a field
-        const name = this.parseIdentifier();
-        if (this.check("(")) {
-          // Method without fn keyword
-          const params = Functions.parseParameterList(this);
-          let returnType: AST.TypeNode | undefined;
-          if (this.match("->", ":")) {
-            returnType = this.parseType();
-          }
-          const body = this.parseBlock();
-          members.push({
-            kind: "Method",
-            name,
-            params,
-            type: returnType,
-            body,
-            visibility,
-            span: this.createSpan(memberStart, this.current - 1)
-          });
-        } else if (this.match(":")) {
-          // Field with type annotation: field: Type = value
-          const type = this.parseType();
-          let value: AST.Expr | undefined;
-          if (this.match("=")) {
-            value = this.parseExpression();
-          }
-          this.consumeSemicolon();
-          members.push({
-            kind: "Field",
-            name,
-            type,
-            value,
-            visibility,
-            span: this.createSpan(memberStart, this.current - 1)
-          });
-        } else {
-          // Unknown member - store as unknown to preserve data
-          // This could be macro invocations or other language features
-          const tokens: Token[] = [];
-          while (!this.checkSemicolon() && !this.check("}") && !this.isAtEnd()) {
-            tokens.push(this.advance());
-          }
-          this.consumeSemicolon();
-          members.push({
-            kind: "Unknown",
-            name,
-            tokens,
-            visibility,
-            span: this.createSpan(memberStart, this.current - 1)
-          });
-        }
-      } else {
-        // Store unknown tokens as unknown member
-        const tokens: Token[] = [];
-        const unknownStart = this.current;
-        while (!this.checkSemicolon() && !this.check("}") && !this.isAtEnd()) {
-          tokens.push(this.advance());
-        }
-        this.consumeSemicolon();
-        if (tokens.length > 0) {
-          members.push({
-            kind: "Unknown",
-            tokens,
-            visibility,
-            span: this.createSpan(unknownStart, this.current - 1)
-          });
-        }
-      }
-    }
-    
-    this.consume("}", "Expected '}' after impl body");
-    
-    // Return as an ImplDecl
-    return {
-      kind: "ImplDecl",
-      type,
-      trait,
-      typeParams,
-      whereClause,
-      members,
-      span: this.createSpan(start, this.current - 1)
-    };
-  }
-  
-  private parseWhereClause(): AST.WhereClause {
-    const start = this.current;
-    this.advance(); // consume 'where'
-    
-    const constraints: AST.WhereConstraint[] = [];
-    
-    // Parse comma-separated constraints
-    do {
-      const constraintStart = this.current;
-      
-      // Parse the type being constrained (e.g., T or T::Item)
-      const type = this.parseType();
-      
-      // Parse the bounds (e.g., : Display + Debug)
-      const bounds: AST.TypeNode[] = [];
-      if (this.match(":")) {
-        // Parse first bound
-        bounds.push(this.parseType());
-        
-        // Parse additional bounds separated by +
-        while (this.match("+")) {
-          bounds.push(this.parseType());
-        }
-      }
-      
-      constraints.push({
-        type,
-        bounds,
-        span: this.createSpan(constraintStart, this.current - 1)
-      });
-    } while (this.match(","));
-    
-    return {
-      constraints,
-      span: this.createSpan(start, this.current - 1)
-    };
-  }
-  
   private parsePackageDecl(): AST.PackageDecl {
     const start = this.current - 1;
-    const nameToken = this.peek().type === TokenType.Identifier ? 
-      this.advance() : 
+    const nameToken = this.peek().type === TokenType.Identifier ?
+      this.advance() :
       this.consume(TokenType.StringLiteral, "Expected package name");
-    
+
     const name: AST.Identifier = {
       kind: "Identifier",
       name: nameToken.value,
       span: this.createSpanFrom(nameToken)
     };
-    
+
     this.consumeSemicolon();
-    
+
     return {
       kind: "PackageDecl",
       name,
       span: this.createSpan(start, this.current - 1)
     };
   }
-  
+
   private parseExportDecl(): AST.ExportDecl {
     const start = this.current - 1;
-    
+
     // Handle 'export default'
     if (this.match("default")) {
       let declaration: AST.Decl | undefined;
-      
+
       // Check if it's a declaration (class, function, etc.)
       if (this.isDeclStart()) {
         declaration = this.parseDeclaration();
@@ -5768,7 +3348,7 @@ export class Parser extends ParserCursor {
         this.consumeSemicolon();
         // We'll store the expression as-is - could extend AST later
       }
-      
+
       return {
         kind: "ExportDecl",
         declaration,
@@ -5776,23 +3356,23 @@ export class Parser extends ParserCursor {
         span: this.createSpan(start, this.current - 1)
       };
     }
-    
+
     // Handle 'export type'
     if (this.match("type")) {
       // Check if it's export type { ... } or export type Name = ...
       if (this.check("{")) {
         // export type { ... }
         const specifiers = this.parseExportSpecifiers();
-        
+
         let source: string | undefined;
         if (this.match("from")) {
           if (this.peek().type === TokenType.StringLiteral) {
             source = this.advance().value.slice(1, -1);
           }
         }
-        
+
         this.consumeSemicolon();
-        
+
         return {
           kind: "ExportDecl",
           specifiers,
@@ -5800,7 +3380,7 @@ export class Parser extends ParserCursor {
           span: this.createSpan(start, this.current - 1)
         };
       } else {
-        // export type Name = ... 
+        // export type Name = ...
         // Parse as type declaration
         const declaration = this.parseTypeDecl();
         return {
@@ -5810,7 +3390,7 @@ export class Parser extends ParserCursor {
         };
       }
     }
-    
+
     // Check for export declaration (export function foo() {})
     if (this.isDeclStart()) {
       const declaration = this.parseDeclaration();
@@ -5820,20 +3400,20 @@ export class Parser extends ParserCursor {
         span: this.createSpan(start, this.current - 1)
       };
     }
-    
+
     // Check for export specifiers (export { foo, bar })
     if (this.check("{")) {
       const specifiers = this.parseExportSpecifiers();
-      
+
       let source: string | undefined;
       if (this.match("from")) {
         if (this.peek().type === TokenType.StringLiteral) {
           source = this.advance().value.slice(1, -1);
         }
       }
-      
+
       this.consumeSemicolon();
-      
+
       return {
         kind: "ExportDecl",
         specifiers,
@@ -5841,7 +3421,7 @@ export class Parser extends ParserCursor {
         span: this.createSpan(start, this.current - 1)
       };
     }
-    
+
     // Handle simple export: export Parser or export * from
     if (this.check("*")) {
       this.advance();
@@ -5851,7 +3431,7 @@ export class Parser extends ParserCursor {
           source = this.advance().value.slice(1, -1);
         }
         this.consumeSemicolon();
-        
+
         return {
           kind: "ExportDecl",
           source,
@@ -5859,34 +3439,34 @@ export class Parser extends ParserCursor {
         };
       }
     }
-    
+
     // Try to consume as identifier
     if (this.peek().type === TokenType.Identifier) {
       this.advance();
       this.consumeSemicolon();
-      
+
       return {
         kind: "ExportDecl",
         span: this.createSpan(start, this.current - 1)
       };
     }
-    
+
     throw this.error(this.peek(), "Invalid export declaration");
   }
-  
+
   private parseExportSpecifiers(): AST.ExportSpecifier[] {
     this.consume("{", "Expected '{'");
     const specifiers: AST.ExportSpecifier[] = [];
-    
+
     if (!this.check("}")) {
       do {
         const local = this.parseIdentifier();
         let exported: AST.Identifier | undefined;
-        
+
         if (this.match("as")) {
           exported = this.parseIdentifier();
         }
-        
+
         specifiers.push({
           local,
           exported,
@@ -5894,62 +3474,11 @@ export class Parser extends ParserCursor {
         });
       } while (this.match(","));
     }
-    
+
     this.consume("}", "Expected '}'");
     return specifiers;
   }
-  
-  private parseEnumDecl(): AST.EnumDecl {
-    const start = this.current - 1;
-    const name = this.parseIdentifier();
-    
-    this.consume("{", "Expected '{' before enum body");
-    const members: AST.EnumMember[] = [];
-    
-    while (!this.check("}") && !this.isAtEnd()) {
-      // Skip virtual semicolons in enum body
-      while (this.peek().virtualSemi) {
-        this.advance();
-      }
-      
-      // Check for closing brace after skipping virtual semicolons
-      if (this.check("}")) {
-        break;
-      }
-      
-      const memberName = this.parseIdentifier();
-      let value: AST.Expr | undefined;
-      
-      if (this.match("=")) {
-        value = this.parseExpression();
-      }
-      
-      members.push({
-        name: memberName,
-        value,
-        span: this.createSpanFrom(memberName)
-      });
-      
-      // Skip trailing virtual semicolons
-      while (this.peek().virtualSemi) {
-        this.advance();
-      }
-      
-      if (!this.match(",")) {
-        break;
-      }
-    }
-    
-    this.consume("}", "Expected '}' after enum body");
-    
-    return {
-      kind: "EnumDecl",
-      name,
-      members,
-      span: this.createSpan(start, this.current - 1)
-    };
-  }
-  
+
   // Literal parsing
   // Literals extracted to src/parselets/literals.ts (Chunk 6)
   public parseStringLiteral(): AST.StringLiteral {
@@ -6102,7 +3631,7 @@ export class Parser extends ParserCursor {
     return ids;
   }
   
-  private parseExpressionList(): AST.Expr[] {
+  public parseExpressionList(): AST.Expr[] {
     const exprs: AST.Expr[] = [this.parseAssignmentExpression()];
     
     while (this.match(",")) {

@@ -46,7 +46,7 @@ export class ParserCursor {
 
   // Context tracking
   protected insideSwitch = false;
-  protected noRubyBlock = false;
+  public noRubyBlock = false;
 
   // Directives
   protected nextStmtGenericMode: "on" | "off" | "auto" = "auto";
@@ -275,7 +275,7 @@ export class ParserCursor {
     }
   }
 
-  protected checkSemicolon(): boolean {
+  public checkSemicolon(): boolean {
     return this.check(";") || this.peek().virtualSemi || false;
   }
 
