@@ -1791,7 +1791,13 @@ export class Parser {
       try {
         this.advance(); // [
         this.advance(); // ]
-        this.parseGoTypeAnnotation(); // skip the element type
+        // For simple identifiers (byte, int, string, etc.), just skip one token
+        // to avoid parseType() over-consuming the following '(' as function type params
+        if (this.peek().type === TokenType.Identifier) {
+          this.advance();
+        } else {
+          this.parseGoTypeAnnotation(); // handle map[K]V, interface{}, etc.
+        }
         if (this.check("{") || this.check("(")) {
           this.current = checkpoint;
           return this.parsePostfix(this.parseGoCompositeLiteral());
@@ -5354,8 +5360,8 @@ export class Parser {
       };
     }
     
-    // Check for postfix if/unless (Ruby-style)
-    if (this.check("if") || this.check("unless")) {
+    // Check for postfix if/unless (Ruby-style) — only on same line
+    if ((this.check("if") || this.check("unless")) && !this.peek().newline) {
       const modifier = this.peek().value;
       this.advance();
       const condition = this.parseExpression();
@@ -5851,6 +5857,17 @@ export class Parser {
       };
     }
     
+    // Handle "keyof Type" pattern (TypeScript-style type operator)
+    if (qualifiedId.name === "keyof" && (this.peek().type === TokenType.Identifier || this.peek().type === TokenType.Keyword)) {
+      const innerType = this.parseSimpleType();
+      return {
+        kind: "SimpleType",
+        id: { kind: "Identifier", name: "keyof", span: this.createSpan(start, this.current - 1) },
+        inner: innerType,
+        span: this.createSpan(start, this.current - 1)
+      } as any;
+    }
+
     // Handle "impl Trait" pattern (Rust-style)
     if (qualifiedId.name === "impl" && this.peek().type === TokenType.Identifier) {
       const traitType = this.parseSimpleType();

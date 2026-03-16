@@ -1,7 +1,6 @@
 import { describe, test, expect } from '@jest/globals';
-import { Parser } from '../src/parser';
-import { Lexer } from '../src/lexer';
 import * as AST from '../src/ast';
+import { parseCode } from './helpers';
 
 // Import test helpers for strong AST verification
 import {
@@ -18,13 +17,6 @@ import {
   findAllAngleBracketUsages,
   analyzeAngleBrackets
 } from './helpers/pattern-matchers';
-
-function parseCode(code: string): AST.Program {
-  const lexer = new Lexer(code);
-  const tokens = lexer.tokenize();
-  const parser = new Parser(tokens);
-  return parser.parse();
-}
 
 describe('Advanced Polyglot Parser Tests', () => {
   test('parses extreme operator mixing and chaining', () => {
@@ -741,7 +733,7 @@ server = http.createServer((req, res) => {
     conn, err := net.Dial("tcp", "localhost:80")
     if err != nil { return }
     defer conn.Close()
-    conn.Write([]byte("GET / HTTP/1.1\r\n"))
+    conn.Write([]byte("GET / HTTP/1.1\\r\\n"))
   }()
   
   # Ruby socket with Python
