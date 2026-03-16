@@ -3027,10 +3027,11 @@ export class Parser {
     let params: AST.Param[] = [];
     if (this.check("(")) {
       params = this.parseParameterList();
-    } else if (isRubyDef && !this.check(":") && !this.check("{") && 
-               !this.check("=>") && !this.peek().virtualSemi) {
+    } else if (isRubyDef && !this.check(":") && !this.check("{") &&
+               !this.check("=>") && !this.peek().virtualSemi &&
+               this.peek().line === name.span.line) {
       // Ruby allows parameters without parentheses: def foo bar, baz
-      // Parse parameters until we hit a delimiter
+      // Only if params are on the same line as the function name
       do {
         params.push(this.parseParameter());
       } while (this.match(","));
