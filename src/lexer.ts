@@ -3,7 +3,7 @@ import * as LS from './lex-state';
 import { LexerCursor } from './lexer-cursor';
 import { skipShebang, skipLineComment, skipBlockComment, skipHTMLComment } from './lexer-comments';
 import { scanPrefixedString, scanTemplateLiteral, scanNumber, scanHeredoc, scanRegex } from './lexer-literals';
-import { scanIdentifier, scanSigilIdentifier, isKeyword } from './lexer-identifiers';
+import { scanIdentifier, scanSigilIdentifier } from './lexer-identifiers';
 import { scanOperator, shouldBeRegex } from './lexer-operators';
 
 export enum TokenType {
@@ -23,26 +23,12 @@ export enum TokenType {
   
   // JSX Tokens
   JSXTagStart = "JSXTagStart",      // < when starting JSX
-  JSXTagEnd = "JSXTagEnd",          // > when ending JSX tag
-  JSXSelfClose = "JSXSelfClose",    // />
-  JSXText = "JSXText",              // Text content in JSX
   
   // Structure
   Comment = "Comment",
   Whitespace = "Whitespace",
   VirtualSemi = "VirtualSemi",
   EOF = "EOF"
-}
-
-export enum LexerMode {
-  Normal = "Normal",
-  MemberAccess = "MemberAccess",  // After '.', keywords become identifiers
-  BashCondition = "BashCondition", // Inside [ ], use bash tokenization
-  Decorator = "Decorator",         // After '@', special decorator syntax
-  StringTemplate = "StringTemplate", // For f-strings, r-strings, heredocs
-  JSXTag = "JSXTag",              // Inside JSX < > for parsing attributes
-  JSXContent = "JSXContent",       // Between JSX opening and closing tags
-  JSXExpression = "JSXExpression"  // Inside {} within JSX
 }
 
 export interface Token {
@@ -53,8 +39,6 @@ export interface Token {
   line: number;
   column: number;
   virtualSemi?: boolean;
-  wsBefore?: boolean;
-  wsAfter?: boolean;
   indentCol?: number;
   newline?: boolean;
 }
@@ -100,9 +84,6 @@ export class Lexer extends LexerCursor {
     const start = this.position;
     const startLine = this.line;
     const startColumn = this.column;
-    
-    // Track whitespace before token
-    const wsBefore = this.position > 0 && /\s/.test(this.source[this.position - 1]);
     
     const char = this.advance();
     

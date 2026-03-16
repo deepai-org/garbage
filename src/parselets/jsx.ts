@@ -133,7 +133,6 @@ export function couldBeTypeAssertion(host: JSXHost): boolean {
 
     // Check for JSX closing tag pattern first
     if (next.type === TokenType.Identifier ||
-        next.type === TokenType.JSXText ||
         next.type === TokenType.StringLiteral) {
       let checkPos = host.current;
 

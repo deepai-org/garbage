@@ -76,56 +76,6 @@ export function scanPrefixedString(h: ScanHost): void {
   h.addTokenEx(TokenType.StringLiteral, value, start, h.position, startLine, startColumn);
 }
 
-export function scanString(h: ScanHost, quote: string): void {
-  const start = h.position - 1;
-  const startLine = h.line;
-  const startColumn = h.column - 1;
-
-  // Check for triple quotes
-  let isTriple = false;
-  if (h.peek() === quote && h.peekNext() === quote) {
-    isTriple = true;
-    h.advance();
-    h.advance();
-  }
-
-  let value = quote;
-  if (isTriple) value += quote + quote;
-
-  while (!h.isAtEnd()) {
-    if (isTriple) {
-      if (h.peek() === quote && h.peekNext() === quote && h.peekAt(2) === quote) {
-        value += h.advance() + h.advance() + h.advance();
-        break;
-      }
-    } else {
-      if (h.peek() === quote) {
-        let backslashCount = 0;
-        let checkPos = h.position - 1;
-        while (checkPos >= 0 && h.source[checkPos] === '\\') {
-          backslashCount++;
-          checkPos--;
-        }
-        if (backslashCount % 2 === 0) {
-          value += h.advance();
-          break;
-        }
-      }
-    }
-
-    if (h.peek() === '\n') {
-      if (!isTriple) {
-        break;
-      }
-      h.line++;
-      h.column = 1;
-    }
-
-    value += h.advance();
-  }
-
-  h.addTokenEx(TokenType.StringLiteral, value, start, h.position, startLine, startColumn);
-}
 
 export function scanTemplateLiteral(h: ScanHost): void {
   const start = h.position - 1;
