@@ -470,6 +470,22 @@ export class Parser extends ParserCursor {
       return { kind: "Import", path: modName.name, span: modName.span } as any;
     }
 
+    // Swift operator declarations: infix/prefix/postfix operator ** { ... }
+    if ((keyword === "infix" || keyword === "prefix" || keyword === "postfix") &&
+        this.peekNext()?.value === "operator") {
+      this.advance(); // consume infix/prefix/postfix
+      this.advance(); // consume operator
+      const opToken = this.advance(); // consume operator symbol
+      const name: AST.Identifier = {
+        kind: "Identifier",
+        name: `${keyword} operator ${opToken.value}`,
+        span: this.createSpanFrom(opToken)
+      };
+      let body: AST.Block | undefined;
+      if (this.check("{")) body = this.parseBlock();
+      return { kind: "FuncDecl", name, params: [], body, span: this.createSpanFrom(opToken) } as any;
+    }
+
     // Short declarations (Go-style :=)
     if (this.peek().type === TokenType.Identifier) {
       const checkpoint = this.current;
