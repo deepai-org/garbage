@@ -37,15 +37,15 @@ export class ParserCursor {
   public errors: ParseError[] = [];
 
   // Block delimiter stacks
-  protected braceDepth = 0;
-  protected indentStack: number[] = [];
-  protected keywordStack: KeywordBlockKind[] = [];
+  public braceDepth = 0;
+  public indentStack: number[] = [];
+  public keywordStack: KeywordBlockKind[] = [];
 
   // Error recovery state
   protected syntheticTokenCounter = 0;
 
   // Context tracking
-  protected insideSwitch = false;
+  public insideSwitch = false;
   public noRubyBlock = false;
 
   // Directives

@@ -8,6 +8,7 @@ import * as Imports from './parselets/imports';
 import * as Literals from './parselets/literals';
 import * as ClassDecl from './parselets/class-decl';
 import * as ControlFlow from './parselets/control-flow';
+import * as Blocks from './parselets/blocks';
 
 export { ParseError } from './parser-cursor';
 
@@ -400,18 +401,18 @@ export class Parser extends ParserCursor {
     
     if (this.check("switch")) {
       this.advance();
-      return this.parseSwitch() as AST.Stmt;
+      return Blocks.parseSwitch(this) as AST.Stmt;
     }
     // match keyword — but not when followed by = or { (assignment or variable reference)
     if (this.check("match") && !this.isAssignmentOp(this.peekAt(1)!) && this.peekAt(1)?.value !== "{") {
       this.advance();
-      return this.parseSwitch() as AST.Stmt;
+      return Blocks.parseSwitch(this) as AST.Stmt;
     }
     // Kotlin-style `when` as match expression
     if (this.peek().value === "when" &&
         (this.peekAt(1)?.value === "(" || this.peekAt(1)?.value === "{")) {
       this.advance(); // consume 'when'
-      return this.parseSwitch() as AST.Stmt;
+      return Blocks.parseSwitch(this) as AST.Stmt;
     }
     
     // Bash-style case...in...esac — allowed even inside switch (distinguishes from switch case)
@@ -419,7 +420,7 @@ export class Parser extends ParserCursor {
       // Bash case: `case expr in ... esac` — detect by looking for `in` after expr
       if (!this.insideSwitch) {
         this.advance();
-        return this.parseCaseStatement();
+        return Blocks.parseCaseStatement(this);
       } else {
         // Inside a switch, only allow if it looks like bash case (has `in` or `when` nearby)
         const cp = this.current;
@@ -427,7 +428,7 @@ export class Parser extends ParserCursor {
         const expr = this.parsePrimary(); // consume discriminant
         if (this.check("in") || this.check("when")) {
           this.advance(); // consume 'in' or 'when'
-          return this.parseCaseEsac(cp, expr);
+          return Blocks.parseCaseEsac(this, cp, expr);
         }
         // Not bash case — restore and let switch handle it
         this.current = cp;
@@ -436,7 +437,7 @@ export class Parser extends ParserCursor {
     
     if (this.match("select")) {
       // Go-style select statement for channels
-      return this.parseSelectStatement();
+      return Blocks.parseSelectStatement(this);
     }
     
     if (this.match("do")) {
@@ -517,7 +518,7 @@ export class Parser extends ParserCursor {
     
     // Begin/end blocks (Ruby-style with rescue/ensure)
     if (this.match("begin")) {
-      return this.parseBeginBlock();
+      return Blocks.parseBeginBlock(this);
     }
     
     // Rust `use path::to::module`, Ruby `include Module`
@@ -573,11 +574,11 @@ export class Parser extends ParserCursor {
           return this.parseExprStmt();
         } else {
           // Parse as block
-          return this.parseBlock();
+          return Blocks.parseBlock(this);
         }
       } catch {
         this.current = checkpoint;
-        return this.parseBlock();
+        return Blocks.parseBlock(this);
       }
     }
     
@@ -585,672 +586,17 @@ export class Parser extends ParserCursor {
     return this.parseExprStmt();
   }
   
-  public parseBlockOrStatement(): AST.Block {
-    // Helper to parse either a block or single statement
-    if (this.check("{")) {
-      return this.parseBlock();
-    } else {
-      // Single statement without braces
-      const stmt = this.parseStatement();
-      return {
-        kind: "Block",
-        statements: stmt ? [stmt] : [],
-        span: this.createSpanFrom(stmt || this.previous())
-      };
-    }
-  }
-
-  public parseBlock(): AST.Block {
-    const start = this.current;
-    const openToken = this.peek();
-    
-    if (this.match("{")) {
-      this.braceDepth++;
-      const statements: (AST.Decl | AST.Stmt)[] = [];
-      let loopCount = 0;
-      while (!this.check("}") && !this.isAtEnd()) {
-        loopCount++;
-        if (loopCount > 1000) {
-          break;
-        }
-
-        const beforePos = this.current;
-        try {
-          // Skip virtual semicolons
-          while (this.peek().virtualSemi) {
-            this.advance();
-          }
-
-          let stmt: AST.Decl | AST.Stmt | null = null;
-
-          if (this.isDeclStart()) {
-            stmt = this.parseDeclaration();
-          } else if (!this.check("}")) {
-            stmt = this.parseStatement();
-          }
-
-          if (stmt) {
-            statements.push(stmt);
-          }
-        } catch (error) {
-          if (error instanceof ParseError) {
-            this.errors.push(error);
-            this.synchronize();
-          } else {
-            throw error;
-          }
-        }
-        // Prevent infinite loop
-        if (this.current === beforePos && !this.check("}")) {
-          this.advance();
-        }
-      }
-      
-      if (!this.match("}")) {
-        throw this.error(this.peek(), "Expected '}'");
-      }
-      this.braceDepth--;
-      
-      return {
-        kind: "Block",
-        statements,
-        span: this.createSpan(start, this.current - 1)
-      };
-    }
-    
-    // Check for indent block
-    if (this.checkIndentBlock()) {
-      return this.parseIndentBlock();
-    }
-    
-    // Check for keyword block
-    if (this.checkKeywordBlock()) {
-      return this.parseKeywordBlock();
-    }
-    
-    throw this.error(this.peek(), "Expected block");
-  }
   
-  public checkIndentBlock(): boolean {
-    // Check if previous token was a header ending with ':'
-    if (this.current > 0) {
-      const prev = this.tokens[this.current - 1];
-      if (prev.type === TokenType.Operator && prev.value === ":") {
-        // Check if next line is more indented
-        const nextToken = this.peek();
-        if (nextToken.indentCol !== undefined && 
-            (this.indentStack.length === 0 || 
-             nextToken.indentCol > this.indentStack[this.indentStack.length - 1])) {
-          return true;
-        }
-      }
-    }
-    return false;
-  }
-  
-  private parseSelectStatement(): AST.Select {
-    const start = this.current - 1;
-    const cases: AST.SwitchCase[] = [];
-    let defaultCase: AST.Block | undefined;
-    
-    this.consume("{", "Expected '{' after select");
-    
-    while (!this.check("}") && !this.isAtEnd()) {
-      // Skip virtual semicolons
-      while (this.peek().virtualSemi) {
-        this.advance();
-      }
-      
-      if (this.check("}") || this.isAtEnd()) {
-        break;
-      }
-      
-      if (this.match("default")) {
-        this.consume(":", "Expected ':' after default");
-        defaultCase = this.parseCaseBody();
-        continue;
-      }
-      
-      if (this.match("case")) {
-        // Parse channel operation (e.g., x := <-ch or ch <- value)
-        // Parse as expression to get the channel operation directly
-        const pattern = this.parseExpression();
-        this.consume(":", "Expected ':' after case");
-        const body = this.parseCaseBody();
-        
-        cases.push({
-          patterns: [pattern], // Channel operation as pattern
-          body,
-          fallthrough: false,
-          span: this.createSpan(start, this.current - 1)
-        });
-        continue;
-      }
-      
-      // If we get here, there's an unexpected token
-      throw this.error(this.peek(), "Expected 'case' or 'default' in select statement");
-    }
-    
-    this.consume("}", "Expected '}' after select body");
-    
-    // Create a pseudo-discriminant for select (since it doesn't have one)
-    return {
-      kind: "Select",
-      cases,
-      defaultCase,
-      span: this.createSpan(start, this.current - 1)
-    };
-  }
-  
-  private parseCaseStatement(): AST.Switch {
-    const start = this.current - 1;
-    // Parse the discriminant - just a primary expression to avoid consuming 'in'
-    const discriminant = this.parsePrimary();
-    // Accept both 'in' (bash) and 'when' (Ruby) as the keyword after case discriminant
-    if (!this.match("in") && !this.match("when")) {
-      this.consume("in", "Expected 'in' or 'when' after case expression");
-    }
-    return this.parseCaseEsac(start, discriminant);
-  }
-  
-  private parseCaseEsac(start: number, discriminant: AST.Expr): AST.Switch {
-    const cases: AST.SwitchCase[] = [];
-    let defaultCase: AST.Block | undefined;
-    
-    while (!this.check("esac") && !this.isAtEnd()) {
-      // Skip any virtual semicolons
-      while (this.peek().virtualSemi) {
-        this.advance();
-      }
-      
-      if (this.check("esac")) break;
-      
-      // Parse case pattern
-      const patterns: AST.Expr[] = [];
-      
-      // Check for default case (*)
-      if (this.match("*")) {
-        this.consume(")", "Expected ')' after case pattern");
-        
-        // Parse case body — stop at ;;, esac, or new pattern followed by )
-        const statements: (AST.Decl | AST.Stmt)[] = [];
-        while (!this.check(";;") && !this.check("esac") && !this.isAtEnd()) {
-          if (this.isNewCaseArm()) break;
-          const stmt = this.parseTopLevel();
-          if (stmt) statements.push(stmt);
-        }
+  // Block parsing — delegated to src/parselets/blocks.ts (Chunk 9)
+  public parseBlock(): AST.Block { return Blocks.parseBlock(this); }
+  public parseBlockOrStatement(): AST.Block { return Blocks.parseBlockOrStatement(this); }
+  public parseIndentBlock(): AST.Block { return Blocks.parseIndentBlock(this); }
+  public parseKeywordBlock(keyword?: string): AST.Block { return Blocks.parseKeywordBlock(this, keyword); }
+  public parseBashTestExpression(): AST.Expr { return Blocks.parseBashTestExpression(this); }
+  public parseIfThenBlock(): AST.Block { return Blocks.parseIfThenBlock(this); }
+  public checkIndentBlock(): boolean { return Blocks.checkIndentBlock(this); }
+  public parseSwitch(): AST.Switch | AST.Match { return Blocks.parseSwitch(this); }
 
-        const body: AST.Block = {
-          kind: "Block",
-          statements,
-          span: this.createSpan(this.current, this.current)
-        };
-
-        // Skip vsemis before checking for ;;
-        while (this.peek().virtualSemi) this.advance();
-        // Check for fallthrough (no ;;)
-        const fallthrough = !this.match(";;");
-
-        // Add default case to cases array with empty patterns to indicate default
-        cases.push({
-          patterns: [], // Empty patterns indicate default case
-          body,
-          fallthrough,
-          span: this.createSpan(this.current, this.current)
-        });
-
-        // Also set defaultCase for backward compatibility
-        defaultCase = body;
-      } else {
-        // Parse pattern (number, string, etc.)
-        patterns.push(this.parseExpression());
-
-        this.consume(")", "Expected ')' after case pattern");
-
-        // Parse case body — stop at ;;, esac, or new pattern followed by )
-        const statements: (AST.Decl | AST.Stmt)[] = [];
-        while (!this.check(";;") && !this.check("esac") && !this.isAtEnd()) {
-          // Detect start of a new case arm (implicit arm boundary without ;;)
-          if (this.isNewCaseArm()) break;
-          const stmt = this.parseTopLevel();
-          if (stmt) statements.push(stmt);
-        }
-
-        const body: AST.Block = {
-          kind: "Block",
-          statements,
-          span: this.createSpan(this.current, this.current)
-        };
-
-        // Skip vsemis before checking for ;;
-        while (this.peek().virtualSemi) this.advance();
-        // Check for fallthrough (no ;;)
-        const fallthrough = !this.match(";;");
-
-        cases.push({
-          patterns,
-          body,
-          fallthrough,
-          span: this.createSpan(this.current, this.current)
-        });
-      }
-    }
-    
-    this.consume("esac", "Expected 'esac' to close case statement");
-    
-    return {
-      kind: "Switch",
-      discriminant,
-      cases,
-      defaultCase,
-      span: this.createSpan(start, this.current - 1)
-    };
-  }
-  
-  /**
-   * Detect if current position starts a new bash case arm pattern.
-   * Uses conservative lookahead to avoid false positives.
-   * Checks for: literal/identifier/_ followed by ), or range pattern like N..M)
-   */
-  private isNewCaseArm(): boolean {
-    const t = this.peek();
-    // Simple pattern: value )
-    if ((t.type === TokenType.NumericLiteral || t.type === TokenType.StringLiteral ||
-         t.type === TokenType.Identifier || (t.type === TokenType.Keyword && t.value === "_")) &&
-        this.peekAt(1)?.value === ")") {
-      return true;
-    }
-    // Range pattern: N..M ) or N..M)
-    if ((t.type === TokenType.NumericLiteral || t.type === TokenType.Identifier) &&
-        this.peekAt(1)?.value === ".." &&
-        this.peekAt(2) &&
-        this.peekAt(3)?.value === ")") {
-      return true;
-    }
-    // Wildcard pattern: * )
-    if (t.value === "*" && this.peekAt(1)?.value === ")") {
-      return true;
-    }
-    return false;
-  }
-
-  public parseBashTestExpression(): AST.Expr {
-    // Parse [ ... ] as a special test expression
-    const start = this.current;
-    this.consume("[", "Expected '[' for bash test");
-    
-    // Collect everything until ] as a test expression
-    // For now, we'll represent it as a special call expression
-    const args: AST.Expr[] = [];
-    
-    while (!this.check("]") && !this.isAtEnd()) {
-      // Skip virtual semicolons
-      if (this.peek().virtualSemi) {
-        this.advance();
-        continue;
-      }
-      
-      // Handle operators as identifiers in bash test context
-      if (this.peek().type === TokenType.Operator) {
-        const op = this.advance();
-        
-        // Handle test operators like -gt, -lt, etc.
-        if (op.value === "-" && this.peek().type === TokenType.Identifier) {
-          const flag = this.advance();
-          // Create a special test operator expression
-          args.push({
-            kind: "Identifier",
-            name: op.value + flag.value,
-            span: this.createSpan(this.current - 2, this.current - 1)
-          });
-        } else {
-          // Other operators like =, !=, etc. are test operators
-          args.push({
-            kind: "Identifier", 
-            name: op.value,
-            span: this.createSpanFrom(op)
-          });
-        }
-      } else if (this.peek().type === TokenType.StringLiteral ||
-                 this.peek().type === TokenType.NumericLiteral ||
-                 this.peek().type === TokenType.Identifier ||
-                 this.peek().type === TokenType.SigilIdentifier) {
-        // Parse literals and identifiers
-        args.push(this.parsePrimary());
-      } else {
-        // Skip unexpected tokens
-        this.advance();
-      }
-    }
-    
-    this.consume("]", "Expected ']' after bash test");
-    
-    // Return as a special call expression representing the test
-    return {
-      kind: "Call",
-      callee: {
-        kind: "Identifier",
-        name: "test",
-        span: this.createSpan(start, start)
-      },
-      args,
-      span: this.createSpan(start, this.current - 1)
-    };
-  }
-  
-  public parseIfThenBlock(): AST.Block {
-    // Parse statements until we hit fi, elif, or else
-    const start = this.current;
-    const statements: (AST.Decl | AST.Stmt)[] = [];
-    
-    while (!this.check("fi") && !this.check("elif") && !this.check("elseif") && 
-           !this.check("else") && !this.isAtEnd()) {
-      const beforePos = this.current;
-      try {
-        const stmt = this.parseTopLevel();
-        if (stmt) statements.push(stmt);
-      } catch (error) {
-        if (error instanceof ParseError) {
-          this.errors.push(error);
-          this.synchronize();
-        } else {
-          throw error;
-        }
-      }
-      // Prevent infinite loop
-      if (this.current === beforePos) {
-        this.advance();
-      }
-    }
-    
-    return {
-      kind: "Block",
-      statements,
-      span: this.createSpan(start, this.current - 1)
-    };
-  }
-  
-  public parseIndentBlock(): AST.Block {
-    const start = this.current;
-    
-    // Skip any virtual semicolons after the colon
-    while (this.peek().virtualSemi) {
-      this.advance();
-    }
-    
-    // Get the base indent level
-    const baseIndent = this.indentStack.length > 0 ? 
-      this.indentStack[this.indentStack.length - 1] : 0;
-    
-    // The first statement should be more indented
-    // Use the indentCol of the next non-whitespace token
-    const blockIndent = this.peek().indentCol ?? 0;
-    if (blockIndent <= baseIndent && !this.isAtEnd()) {
-      // Empty block or same-line statement
-      return {
-        kind: "Block",
-        statements: [],
-        span: this.createSpan(start, this.current)
-      };
-    }
-    
-    this.indentStack.push(blockIndent);
-    const statements: (AST.Decl | AST.Stmt)[] = [];
-    
-    while (!this.isAtEnd()) {
-      // Skip virtual semicolons before checking indentation
-      while (this.peek().virtualSemi) {
-        this.advance();
-      }
-      if (this.isAtEnd()) break;
-
-      const nextIndent = this.peek().indentCol ?? 0;
-
-      // Check if we've dedented back to or past the base level
-      if (nextIndent < blockIndent) {
-        break;
-      }
-
-      try {
-        const stmt = this.parseTopLevel();
-        if (stmt) statements.push(stmt);
-      } catch (error) {
-        if (error instanceof ParseError) {
-          this.errors.push(error);
-          this.synchronize();
-        } else {
-          throw error;
-        }
-      }
-    }
-    
-    this.indentStack.pop();
-    
-    return {
-      kind: "Block",
-      statements,
-      span: this.createSpan(start, this.current - 1)
-    };
-  }
-  
-  private checkKeywordBlock(): boolean {
-    const value = this.previous()?.value;
-    return value === "do" || value === "case" || value === "begin" ||
-           (value === "if" && this.isBashOrRubyStyle()) ||
-           (value === "for" && this.isRubyStyle()) ||
-           (value === "while" && this.isRubyStyle()) ||
-           (value === "function" && this.isBashStyle());
-  }
-  
-  private parseBeginBlock(): AST.Try | AST.Block {
-    const start = this.current - 1;
-    const statements: (AST.Decl | AST.Stmt)[] = [];
-    
-    // Parse the main body until rescue/ensure/end
-    while (!this.check("rescue") && !this.check("ensure") && !this.check("end") && !this.isAtEnd()) {
-      // Skip virtual semicolons
-      if (this.peek().virtualSemi) {
-        this.advance();
-        continue;
-      }
-      
-      const beforePos = this.current;
-      try {
-        const stmt = this.parseTopLevel();
-        if (stmt) statements.push(stmt);
-      } catch (error) {
-        if (error instanceof ParseError) {
-          this.errors.push(error);
-          this.synchronize();
-        } else {
-          throw error;
-        }
-      }
-      // Prevent infinite loop
-      if (this.current === beforePos) {
-        this.advance();
-      }
-    }
-    
-    // If we hit 'end' directly without rescue/ensure, it's just a block
-    if (this.check("end")) {
-      this.advance(); // consume 'end'
-      return {
-        kind: "Block",
-        statements,
-        span: this.createSpan(start, this.current - 1)
-      };
-    }
-    
-    const body: AST.Block = {
-      kind: "Block",
-      statements,
-      span: this.createSpan(start, this.current - 1)
-    };
-    
-    const catches: AST.CatchClause[] = [];
-    
-    // Handle rescue clauses
-    while (this.match("rescue")) {
-      let param: AST.Identifier | undefined;
-      let type: AST.TypeNode | undefined;
-      
-      // Check for rescue Type => var pattern
-      if (this.peek().type === TokenType.Identifier && !this.check("=>")) {
-        type = this.parseType();
-      }
-      
-      if (this.match("=>")) {
-        param = this.parseIdentifier();
-      }
-      
-      const rescueStatements: (AST.Decl | AST.Stmt)[] = [];
-      while (!this.check("rescue") && !this.check("ensure") && !this.check("end") && !this.isAtEnd()) {
-        if (this.peek().virtualSemi) {
-          this.advance();
-          continue;
-        }
-        
-        const beforePos = this.current;
-        try {
-          const stmt = this.parseTopLevel();
-          if (stmt) rescueStatements.push(stmt);
-        } catch (error) {
-          if (error instanceof ParseError) {
-            this.errors.push(error);
-            this.synchronize();
-          } else {
-            throw error;
-          }
-        }
-        // Prevent infinite loop
-        if (this.current === beforePos && !this.check("rescue") && !this.check("ensure") && !this.check("end")) {
-          this.advance();
-        }
-      }
-      
-      catches.push({
-        param,
-        type,
-        body: {
-          kind: "Block",
-          statements: rescueStatements,
-          span: this.createSpan(this.current - 1, this.current)
-        },
-        span: this.createSpan(this.current - 1, this.current)
-      });
-    }
-    
-    // Handle ensure clause
-    let finallyBlock: AST.Block | undefined;
-    if (this.match("ensure")) {
-      const ensureStatements: (AST.Decl | AST.Stmt)[] = [];
-      while (!this.check("end") && !this.isAtEnd()) {
-        if (this.peek().virtualSemi) {
-          this.advance();
-          continue;
-        }
-        
-        try {
-          const stmt = this.parseTopLevel();
-          if (stmt) ensureStatements.push(stmt);
-        } catch (error) {
-          if (error instanceof ParseError) {
-            this.errors.push(error);
-            this.synchronize();
-          } else {
-            throw error;
-          }
-        }
-      }
-      
-      finallyBlock = {
-        kind: "Block",
-        statements: ensureStatements,
-        span: this.createSpan(this.current - 1, this.current)
-      };
-    }
-    
-    this.consume("end", "Expected 'end' to close begin block");
-    
-    return {
-      kind: "Try",
-      body,
-      catches,
-      finallyBody: finallyBlock,
-      span: this.createSpan(start, this.current - 1)
-    };
-  }
-  
-  public parseKeywordBlock(keyword?: string): AST.Block {
-    const start = this.current;
-    const actualKeyword = keyword || this.previous()?.value || "do";
-    this.keywordStack.push(actualKeyword as any);
-    
-    const statements: (AST.Decl | AST.Stmt)[] = [];
-    
-    const endKeyword = this.getEndKeyword(actualKeyword);
-    
-    while (!this.check(endKeyword) && !this.isAtEnd()) {
-      // Skip virtual semicolons
-      if (this.peek().virtualSemi) {
-        this.advance();
-        continue;
-      }
-      
-      try {
-        const stmt = this.parseTopLevel();
-        if (stmt) statements.push(stmt);
-      } catch (error) {
-        if (error instanceof ParseError) {
-          this.errors.push(error);
-          this.synchronize();
-        } else {
-          throw error;
-        }
-      }
-    }
-    
-    if (!this.match(endKeyword)) {
-      throw this.error(this.peek(), `Expected '${endKeyword}'`);
-    }
-    
-    this.keywordStack.pop();
-    
-    return {
-      kind: "Block",
-      statements,
-      span: this.createSpan(start, this.current - 1)
-    };
-  }
-  
-  private getEndKeyword(keyword: string): string {
-    switch (keyword) {
-      case "do": return "done";
-      case "case": return "esac";
-      case "begin": return "end";
-      case "if": return "fi";
-      case "for":
-      case "while":
-      case "function": return this.isBashStyle() ? "done" : "end";
-      default: return "end";
-    }
-  }
-  
-  private isBashStyle(): boolean {
-    // Heuristic: check for bash-style constructs
-    return false; // Implement based on context
-  }
-  
-  private isRubyStyle(): boolean {
-    // Heuristic: check for ruby-style constructs
-    return false; // Implement based on context
-  }
-  
-  private isBashOrRubyStyle(): boolean {
-    return this.isBashStyle() || this.isRubyStyle();
-  }
-  
   // Expression parsing with Pratt parser
   public parseExpression(minPrecedence = 0): AST.Expr {
     let left = this.parsePrimary();
@@ -1264,7 +610,7 @@ export class Parser extends ParserCursor {
         this.advance();
       }
       
-      const body = this.check("{") ? this.parseBlock() : this.parseAssignmentExpression();
+      const body = this.check("{") ? Blocks.parseBlock(this) : this.parseAssignmentExpression();
       return {
         kind: "Lambda",
         params: [{
@@ -1343,7 +689,7 @@ export class Parser extends ParserCursor {
       if (op.value === "|>" && this.check("match")) {
         // Parse match with implicit discriminant (left side of pipe)
         this.advance(); // consume 'match'
-        const switchStmt = this.parseSwitch();
+        const switchStmt = Blocks.parseSwitch(this);
         // For now, treat it as an expression (would need AST changes for proper support)
         right = switchStmt as any;
       } else {
@@ -1372,7 +718,7 @@ export class Parser extends ParserCursor {
     return left;
   }
   
-  private parsePrimary(): AST.Expr {
+  public parsePrimary(): AST.Expr {
     // Handle function expressions (including async)
     // But not when func() looks like a function call (no body follows the parens)
     if ((this.peek().value === "function" || this.peek().value === "func") &&
@@ -1399,7 +745,7 @@ export class Parser extends ParserCursor {
       }
 
       // Parse body
-      const body = this.parseBlock();
+      const body = Blocks.parseBlock(this);
 
       // Return as a Lambda expression (anonymous function)
       // Allow postfix operations (like IIFE calls: func(){}())
@@ -1451,7 +797,7 @@ export class Parser extends ParserCursor {
           }
           
           // Parse body
-          const body = this.parseBlock();
+          const body = Blocks.parseBlock(this);
           
           // Return as an async Lambda expression
           const lambda: any = {
@@ -1670,7 +1016,7 @@ export class Parser extends ParserCursor {
     if (this.peek().value === "when" &&
         (this.peekAt(1)?.value === "(" || this.peekAt(1)?.value === "{")) {
       this.advance(); // consume 'when'
-      const switchExpr = this.parseSwitch();
+      const switchExpr = Blocks.parseSwitch(this);
       return switchExpr as any;
     }
 
@@ -1814,7 +1160,7 @@ export class Parser extends ParserCursor {
     // or { (e.g. if match { ... } where match is a variable name used as condition)
     if (this.check("match") && !this.isAssignmentOp(this.peekAt(1)!) && this.peekAt(1)?.value !== "{") {
       this.advance();
-      const switchExpr = this.parseSwitch();
+      const switchExpr = Blocks.parseSwitch(this);
       return switchExpr as any;
     }
     // match as identifier (assignment target or variable reference)
@@ -2788,424 +2134,6 @@ export class Parser extends ParserCursor {
   
   // Control flow parsing
   
-  public parseSwitch(): AST.Switch | AST.Match {
-    const start = this.current - 1;
-    const prevVal = this.previous()?.value;
-    const isMatch = prevVal === "match" || prevVal === "when";
-    const discriminant = this.parseExpression();
-    const cases: AST.SwitchCase[] = [];
-    let defaultCase: AST.Block | undefined;
-    
-    // Set flag to indicate we're inside a switch
-    const wasInsideSwitch = this.insideSwitch;
-    this.insideSwitch = true;
-    
-    // Support both { } and : styles
-    const isPythonStyle = this.check(":");
-    let baseIndent = 0;
-    
-    if (isPythonStyle) {
-      this.consume(":", "Expected ':' after match expression");
-      // Get the indentation level for Python-style match
-      baseIndent = this.tokens[this.current - 1]?.indentCol ?? 0;
-      
-      // Skip to next line if there's a virtual semicolon
-      while (this.peek().virtualSemi) {
-        this.advance();
-      }
-    } else {
-      this.consume("{", "Expected '{' after switch expression");
-      // We've consumed a brace but didn't increment braceDepth
-      // Track this so we know when we're back at the match level
-    }
-    
-    // Track the initial brace depth (before parsing any arms)
-    const matchBraceDepth = this.braceDepth;
-    
-    // Loop condition depends on style
-    while (!this.isAtEnd()) {
-      // Skip virtual semicolons first
-      while (this.peek().virtualSemi) {
-        this.advance();
-      }
-
-      // For Python style, check if we've dedented back
-      if (isPythonStyle) {
-        const currentIndent = this.peek().indentCol;
-        if (currentIndent !== undefined && currentIndent <= baseIndent) {
-          // We've dedented, exit the match block
-          break;
-        }
-      } else {
-        // For brace style, check for closing brace
-        // We should only exit if we're back at the same brace depth as when we started
-        if (this.check("}") && this.braceDepth === matchBraceDepth) {
-          break;
-        }
-      }
-      
-      if (this.isAtEnd()) {
-        break;
-      }
-      
-      const caseStart = this.current;
-      
-      // Handle default case (also `else` for Kotlin when-style)
-      if (this.match("default") || (isMatch && this.match("else"))) {
-        // Match uses => while switch uses :
-        if (isMatch && !isPythonStyle) {
-          this.consume("=>", "Expected '=>' after default");
-          defaultCase = this.parseMatchCaseBody();
-        } else {
-          this.consume(":", "Expected ':' after default");
-          defaultCase = this.parseCaseBody();
-        }
-        
-        // Check for comma in match expressions
-        if (isMatch && this.check(",")) {
-          this.advance();
-        }
-        continue;
-      }
-      
-      // Handle regular case
-      const patterns: AST.Expr[] = [];
-      
-      // Check for wildcard default in match expressions
-      if (isMatch && this.check("_")) {
-        const wildcardStart = this.current;
-        this.advance(); // consume _
-        
-        // Skip virtual semicolons
-        while (this.peek().virtualSemi) {
-          this.advance();
-        }
-        
-        if (this.check("=>")) {
-          // This is a wildcard default case
-          this.consume("=>", "Expected '=>' after wildcard pattern");
-          defaultCase = this.parseMatchCaseBody();
-          
-          // Check for comma in match expressions
-          if (this.check(",")) {
-            this.advance();
-          }
-          continue;
-        } else {
-          // Not a wildcard, backtrack
-          this.current = wildcardStart;
-        }
-      }
-      
-      if (this.match("case")) {
-        // Go type switch case: case []map[string]string: or case map[K]V:
-        if ((this.check("[") && this.peekAt(1)?.value === "]") ||
-            (this.check("map") && this.peekAt(1)?.value === "[")) {
-          const goType = Types.parseGoTypeAnnotation(this);
-          // Convert type to an identifier expression for case matching
-          const typeName = goType.kind === "SimpleType" ? ((goType as any).id?.name || "GoType") :
-                           goType.kind === "GenericType" ? Types.typeNodeToString(goType) : "GoType";
-          patterns.push({
-            kind: "Identifier",
-            name: typeName,
-            span: goType.span
-          } as AST.Identifier);
-        } else {
-          // Traditional switch case
-          patterns.push(this.parseExpression());
-        }
-        while (this.match(",")) {
-          patterns.push(this.parseExpression());
-        }
-      } else if (isMatch && !this.check("}")) {
-        // Match expression case - parse pattern directly
-        patterns.push(this.parseMatchPattern());
-        
-        // Handle alternative patterns with |
-        while (this.match("|")) {
-          patterns.push(this.parseMatchPattern());
-        }
-      } else {
-        // No more cases
-        break;
-      }
-      
-      // Check for guard clause (if condition)
-      let guard: AST.Expr | undefined;
-      if (this.match("if")) {
-        guard = this.parseExpression();
-      }
-      
-      // Match can use either => or : depending on style
-      if (isMatch && !isPythonStyle) {
-        this.consume("=>", "Expected '=>' after match pattern");
-      } else {
-        this.consume(":", "Expected ':' after case pattern");
-      }
-      
-      const body = isMatch ? this.parseMatchCaseBody() : this.parseCaseBody();
-      
-      // Check for fallthrough
-      const fallthrough = this.checkFallthrough();
-      
-      cases.push({
-        patterns,
-        guard,
-        body,
-        fallthrough,
-        span: this.createSpan(caseStart, this.current - 1)
-      });
-      
-      
-      // In match expressions, cases can be separated by commas
-      if (isMatch && this.check(",")) {
-        this.advance(); // consume comma
-        // Continue to next case
-      }
-    }
-    
-    // Only expect closing brace for non-Python style
-    if (!isPythonStyle) {
-      this.consume("}", "Expected '}' after switch body");
-    }
-    
-    // Restore switch context flag
-    this.insideSwitch = wasInsideSwitch;
-    
-    // Return Match for match expressions, Switch for switch statements
-    if (isMatch) {
-      // Convert SwitchCase to MatchArm
-      const arms: AST.MatchArm[] = cases.map(c => ({
-        patterns: c.patterns,
-        guard: c.guard,
-        body: c.body
-      }));
-      
-      // Add default case as a catch-all arm if present
-      if (defaultCase) {
-        arms.push({
-          patterns: [{ kind: "Identifier", name: "_", span: defaultCase.span }],
-          body: defaultCase
-        });
-      }
-      
-      return {
-        kind: "Match",
-        expr: discriminant,
-        arms,
-        style: isPythonStyle ? "python" : "rust",
-        span: this.createSpan(start, this.current - 1)
-      } as AST.Match;
-    }
-    
-    return {
-      kind: "Switch",
-      discriminant,
-      cases,
-      defaultCase,
-      span: this.createSpan(start, this.current - 1)
-    };
-  }
-  
-  private parseMatchPattern(): AST.Expr {
-    const start = this.current;
-    
-    // Skip virtual semicolons
-    while (this.peek().virtualSemi) {
-      this.advance();
-    }
-    
-    // Check for wildcard pattern _
-    if (this.match("_")) {
-      return {
-        kind: "Identifier",
-        name: "_",
-        span: this.createSpan(start, this.current - 1)
-      };
-    }
-    
-    // Check for literal patterns (numbers, strings, booleans)
-    if (this.peek().type === TokenType.NumericLiteral) {
-      return Literals.parseNumericLiteral(this);
-    }
-    
-    if (this.peek().type === TokenType.StringLiteral) {
-      return Literals.parseStringLiteral(this);
-    }
-    
-    if (this.match("true", "false")) {
-      const token = this.previous();
-      return {
-        kind: "BooleanLiteral",
-        value: token?.value === "true",
-        span: this.createSpanFrom(token!)
-      };
-    }
-    
-    if (this.match("null", "undefined", "nil", "None")) {
-      return {
-        kind: "NullLiteral",
-        span: this.createSpanFrom(this.previous()!)
-      };
-    }
-    
-    // Check for array/list patterns [head, ...tail]
-    if (this.match("[")) {
-      return Literals.parseArrayLiteral(this);
-    }
-    
-    // Check for object patterns {type: "user", name}
-    if (this.match("{")) {
-      return Literals.parseObjectLiteral(this);
-    }
-    
-    // Parse constructor pattern like Some(v) or simple identifier
-    let id: AST.Expr = this.parseIdentifier();
-    
-    // Check for qualified pattern like Pattern::Regex
-    if (this.check("::")) {
-      this.advance(); // consume ::
-      const property = this.parseIdentifier();
-      id = {
-        kind: "Member",
-        object: id,
-        property,
-        computed: false,
-        span: this.createSpan(start, this.current - 1)
-      };
-    }
-    
-    // Check for constructor pattern with arguments
-    if (this.match("(")) {
-      const args: AST.Expr[] = [];
-      
-      if (!this.check(")")) {
-        do {
-          // Parse binding variable or nested pattern
-          args.push(this.parseExpression());
-        } while (this.match(","));
-      }
-      
-      this.consume(")", "Expected ')' after constructor arguments");
-      
-      return {
-        kind: "Call",
-        callee: id,
-        args,
-        span: this.createSpan(start, this.current - 1)
-      };
-    }
-    
-    return id;
-  }
-  
-  private parseCaseBody(): AST.Block {
-    const statements: (AST.Decl | AST.Stmt)[] = [];
-
-    while (!this.isAtEnd() && !this.check("}") && !this.check("default")) {
-      // Skip virtual semicolons
-      while (this.peek().virtualSemi) {
-        this.advance();
-      }
-
-      // Check terminators after skipping vsemis
-      if (this.check("}") || this.check("default") || this.isAtEnd()) {
-        break;
-      }
-
-      // Stop at 'case' unless it's a bash case...in statement
-      if (this.check("case")) {
-        // Look ahead: case <pattern> in => bash case statement (parse as body statement)
-        // case <pattern> : => next switch case (stop)
-        let isBashCase = false;
-        const checkpoint = this.current;
-        // Peek past 'case' and the pattern to see 'in' vs ':'
-        let scan = this.current + 1; // skip 'case'
-        // skip the pattern expression tokens until we hit 'in', ':', or '=>'
-        while (scan < this.tokens.length) {
-          const t = this.tokens[scan];
-          if (t.value === "in") { isBashCase = true; break; }
-          if (t.value === ":" || t.value === "=>" || t.value === "}" ||
-              t.type === TokenType.EOF || t.virtualSemi) break;
-          scan++;
-        }
-        if (!isBashCase) break;
-      }
-      
-      // Parse statements directly, not using parseTopLevel
-      let stmt: AST.Decl | AST.Stmt | null = null;
-      if (this.isDeclStart()) {
-        stmt = this.parseDeclaration();
-      } else {
-        stmt = this.parseStatement();
-      }
-      
-      if (stmt) statements.push(stmt);
-      
-      // Check for break statement
-      if (stmt && stmt.kind === "Break") {
-        break;
-      }
-    }
-    
-    return {
-      kind: "Block",
-      statements,
-      span: this.createSpanFrom(statements[0] || this.previous())
-    };
-  }
-  
-  private parseMatchCaseBody(): AST.Block {
-    // For match expressions, the body is typically a single expression
-    // It can be a block {...} or just an expression
-    if (this.check("{")) {
-      return this.parseBlock();
-    }
-
-    // Handle return/break/continue statements in match arms (Rust allows this)
-    if (this.check("return") || this.check("break") || this.check("continue")) {
-      const stmt = this.parseStatement();
-      return {
-        kind: "Block",
-        statements: stmt ? [stmt] : [],
-        span: stmt?.span || this.createSpan(this.current, this.current)
-      };
-    }
-
-    // Parse single expression but not comma operator at this level
-    // In match cases, comma separates cases, not expressions
-    const expr = this.parseAssignmentExpression();
-    
-    // Check for comma (next case) but don't consume it
-    // The main loop will handle advancing past the comma
-    if (this.check(",")) {
-      // Don't consume - let the main loop handle it
-    }
-    
-    return {
-      kind: "Block",
-      statements: [{
-        kind: "ExprStmt",
-        expr,
-        span: expr.span
-      }],
-      span: expr.span
-    };
-  }
-  
-  private checkFallthrough(): boolean {
-    // Check for fallthrough token or comment
-    const next = this.peek();
-    if (next.type === TokenType.Keyword && next.value === "fallthrough") {
-      this.advance();
-      this.consumeSemicolon();
-      return true;
-    }
-    
-    // Check for // fallthrough comment
-    // This would need to be tracked during lexing
-    return false;
-  }
   
   
   public parseExprStmt(): AST.ExprStmt | AST.If {
