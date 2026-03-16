@@ -75,6 +75,7 @@ export class ParserCursor {
   /**
    * Run `fn`, rolling back cursor position on failure (thrown error or null return).
    * Returns the result on success, or null on failure.
+   * Does NOT roll back errors by default — use attemptClean() for that.
    */
   protected attempt<T>(fn: () => T): T | null {
     const checkpoint = this.current;
@@ -87,6 +88,28 @@ export class ParserCursor {
       return result;
     } catch {
       this.current = checkpoint;
+      return null;
+    }
+  }
+
+  /**
+   * Like attempt(), but also rolls back errors on failure.
+   * Use when speculative parsing should leave no error trace.
+   */
+  protected attemptClean<T>(fn: () => T): T | null {
+    const checkpoint = this.current;
+    const errorCheckpoint = this.errors.length;
+    try {
+      const result = fn();
+      if (result === null || result === undefined) {
+        this.current = checkpoint;
+        this.errors.length = errorCheckpoint;
+        return null;
+      }
+      return result;
+    } catch {
+      this.current = checkpoint;
+      this.errors.length = errorCheckpoint;
       return null;
     }
   }

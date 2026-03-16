@@ -320,20 +320,16 @@ export class Parser extends ParserCursor {
     
     // Check for return-type-before-name function declaration
     if (this.isType()) {
-      const checkpoint = this.current;
-      try {
-        const type = this.parseType();
+      const isRetTypeFn = this.attempt(() => {
+        this.parseType();
         if (this.peek().type === TokenType.Identifier) {
-          const name = this.advance();
-          if (this.check("(")) {
-            // This is a function with return type before name
-            this.current = checkpoint;
-            return this.parseFuncDeclWithReturnTypeBefore();
-          }
+          this.advance();
+          if (this.check("(")) return true;
         }
-        this.current = checkpoint;
-      } catch {
-        this.current = checkpoint;
+        return null;
+      });
+      if (isRetTypeFn) {
+        return this.parseFuncDeclWithReturnTypeBefore();
       }
     }
     
@@ -1644,10 +1640,11 @@ export class Parser extends ParserCursor {
       const runtimeNames = ["py", "js", "go", "rb", "java"];
       const nextToken = this.peekNext();
       if (nextToken && runtimeNames.includes(nextToken.value)) {
-        const checkpoint = this.current;
-        const atToken = this.advance(); // consume @
-        const runtimeName = this.advance(); // consume runtime name
-        if (this.check("(")) {
+        const runtimeTag = this.attempt(() => {
+          const tagStart = this.current;
+          this.advance(); // consume @
+          const runtimeName = this.advance(); // consume runtime name
+          if (!this.check("(")) return null;
           this.advance(); // consume (
           const expr = this.parseExpression();
           this.consume(")", "Expected ')' after runtime-tagged expression");
@@ -1655,11 +1652,10 @@ export class Parser extends ParserCursor {
             kind: "RuntimeTag",
             runtime: runtimeName.value as AST.RuntimeTag["runtime"],
             expr,
-            span: this.createSpan(checkpoint, this.current - 1)
+            span: this.createSpan(tagStart, this.current - 1)
           });
-        }
-        // Not a runtime tag call, restore
-        this.current = checkpoint;
+        });
+        if (runtimeTag) return runtimeTag;
       }
     }
 
@@ -2944,8 +2940,8 @@ export class Parser extends ParserCursor {
       returnType = this.parseType();
     } else if (declKeywordValue === "func" && this.check("(") && !this.check("(=")) {
       // Go multi-return: func name(params) (Type1, Type2) { ... }
-      const checkpoint = this.current;
-      try {
+      const goRetStart = this.current;
+      const parsed = this.attempt(() => {
         this.advance(); // consume '('
         const types: AST.TypeNode[] = [];
         if (!this.check(")")) {
@@ -2954,14 +2950,14 @@ export class Parser extends ParserCursor {
           } while (this.match(","));
         }
         this.consume(")", "Expected ')' after return types");
-        if (types.length === 1) {
-          returnType = types[0];
-        } else if (types.length > 1) {
-          // Represent as a tuple/union for multi-return
-          returnType = { kind: "UnionType", types, span: this.createSpan(checkpoint, this.current - 1) } as any;
+        return types;
+      });
+      if (parsed) {
+        if (parsed.length === 1) {
+          returnType = parsed[0];
+        } else if (parsed.length > 1) {
+          returnType = { kind: "UnionType", types: parsed, span: this.createSpan(goRetStart, this.current - 1) } as any;
         }
-      } catch {
-        this.current = checkpoint;
       }
     } else if (declKeywordValue === "func" && this.peek().type === TokenType.Identifier &&
                !this.check("{") && !this.peek().virtualSemi) {
@@ -6477,13 +6473,11 @@ export class Parser extends ParserCursor {
           // Check for generic parameters on methods: methodName<T, U>() or methodName<K extends T>()
           let genericParams: AST.Identifier[] | undefined;
           if (this.check("<") && !this.check("<=") && !this.check("<<") && !this.check("<-")) {
-            const checkpoint = this.current;
-            try {
+            genericParams = this.attempt(() => {
               this.advance(); // consume <
-              genericParams = [];
+              const params: AST.Identifier[] = [];
               do {
-                genericParams.push(this.parseIdentifier());
-                // Skip type constraints: extends Type, : Type
+                params.push(this.parseIdentifier());
                 if (this.match("extends", "super")) {
                   this.parseType();
                 } else if (this.check(":") && !this.check("::")) {
@@ -6495,18 +6489,9 @@ export class Parser extends ParserCursor {
                 }
               } while (this.match(","));
               this.consume(">", "Expected '>' after generic parameters");
-              
-              // Verify this is followed by parentheses (method signature)
-              if (!this.check("(")) {
-                // Not a method with generics, restore position
-                genericParams = undefined;
-                this.current = checkpoint;
-              }
-            } catch {
-              // Failed to parse generics, restore position
-              genericParams = undefined;
-              this.current = checkpoint;
-            }
+              if (!this.check("(")) return null;
+              return params;
+            }) ?? undefined;
           }
           
           // Method with parentheses: methodName(params): returnType { body }
@@ -7707,13 +7692,10 @@ export class Parser extends ParserCursor {
       } else {
         // Check for match expression in comprehension context
         if (this.check("match")) {
-          const checkpoint = this.current;
-          try {
-            const matchExpr = this.parseSwitch();
-            firstExpr = matchExpr as any;
-          } catch (e) {
-            // If match parsing fails, restore position and parse as assignment
-            this.current = checkpoint;
+          const matchResult = this.attempt(() => this.parseSwitch() as any as AST.Expr);
+          if (matchResult) {
+            firstExpr = matchResult;
+          } else {
             firstExpr = this.parseAssignmentExpression();
           }
         } else {
