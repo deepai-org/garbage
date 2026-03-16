@@ -1,5 +1,6 @@
 import { applyMASI } from './lexer-masi';
 import * as LS from './lex-state';
+import { OPERATOR_TRIE } from './operator-trie';
 
 export enum TokenType {
   // Literals
@@ -835,33 +836,12 @@ export class Lexer {
       // Otherwise it might be a C# verbatim string, handled elsewhere
     }
     
-    // Try to match longest operator
-    const operators = [
-      '>>>=', '>>>=' , '>>>', '>>=', '<<=', '===', '!==', '??=', '**=', '||=', '&&=',
-      '<=>', '...', '..', '=>', '==', '!=', '<=', '>=', '<<', '>>', '&&', '||',
-      '??', ';;', '|>', '**', '+=', '-=', '*=', '/=', '%=', '&=', '|=', '^=', 
-      '~=', '=~', '++', '--', ':=:', ':=', '->', '<-', '::', '?.', '!.', '.*'
-    ];
-    
-    for (const op of operators) {
-      if (this.matchOperator(start, op)) {
-        value = op;
-        this.position = start + op.length;
-        this.column += op.length - 1;
-        break;
-      }
-    }
-    
+    // Longest-match via trie
+    value = OPERATOR_TRIE.longestMatch(this.source, start);
+    this.position = start + value.length;
+    this.column = startColumn + value.length;
+
     this.addTokenEx(TokenType.Operator, value, start, this.position, startLine, startColumn);
-  }
-  
-  private matchOperator(start: number, op: string): boolean {
-    for (let i = 0; i < op.length; i++) {
-      if (start + i >= this.source.length || this.source[start + i] !== op[i]) {
-        return false;
-      }
-    }
-    return true;
   }
   
   private shouldBeRegex(): boolean {
