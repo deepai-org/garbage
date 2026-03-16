@@ -1924,7 +1924,58 @@ export class Parser {
       };
       return this.parsePostfix(id);
     }
-    
+
+    // Ruby symbol literals: :identifier or :keyword
+    if (this.check(":") && !this.check("::")) {
+      const next = this.peekAt(1);
+      if (next && (next.type === TokenType.Identifier || next.type === TokenType.Keyword)) {
+        const start = this.current;
+        this.advance(); // consume ':'
+        const name = this.advance(); // consume identifier/keyword
+        return this.parsePostfix({
+          kind: "StringLiteral",
+          parts: [{ kind: "Text", value: ":" + name.value }],
+          flags: {},
+          delimiter: ":",
+          span: this.createSpan(start, this.current - 1)
+        });
+      }
+    }
+
+    // Ruby percent literals: %r{pattern}flags, %w{word list}, %i{symbol list}
+    if (this.check("%")) {
+      const next = this.peekAt(1);
+      if (next && next.type === TokenType.Identifier && /^[rwiqQxs]$/.test(next.value)) {
+        const nextNext = this.peekAt(2);
+        if (nextNext && (nextNext.value === "{" || nextNext.value === "[" || nextNext.value === "(")) {
+          const start = this.current;
+          this.advance(); // consume '%'
+          const kind = this.advance(); // consume letter (r, w, etc.)
+          const open = this.advance(); // consume opening delimiter
+          const close = open.value === "{" ? "}" : open.value === "[" ? "]" : ")";
+          // Consume content until matching close delimiter
+          let depth = 1;
+          while (!this.isAtEnd() && depth > 0) {
+            if (this.peek().value === open.value) depth++;
+            else if (this.peek().value === close) depth--;
+            if (depth > 0) this.advance();
+          }
+          if (!this.isAtEnd()) this.advance(); // consume closing delimiter
+          // Consume optional trailing flags (e.g., 'i', 'g', 'mix')
+          if (!this.isAtEnd() && this.peek().type === TokenType.Identifier &&
+              /^[igmxsue]+$/.test(this.peek().value)) {
+            this.advance();
+          }
+          return {
+            kind: "RegexLiteral",
+            pattern: "%" + kind.value + open.value + "..." + close,
+            flags: "",
+            span: this.createSpan(start, this.current - 1)
+          } as any;
+        }
+      }
+    }
+
     throw this.error(this.peek(), "Unexpected token in expression");
   }
   
@@ -2051,20 +2102,22 @@ export class Parser {
             this.consume("|", "Expected '|' after block parameters");
           }
           
-          // Parse block body until 'end'
+          // Parse block body until 'end' or 'done'
           const blockStatements: (AST.Stmt | AST.Decl)[] = [];
-          while (!this.isAtEnd() && this.peek().value !== "end") {
+          while (!this.isAtEnd() && this.peek().value !== "end" && this.peek().value !== "done") {
             if (this.peek().virtualSemi) {
               this.advance();
               continue;
             }
-            
+
             const stmt = this.parseStatement();
             if (stmt) blockStatements.push(stmt);
           }
-          
-          this.consume("end", "Expected 'end' to close Ruby block");
-          
+
+          if (!this.match("end") && !this.match("done")) {
+            this.consume("end", "Expected 'end' to close Ruby block");
+          }
+
           // Add block as a special property on the call (not in standard AST)
           (callExpr as any).rubyBlock = {
             params: blockParams,
@@ -2072,10 +2125,10 @@ export class Parser {
             span: this.createSpan(blockStart, this.current - 1)
           };
         }
-        
+
         continue;
       }
-      
+
       // Check for Ruby block after member access (Ruby method calls without parens)
       // e.g., items.each do |item| ... end
       if (this.check("do") && expr.kind === "Member" && !this.noRubyBlock) {
@@ -2086,10 +2139,10 @@ export class Parser {
           args: [],
           span: expr.span
         };
-        
+
         const blockStart = this.current;
         this.advance(); // consume 'do'
-        
+
         // Parse block parameters if present |x, y|
         let blockParams: AST.Identifier[] = [];
         if (this.match("|")) {
@@ -2098,20 +2151,22 @@ export class Parser {
           } while (this.match(","));
           this.consume("|", "Expected '|' after block parameters");
         }
-        
-        // Parse block body until 'end'
+
+        // Parse block body until 'end' or 'done'
         const blockStatements: (AST.Stmt | AST.Decl)[] = [];
-        while (!this.isAtEnd() && this.peek().value !== "end") {
+        while (!this.isAtEnd() && this.peek().value !== "end" && this.peek().value !== "done") {
           if (this.peek().virtualSemi) {
             this.advance();
             continue;
           }
-          
+
           const stmt = this.parseStatement();
           if (stmt) blockStatements.push(stmt);
         }
-        
-        this.consume("end", "Expected 'end' to close Ruby block");
+
+        if (!this.match("end") && !this.match("done")) {
+          this.consume("end", "Expected 'end' to close Ruby block");
+        }
         
         // Add block as a special property on the call
         (callExpr as any).rubyBlock = {
@@ -4140,7 +4195,17 @@ export class Parser {
     if (this.check("{")) {
       return this.parseBlock();
     }
-    
+
+    // Handle return/break/continue statements in match arms (Rust allows this)
+    if (this.check("return") || this.check("break") || this.check("continue")) {
+      const stmt = this.parseStatement();
+      return {
+        kind: "Block",
+        statements: stmt ? [stmt] : [],
+        span: stmt?.span || this.createSpan(this.current, this.current)
+      };
+    }
+
     // Parse single expression but not comma operator at this level
     // In match cases, comma separates cases, not expressions
     const expr = this.parseAssignmentExpression();
@@ -4190,14 +4255,16 @@ export class Parser {
         } while (this.match(","));
       }
       this.consume("|", "Expected '|' after block parameters");
-      // Parse body until 'end'
+      // Parse body until 'end' or 'done'
       const stmts: AST.Stmt[] = [];
-      while (!this.check("end") && !this.isAtEnd()) {
+      while (!this.check("end") && !this.check("done") && !this.isAtEnd()) {
         while (this.peek().virtualSemi) this.advance();
-        if (this.check("end")) break;
+        if (this.check("end") || this.check("done")) break;
         stmts.push(this.parseTopLevel() as AST.Stmt);
       }
-      this.consume("end", "Expected 'end' to close do block");
+      if (!this.match("end") && !this.match("done")) {
+        throw this.error(this.peek(), "Expected 'end' to close do block");
+      }
       const body: AST.Block = { kind: "Block", statements: stmts, span: this.createSpan(start, this.current - 1) };
       // Emit as a Lambda expression statement (the block is a Ruby block/lambda)
       const lambda: AST.Lambda = {
@@ -4622,6 +4689,9 @@ export class Parser {
       } else if (this.match(":")) {
         // Python-style colon block
         body = this.parseIndentBlock();
+      } else if (this.peek().virtualSemi && !this.check("{")) {
+        // Ruby-style: while cond \n body \n end
+        body = this.parseKeywordBlock("while");
       } else {
         body = this.parseBlockOrStatement();
       }
