@@ -1,6 +1,11 @@
 import { Token, TokenType } from './lexer';
 import * as AST from './ast';
 import { ParserCursor, ParseError } from './parser-cursor';
+import * as JSX from './parselets/jsx';
+import * as Types from './parselets/types';
+import * as Functions from './parselets/functions';
+import * as Imports from './parselets/imports';
+import * as Literals from './parselets/literals';
 
 export { ParseError } from './parser-cursor';
 
@@ -58,7 +63,7 @@ export class Parser extends ParserCursor {
     };
   }
 
-  private parseTopLevel(): AST.Decl | AST.Stmt | null {
+  public parseTopLevel(): AST.Decl | AST.Stmt | null {
     this.consumeDirectives();
     
     // Skip virtual semicolons at top level
@@ -121,12 +126,12 @@ export class Parser extends ParserCursor {
         
         if (this.match("def", "fun", "fn", "func", "function")) {
           const isGenerator = this.previous()?.value === "function" && this.match("*");
-          const func = this.parseFuncDecl(isAsync, isUnsafe, isGenerator, decorators);
+          const func = Functions.parseFuncDecl(this, isAsync, isUnsafe, isGenerator, decorators);
           return func;
         }
       } else if (this.match("def", "fun", "fn", "func", "function")) {
         const isGenerator = this.previous()?.value === "function" && this.match("*");
-        const func = this.parseFuncDecl(false, false, isGenerator, decorators);
+        const func = Functions.parseFuncDecl(this, false, false, isGenerator, decorators);
         return func;
       }
       
@@ -242,12 +247,12 @@ export class Parser extends ParserCursor {
     
     // Import statements
     if (this.match("import", "require")) {
-      return this.parseImport();
+      return Imports.parseImport(this);
     }
 
     // Python-style: from module import names
     if (this.peek().value === "from" && this.peek().type === TokenType.Keyword && this.isDeclStart()) {
-      return this.parseFromImport();
+      return Imports.parseFromImport(this);
     }
 
     // Check if using is for import or resource management
@@ -259,7 +264,7 @@ export class Parser extends ParserCursor {
       if (next?.type === TokenType.StringLiteral || 
           (next?.type === TokenType.Identifier && this.peekAt(2)?.value !== "=")) {
         this.advance(); // consume 'using'
-        return this.parseImport();
+        return Imports.parseImport(this);
       }
       
       // It's a using statement for resource management
@@ -271,7 +276,7 @@ export class Parser extends ParserCursor {
     if (this.check("#") && this.peekNext()?.value === "include") {
       this.advance(); // #
       this.advance(); // include
-      return this.parseImport();
+      return Imports.parseImport(this);
     }
     
     // Variable declarations
@@ -304,7 +309,7 @@ export class Parser extends ParserCursor {
         // Check for generator function (function*)
         const funcKeyword = this.previous()?.value;
         const isGenerator = funcKeyword === "function" && this.match("*");
-        return this.parseFuncDecl(isAsync, isUnsafe, isGenerator);
+        return Functions.parseFuncDecl(this, isAsync, isUnsafe, isGenerator);
       }
       
       // Not a function declaration - this would be an error
@@ -315,11 +320,11 @@ export class Parser extends ParserCursor {
     if (this.match("def", "fun", "fn", "func", "function")) {
       // Check for generator function (function*)
       const isGenerator = this.previous()?.value === "function" && this.match("*");
-      return this.parseFuncDecl(false, false, isGenerator);
+      return Functions.parseFuncDecl(this, false, false, isGenerator);
     }
     
     // Check for return-type-before-name function declaration
-    if (this.isType()) {
+    if (Types.isType(this)) {
       const isRetTypeFn = this.attempt(() => {
         this.parseType();
         if (this.peek().type === TokenType.Identifier) {
@@ -329,7 +334,7 @@ export class Parser extends ParserCursor {
         return null;
       });
       if (isRetTypeFn) {
-        return this.parseFuncDeclWithReturnTypeBefore();
+        return Functions.parseFuncDeclWithReturnTypeBefore(this);
       }
     }
     
@@ -377,7 +382,7 @@ export class Parser extends ParserCursor {
     throw this.error(this.peek(), "Expected declaration");
   }
   
-  private parseStatement(): AST.Stmt {
+  public parseStatement(): AST.Stmt {
     // Handle async for
     if (this.peek().value === "async" && this.peekNext()?.value === "for") {
       this.advance(); // consume async
@@ -519,7 +524,7 @@ export class Parser extends ParserCursor {
         this.peekAt(1) && (this.peekAt(1)!.type === TokenType.Identifier ||
                            this.peekAt(1)!.type === TokenType.StringLiteral)) {
       this.advance(); // consume 'use' or 'include'
-      return this.parseImport() as any;
+      return Imports.parseImport(this) as any;
     }
 
     // Rust `mod name;` module declaration
@@ -578,7 +583,7 @@ export class Parser extends ParserCursor {
     return this.parseExprStmt();
   }
   
-  private parseBlockOrStatement(): AST.Block {
+  public parseBlockOrStatement(): AST.Block {
     // Helper to parse either a block or single statement
     if (this.check("{")) {
       return this.parseBlock();
@@ -593,7 +598,7 @@ export class Parser extends ParserCursor {
     }
   }
 
-  private parseBlock(): AST.Block {
+  public parseBlock(): AST.Block {
     const start = this.current;
     const openToken = this.peek();
     
@@ -963,7 +968,7 @@ export class Parser extends ParserCursor {
     };
   }
   
-  private parseIndentBlock(): AST.Block {
+  public parseIndentBlock(): AST.Block {
     const start = this.current;
     
     // Skip any virtual semicolons after the colon
@@ -1245,7 +1250,7 @@ export class Parser extends ParserCursor {
   }
   
   // Expression parsing with Pratt parser
-  private parseExpression(minPrecedence = 0): AST.Expr {
+  public parseExpression(minPrecedence = 0): AST.Expr {
     let left = this.parsePrimary();
     
     // Check for single-parameter lambda without parentheses
@@ -1274,7 +1279,7 @@ export class Parser extends ParserCursor {
     
     while (true) {
       // Skip JSX whitespace tokens if we're in a JSX context
-      this.skipJSXWhitespace();
+      JSX.skipJSXWhitespace(this);
       
       const op = this.peek();
       
@@ -1303,7 +1308,7 @@ export class Parser extends ParserCursor {
       this.advance();
       
       // Skip JSX whitespace after operators
-      this.skipJSXWhitespace();
+      JSX.skipJSXWhitespace(this);
       
       // Skip virtual semicolons after binary operators
       while (this.peek().virtualSemi) {
@@ -1312,11 +1317,11 @@ export class Parser extends ParserCursor {
       
       // Handle ternary operator
       if (op.value === "?") {
-        this.skipJSXWhitespace();
+        JSX.skipJSXWhitespace(this);
         const consequent = this.parseExpression();
-        this.skipJSXWhitespace();
+        JSX.skipJSXWhitespace(this);
         this.consume(":", "Expected ':' in ternary expression");
-        this.skipJSXWhitespace();
+        JSX.skipJSXWhitespace(this);
         const alternate = this.parseExpression(precedence);
         left = {
           kind: "Ternary",
@@ -1383,7 +1388,7 @@ export class Parser extends ParserCursor {
       }
 
       // Parse parameters
-      const params = this.parseParameterList();
+      const params = Functions.parseParameterList(this);
 
       // Parse return type if present
       let returnType: AST.TypeNode | undefined = undefined;
@@ -1435,7 +1440,7 @@ export class Parser extends ParserCursor {
           }
           
           // Parse parameters
-          const params = this.parseParameterList();
+          const params = Functions.parseParameterList(this);
           
           // Parse return type if present
           let returnType: AST.TypeNode | undefined = undefined;
@@ -1465,7 +1470,7 @@ export class Parser extends ParserCursor {
         // Check for lambda or async block
         if (this.check("(") || this.peek().type === TokenType.Identifier || this.check("{")) {
           // Parse as async lambda or async block
-          const lambda = this.parseAsyncLambda(start);
+          const lambda = Functions.parseAsyncLambda(this, start);
           // Mark if it has move semantics
           if (hasMove) {
             (lambda as any).move = true;
@@ -1501,24 +1506,24 @@ export class Parser extends ParserCursor {
     const token = this.peek();
     if (token.type === TokenType.JSXTagStart || token.value === "<") {
       // Check if we're in a valid JSX expression context
-      if (this.isInJSXExpressionContext()) {
+      if (JSX.isInJSXExpressionContext(this)) {
         const next = this.peekNext();
-        
+
         // Check for JSX fragment <>
         if (next && next.value === ">") {
-          return this.parseJSXFragment();
+          return JSX.parseJSXFragment(this);
         }
-        
+
         // Check for JSX closing tag </
         if (next && next.value === "/") {
           // This shouldn't happen in primary expression position
           throw this.error(this.peek(), "Unexpected JSX closing tag");
         }
-        
+
         // Check if this looks like JSX element using new disambiguation
         if (next && (next.type === TokenType.Identifier || next.value === ">")) {
-          if (this.isJSXElement()) {
-            return this.parseJSXElement();
+          if (JSX.isJSXElement(this)) {
+            return JSX.parseJSXElement(this);
           }
         }
       }
@@ -1589,11 +1594,11 @@ export class Parser extends ParserCursor {
     
     // Literals
     if (this.peek().type === TokenType.NumericLiteral) {
-      return this.parseNumericLiteral();
+      return Literals.parseNumericLiteral(this);
     }
     
     if (this.peek().type === TokenType.StringLiteral) {
-      return this.parseStringLiteral();
+      return Literals.parseStringLiteral(this);
     }
     
     if (this.peek().type === TokenType.TemplateLiteral) {
@@ -1601,11 +1606,11 @@ export class Parser extends ParserCursor {
       if (this.shouldReinterpretAsIdentifier()) {
         return this.parseBacktickIdentifier();
       }
-      return this.parseTemplateLiteral();
+      return Literals.parseTemplateLiteral(this);
     }
     
     if (this.peek().type === TokenType.RegexLiteral) {
-      return this.parsePostfix(this.parseRegexLiteral());
+      return this.parsePostfix(Literals.parseRegexLiteral(this));
     }
     
     if (this.match("true", "false")) {
@@ -1685,7 +1690,7 @@ export class Parser extends ParserCursor {
         if (this.peek().type === TokenType.Identifier) {
           this.advance();
         } else {
-          this.parseGoTypeAnnotation(); // handle map[K]V, interface{}, etc.
+          Types.parseGoTypeAnnotation(this); // handle map[K]V, interface{}, etc.
         }
         if (this.check("{") || this.check("(")) {
           this.current = checkpoint;
@@ -1738,11 +1743,11 @@ export class Parser extends ParserCursor {
     if (this.match("(")) {
       // Check if this is a lambda parameter list
       const checkpoint = this.current;
-      const isLambda = this.checkParenthesizedLambda();
+      const isLambda = Functions.checkParenthesizedLambda(this);
       this.current = checkpoint;
       
       if (isLambda) {
-        return this.parseLambda();
+        return Functions.parseLambda(this);
       }
       
       const start = this.current - 1;
@@ -1751,7 +1756,7 @@ export class Parser extends ParserCursor {
       while (this.peek().virtualSemi) {
         this.advance();
       }
-      this.skipJSXWhitespace();
+      JSX.skipJSXWhitespace(this);
       
       const expr = this.parseExpression();
       
@@ -1759,11 +1764,11 @@ export class Parser extends ParserCursor {
       while (this.peek().virtualSemi) {
         this.advance();
       }
-      this.skipJSXWhitespace();
+      JSX.skipJSXWhitespace(this);
       
       // Check for generator comprehension: (expr for var in iterable)
       if (this.check("for")) {
-        return this.parseGeneratorComprehension(expr, start);
+        return Literals.parseGeneratorComprehension(this, expr, start);
       }
       
       this.must(")", { recoverWithSynthetic: true });
@@ -1772,17 +1777,17 @@ export class Parser extends ParserCursor {
     
     // Array literal
     if (this.match("[")) {
-      return this.parsePostfix(this.parseArrayLiteral());
+      return this.parsePostfix(Literals.parseArrayLiteral(this));
     }
 
     // Object literal
     if (this.match("{")) {
-      return this.parsePostfix(this.parseObjectLiteral());
+      return this.parsePostfix(Literals.parseObjectLiteral(this));
     }
     
     // Lambda/arrow function
-    if (this.checkLambda()) {
-      return this.parseLambda();
+    if (Functions.checkLambda(this)) {
+      return Functions.parseLambda(this);
     }
     
     // new expression
@@ -1912,7 +1917,7 @@ export class Parser extends ParserCursor {
             // Use parseGoTypeAnnotation for Go-specific types (slices, maps)
             // Use parseType for chan (supports angle bracket generics like chan<T>)
             const useGoType = (this.check("[") && this.peekAt(1)?.value === "]") || this.peek().value === "map";
-            const typeNode = useGoType ? this.parseGoTypeAnnotation() : this.parseType();
+            const typeNode = useGoType ? Types.parseGoTypeAnnotation(this) : this.parseType();
             
             // If it's a GenericType with chan base, keep it as a structured expression
             let typeExpr: AST.Expr;
@@ -1921,8 +1926,8 @@ export class Parser extends ParserCursor {
               // For now, we'll still convert to string but mark it specially
               typeExpr = {
                 kind: "Identifier",
-                name: this.typeNodeToString(typeNode),
-                originalSpelling: this.typeNodeToString(typeNode),
+                name: Types.typeNodeToString(typeNode),
+                originalSpelling: Types.typeNodeToString(typeNode),
                 span: typeNode.span,
                 // Store the original type info in a non-standard field for test access
                 _typeNode: typeNode
@@ -1930,8 +1935,8 @@ export class Parser extends ParserCursor {
             } else {
               typeExpr = {
                 kind: "Identifier",
-                name: this.typeNodeToString(typeNode),
-                originalSpelling: this.typeNodeToString(typeNode),
+                name: Types.typeNodeToString(typeNode),
+                originalSpelling: Types.typeNodeToString(typeNode),
                 span: typeNode.span
               };
             }
@@ -2263,7 +2268,7 @@ export class Parser extends ParserCursor {
               };
             } else {
               // Go type assertion: expr.(ConcreteType)
-              const type = this.parseGoTypeAnnotation();
+              const type = Types.parseGoTypeAnnotation(this);
               this.consume(")", "Expected ')' after type assertion");
               expr = {
                 kind: "TypeAssertion",
@@ -2407,300 +2412,6 @@ export class Parser extends ParserCursor {
   }
   
   // Helper methods for specific constructs
-  private parseImport(): AST.Import | AST.ImportDecl {
-    const start = this.current - 1;
-    
-    // Handle TypeScript-style imports: import { ... } from '...' or import * as ... from '...'
-    let alias: AST.Identifier | undefined;
-    let path: string;
-    
-    // Check for destructured imports: import { Token, TokenType } from './lexer'
-    if (this.check("{")) {
-      this.advance();
-      
-      // Parse import specifiers
-      const specifiers: AST.ImportSpecifier[] = [];
-      
-      if (!this.check("}")) {
-        do {
-          const imported = this.parseIdentifier().name;
-          let local = imported;
-          
-          // Check for "as" alias
-          if (this.match("as")) {
-            local = this.parseIdentifier().name;
-          }
-          
-          specifiers.push({ imported, local });
-        } while (this.match(",") && !this.check("}"));
-      }
-      
-      this.consume("}", "Expected '}' after import specifiers");
-      
-      // Expect 'from'
-      if (this.match("from")) {
-        // Get the path
-        if (this.peek().type === TokenType.StringLiteral) {
-          const token = this.advance();
-          path = token.value.slice(1, -1);
-        } else {
-          throw this.error(this.peek(), "Expected import path after 'from'");
-        }
-      } else {
-        throw this.error(this.peek(), "Expected 'from' after import specifiers");
-      }
-      
-      this.consumeSemicolon();
-      
-      return {
-        kind: "ImportDecl",
-        specifiers,
-        path,
-        span: this.createSpan(start, this.current - 1)
-      };
-    }
-    // Check for namespace import: import * as AST from './ast'
-    else if (this.check("*")) {
-      this.advance();
-      let namespaceImport: AST.Identifier | undefined;
-      if (this.match("as")) {
-        namespaceImport = this.parseIdentifier();
-      }
-      
-      // Expect 'from'
-      if (this.match("from")) {
-        // Get the path
-        if (this.peek().type === TokenType.StringLiteral) {
-          const token = this.advance();
-          path = token.value.slice(1, -1);
-        } else {
-          throw this.error(this.peek(), "Expected import path after 'from'");
-        }
-      } else {
-        throw this.error(this.peek(), "Expected 'from' after namespace import");
-      }
-      
-      this.consumeSemicolon();
-      
-      return {
-        kind: "ImportDecl",
-        namespaceImport,
-        path,
-        span: this.createSpan(start, this.current - 1)
-      };
-    }
-    // Check for default import with destructured: import React, { Component } from 'react'
-    else if (this.peek().type === TokenType.Identifier) {
-      const maybeDefault = this.peek();
-      const nextToken = this.peekNext();
-      
-      if (nextToken && nextToken.value === ",") {
-        // Default import with destructured
-        const defaultImport = this.parseIdentifier();
-        this.consume(",", "Expected ','");
-        
-        // Parse destructured imports
-        const specifiers: AST.ImportSpecifier[] = [];
-        if (this.check("{")) {
-          this.advance();
-          
-          if (!this.check("}")) {
-            do {
-              const imported = this.parseIdentifier().name;
-              let local = imported;
-              
-              // Check for "as" alias
-              if (this.match("as")) {
-                local = this.parseIdentifier().name;
-              }
-              
-              specifiers.push({ imported, local });
-            } while (this.match(",") && !this.check("}"));
-          }
-          
-          this.consume("}", "Expected '}' after import specifiers");
-        }
-        
-        // Expect 'from'
-        if (this.match("from")) {
-          // Get the path
-          if (this.peek().type === TokenType.StringLiteral) {
-            const token = this.advance();
-            path = token.value.slice(1, -1);
-          } else {
-            throw this.error(this.peek(), "Expected import path after 'from'");
-          }
-        } else {
-          throw this.error(this.peek(), "Expected 'from' after import specifiers");
-        }
-        
-        this.consumeSemicolon();
-        
-        return {
-          kind: "ImportDecl",
-          defaultImport,
-          specifiers: specifiers.length > 0 ? specifiers : undefined,
-          path,
-          span: this.createSpan(start, this.current - 1)
-        };
-      }
-      // Simple import: import 'module' or import module
-      else if (nextToken && nextToken.value === "from") {
-        // Default import: import Parser from './parser'
-        const defaultImport = this.parseIdentifier();
-        this.consume("from", "Expected 'from'");
-        
-        if (this.peek().type === TokenType.StringLiteral) {
-          const token = this.advance();
-          path = token.value.slice(1, -1);
-        } else {
-          throw this.error(this.peek(), "Expected import path after 'from'");
-        }
-        
-        this.consumeSemicolon();
-        
-        return {
-          kind: "ImportDecl",
-          defaultImport,
-          path,
-          span: this.createSpan(start, this.current - 1)
-        };
-      }
-      // Old-style simple import (possibly dotted or :: separated)
-      else {
-        let pathParts = [this.advance().value];
-        while (this.match(".") || this.match("::")) {
-          const sep = this.previous()!.value;
-          if (this.peek().type === TokenType.Identifier || this.peek().type === TokenType.Keyword) {
-            pathParts.push(sep === "::" ? "::" : ".");
-            pathParts.push(this.advance().value);
-          } else if (this.match("*")) {
-            pathParts.push(sep === "::" ? "::" : ".");
-            pathParts.push("*");
-          } else break;
-        }
-        path = pathParts.join("");
-        if (this.match("as")) {
-          alias = this.parseIdentifier();
-        }
-      }
-    }
-    // String literal import: import './styles.css' or import "module" as alias
-    else if (this.peek().type === TokenType.StringLiteral) {
-      const token = this.advance();
-      path = token.value.slice(1, -1);
-      
-      // Check for Python-style import alias: import "module" as mod
-      if (this.match("as")) {
-        alias = this.parseIdentifier();
-      }
-    }
-    // Go grouped imports: import ( "fmt" "os" )
-    else if (this.check("(")) {
-      this.advance(); // consume '('
-      const imports: (AST.Import | AST.ImportDecl)[] = [];
-      while (!this.check(")") && !this.isAtEnd()) {
-        while (this.peek().virtualSemi) this.advance();
-        if (this.check(")")) break;
-        if (this.peek().type === TokenType.StringLiteral) {
-          const token = this.advance();
-          const importPath = token.value.slice(1, -1);
-          let importAlias: AST.Identifier | undefined;
-          // Go import alias comes BEFORE the path, but we already consumed it
-          // For simplicity, also check for `as` after
-          if (this.match("as")) {
-            importAlias = this.parseIdentifier();
-          }
-          imports.push({
-            kind: "Import",
-            path: importPath,
-            alias: importAlias,
-            span: this.createSpanFrom(token)
-          });
-        } else if (this.peek().type === TokenType.Identifier) {
-          // Go alias import: alias "path"
-          const importAlias = this.parseIdentifier();
-          if (this.peek().type === TokenType.StringLiteral) {
-            const token = this.advance();
-            const importPath = token.value.slice(1, -1);
-            imports.push({
-              kind: "Import",
-              path: importPath,
-              alias: importAlias,
-              span: this.createSpanFrom(token)
-            });
-          }
-        } else {
-          this.advance(); // skip unknown token
-        }
-        while (this.peek().virtualSemi) this.advance();
-      }
-      this.consume(")", "Expected ')' after grouped imports");
-      this.consumeSemicolon();
-
-      // Return first import if only one, otherwise return first and let the rest
-      // be handled by re-parsing. For grouped imports, wrap as first import.
-      if (imports.length === 0) {
-        return { kind: "Import", path: "", span: this.createSpan(start, this.current - 1) };
-      }
-      // Return the first import — the rest will be lost, but the parse won't error.
-      // A proper solution would need a multi-import AST node.
-      return imports[0];
-    } else {
-      throw this.error(this.peek(), "Expected import path");
-    }
-
-    this.consumeSemicolon();
-
-    return {
-      kind: "Import",
-      path: path!,
-      alias,
-      span: this.createSpan(start, this.current - 1)
-    };
-  }
-  
-  private parseFromImport(): AST.ImportDecl {
-    const start = this.current;
-    this.advance(); // consume 'from'
-
-    // Parse the module path — could be dotted identifier or string
-    let path: string;
-    if (this.peek().type === TokenType.StringLiteral) {
-      const token = this.advance();
-      path = token.value.slice(1, -1);
-    } else {
-      // Dotted path like typing, os.path, etc.
-      let pathParts = [this.advance().value];
-      while (this.match(".")) {
-        pathParts.push(this.advance().value);
-      }
-      path = pathParts.join(".");
-    }
-
-    this.consume("import", "Expected 'import' after module path");
-
-    // Parse imported names
-    const specifiers: AST.ImportSpecifier[] = [];
-    do {
-      const imported = this.parseIdentifier().name;
-      let local = imported;
-      if (this.match("as")) {
-        local = this.parseIdentifier().name;
-      }
-      specifiers.push({ imported, local });
-    } while (this.match(","));
-
-    this.consumeSemicolon();
-
-    return {
-      kind: "ImportDecl",
-      specifiers,
-      path,
-      span: this.createSpan(start, this.current - 1)
-    };
-  }
-
   private parseVarDecl(): AST.VarDecl {
     const start = this.current - 1;
 
@@ -2870,558 +2581,6 @@ export class Parser extends ParserCursor {
     };
   }
   
-  private parseFuncDecl(async = false, unsafe = false, generator = false, decorators?: AST.Expr[]): AST.FuncDecl {
-    const start = this.current - 1;
-
-    // Capture the declaration keyword for runtime resolution
-    const declKeywordValue = this.tokens[start]?.value;
-    const declKeyword = (declKeywordValue === "def" || declKeywordValue === "fn" ||
-                         declKeywordValue === "fun" || declKeywordValue === "func" ||
-                         declKeywordValue === "function") ? declKeywordValue as AST.FuncDecl["declKeyword"] : undefined;
-
-    // Check if this is a Ruby-style def
-    const isRubyDef = declKeywordValue === "def";
-
-    // Ruby/C++ operator overload: def +(other), operator+(...)
-    let name: AST.Identifier;
-    const isOperatorName = isRubyDef && this.peek().type === TokenType.Operator &&
-      ["+", "-", "*", "/", "%", "==", "!=", "<", ">", "<=", ">=", "<<", ">>",
-       "[]", "[]=", "<=>", "**", "&", "|", "^", "~", "!"].includes(this.peek().value);
-    if (isOperatorName) {
-      const opToken = this.advance();
-      name = {
-        kind: "Identifier",
-        name: opToken.value,
-        span: this.createSpanFrom(opToken)
-      };
-    } else {
-      name = this.parseIdentifier();
-    }
-    
-    // Parse generic parameters if present
-    let genericParams: AST.Identifier[] | undefined;
-    if (this.match("<")) {
-      genericParams = [];
-      do {
-        genericParams.push(this.parseIdentifier());
-        // Skip type constraints: extends Type, super Type, : Type
-        if (this.match("extends", "super")) {
-          this.parseType();
-        } else if (this.check(":") && !this.check("::")) {
-          this.advance();
-          this.parseType();
-          while (this.match("+")) {
-            this.parseType();
-          }
-        }
-      } while (this.match(","));
-      this.consume(">", "Expected '>' after generic parameters");
-    }
-
-    // For Ruby def, parameters are optional (can be without parentheses)
-    let params: AST.Param[] = [];
-    if (this.check("(")) {
-      params = this.parseParameterList();
-    } else if (isRubyDef && !this.check(":") && !this.check("{") &&
-               !this.check("=>") && !this.peek().virtualSemi &&
-               this.peek().line === name.span.line) {
-      // Ruby allows parameters without parentheses: def foo bar, baz
-      // Only if params are on the same line as the function name
-      do {
-        params.push(this.parseParameter());
-      } while (this.match(","));
-    }
-    
-    let returnType: AST.TypeNode | undefined;
-
-    // Check for return type annotations
-    if (this.match("->")) {
-      // Arrow notation always indicates return type
-      returnType = this.parseType();
-    } else if (declKeywordValue === "func" && this.check("(") && !this.check("(=")) {
-      // Go multi-return: func name(params) (Type1, Type2) { ... }
-      const goRetStart = this.current;
-      const parsed = this.attempt(() => {
-        this.advance(); // consume '('
-        const types: AST.TypeNode[] = [];
-        if (!this.check(")")) {
-          do {
-            types.push(this.parseGoTypeAnnotation());
-          } while (this.match(","));
-        }
-        this.consume(")", "Expected ')' after return types");
-        return types;
-      });
-      if (parsed) {
-        if (parsed.length === 1) {
-          returnType = parsed[0];
-        } else if (parsed.length > 1) {
-          returnType = { kind: "UnionType", types: parsed, span: this.createSpan(goRetStart, this.current - 1) } as any;
-        }
-      }
-    } else if (declKeywordValue === "func" && this.peek().type === TokenType.Identifier &&
-               !this.check("{") && !this.peek().virtualSemi) {
-      // Go single return type without parens: func name(params) Type { ... }
-      returnType = this.parseGoTypeAnnotation();
-    } else if (this.check(":")) {
-      // Colon could be either type annotation or Python-style block
-      // Check if next token after colon indicates an indent block
-      const checkpoint = this.current;
-      this.advance(); // consume ':'
-      
-      // Check what comes after the colon
-      const nextToken = this.peek();
-      const prevIndent = this.tokens[checkpoint]?.indentCol ?? 0;
-      const nextIndent = nextToken.indentCol;
-      
-      if (nextToken.virtualSemi || 
-          (nextIndent !== undefined && nextIndent > prevIndent)) {
-        // This is a Python-style indented block
-        // parseIndentBlock will handle the rest
-      } else if (this.check("return") || this.check("pass") || 
-                 this.check("raise") || this.check("yield") ||
-                 this.check("this") || this.check("super")) {
-        // Single-line Python function body or statement starting with this/super
-        // Don't parse as type, this is a statement
-      } else {
-        // This is a type annotation
-        returnType = this.parseType();
-      }
-    }
-    
-    let body: AST.Block;
-    if (this.match("=>")) {
-      body = this.parseExpressionBody();
-    } else if (this.match(":") || this.previous()?.value === ":") {
-      // Python-style block with colon (handles both direct : and -> Type: cases)
-      // Note: previous check handles case where : was already consumed in type checking
-      const currentIndent = this.current > 0 ? (this.tokens[this.current - 1]?.indentCol ?? 0) : 0;
-      const peekIndent = this.peek().indentCol;
-      if (this.peek().virtualSemi || 
-          (peekIndent !== undefined && peekIndent > currentIndent)) {
-        // Indented block
-        body = this.parseIndentBlock();
-      } else {
-        // Single-line Python body
-        const stmt = this.parseStatement();
-        body = {
-          kind: "Block",
-          statements: stmt ? [stmt] : [],
-          span: this.createSpanFrom(stmt || this.previous())
-        };
-      }
-    } else if (this.check("{")) {
-      body = this.parseBlock();
-    } else if (isRubyDef) {
-      // Ruby-style def without braces - parse until matching 'end'
-      const statements: (AST.Decl | AST.Stmt)[] = [];
-      
-      // Track nested blocks that also use 'end'
-      let endCount = 1; // We need to find one matching 'end' for this def
-      
-      while (!this.isAtEnd() && endCount > 0) {
-        if (this.peek().virtualSemi) {
-          this.advance();
-          continue;
-        }
-        
-        // Check for keywords that start blocks ending with 'end'
-        const token = this.peek();
-        if (token.value === "def" || token.value === "class" || token.value === "module") {
-          // These start a new block that will need its own 'end'
-          endCount++;
-        } else if (token.value === "begin") {
-          // 'begin' blocks are handled by parseBeginBlock which consumes its own 'end'
-          // So we don't need to track it here - parseTopLevel will handle it
-        } else if (token.value === "do") {
-          // 'do' blocks might end with 'end' (Ruby) or 'done' (bash)
-          // Check context to determine if this is a Ruby do...end block
-          if (this.current > 0) {
-            const prevToken = this.tokens[this.current - 1];
-            // Ruby do...end typically follows method calls or control structures
-            if (prevToken.type === TokenType.Identifier || 
-                prevToken.value === ")" || prevToken.value === "|") {
-              endCount++;
-            }
-          }
-        } else if (token.value === "if" || token.value === "unless" ||
-                   token.value === "while" || token.value === "until") {
-          // These might use 'end' in Ruby style or other endings in bash style
-          // Look ahead to see if there's a 'then' or ':' suggesting Ruby style
-          const nextIdx = this.current + 1;
-          let isRubyStyle = false;
-          for (let i = nextIdx; i < this.tokens.length && i < nextIdx + 10; i++) {
-            if (this.tokens[i].value === "then" || 
-                (this.tokens[i].value === ":" && this.tokens[i].type === TokenType.Operator)) {
-              isRubyStyle = true;
-              break;
-            }
-            if (this.tokens[i].virtualSemi || this.tokens[i].value === "{") break;
-          }
-          if (isRubyStyle) endCount++;
-        } else if (token.value === "case") {
-          // case might end with 'end' (Ruby) or 'esac' (bash)
-          // Look for 'when' to determine Ruby style
-          const nextIdx = this.current + 1;
-          let isRubyStyle = false;
-          for (let i = nextIdx; i < this.tokens.length && i < nextIdx + 20; i++) {
-            if (this.tokens[i].value === "when") {
-              isRubyStyle = true;
-              break;
-            }
-            if (this.tokens[i].value === "in" || this.tokens[i].value === ")") {
-              // Bash style case
-              break;
-            }
-          }
-          if (isRubyStyle) endCount++;
-        } else if (token.value === "try") {
-          // try blocks might use rescue...end in Ruby style
-          // Look for 'rescue' to determine Ruby style
-          const nextIdx = this.current + 1;
-          let isRubyStyle = false;
-          for (let i = nextIdx; i < this.tokens.length && i < nextIdx + 50; i++) {
-            if (this.tokens[i].value === "rescue") {
-              isRubyStyle = true;
-              break;
-            }
-            if (this.tokens[i].value === "catch" || this.tokens[i].value === "except") {
-              // JavaScript/Python style
-              break;
-            }
-          }
-          if (isRubyStyle) endCount++;
-        } else if (token.value === "end") {
-          // Found an 'end' - decrement counter
-          endCount--;
-          if (endCount === 0) {
-            // This is our matching 'end'
-            break;
-          }
-        }
-        
-        try {
-          const stmt = this.parseTopLevel();
-          if (stmt) statements.push(stmt);
-        } catch (error) {
-          if (error instanceof ParseError) {
-            this.errors.push(error);
-            this.synchronize();
-          } else {
-            throw error;
-          }
-        }
-      }
-      
-      this.consume("end", "Expected 'end' to close function");
-      
-      body = {
-        kind: "Block",
-        statements,
-        span: this.createSpan(start, this.current - 1)
-      };
-    } else {
-      // Default: try to parse a block or single statement
-      if (this.peek().virtualSemi || this.isAtEnd()) {
-        // No body provided
-        body = {
-          kind: "Block",
-          statements: [],
-          span: this.createSpanFrom(this.previous() || { span: { start: 0, end: 0, line: 0, column: 0 } })
-        };
-      } else {
-        // Try to parse as a single expression or statement
-        const stmt = this.parseStatement();
-        body = {
-          kind: "Block",
-          statements: stmt ? [stmt] : [],
-          span: this.createSpanFrom(stmt || this.previous())
-        };
-      }
-    }
-    
-    const funcDecl: AST.FuncDecl = {
-      kind: "FuncDecl",
-      name,
-      genericParams,
-      params,
-      returnType,
-      async,
-      unsafe,
-      generator,
-      declKeyword,
-      body: body as AST.Block,
-      span: this.createSpan(start, this.current - 1)
-    };
-    
-    // Add decorators if provided
-    if (decorators && decorators.length > 0) {
-      funcDecl.decorators = decorators.map(expr => ({
-        kind: "Decorator" as const,
-        name: expr.kind === "Identifier" ? expr : 
-              expr.kind === "Call" && expr.callee.kind === "Identifier" ? expr.callee :
-              { kind: "Identifier" as const, name: "unknown", span: expr.span },
-        args: expr.kind === "Call" ? expr.args : undefined,
-        span: expr.span
-      }));
-    }
-    
-    return funcDecl;
-  }
-  
-  private parseFuncDeclWithReturnTypeBefore(): AST.FuncDecl {
-    const start = this.current;
-    const returnType = this.parseType();
-    const name = this.parseIdentifier();
-    const params = this.parseParameterList();
-    
-    const body = this.match("=>") ? 
-      this.parseExpressionBody() : 
-      this.parseBlock();
-    
-    return {
-      kind: "FuncDecl",
-      name,
-      genericParams: undefined,
-      params,
-      returnType,
-      async: false,
-      unsafe: false,
-      body: body as AST.Block,
-      span: this.createSpan(start, this.current - 1)
-    };
-  }
-  
-  private parseParameterList(): AST.Param[] {
-    this.consume("(", "Expected '(' before parameters");
-    const params: AST.Param[] = [];
-    
-    // Skip virtual semicolons before first parameter
-    while (this.peek().virtualSemi) {
-      this.advance();
-    }
-    
-    if (!this.check(")")) {
-      do {
-        params.push(this.parseParameter());
-        
-        // Skip virtual semicolons after parameter
-        while (this.peek().virtualSemi) {
-          this.advance();
-        }
-      } while (this.match(","));
-    }
-    
-    // Skip virtual semicolons before closing paren
-    while (this.peek().virtualSemi) {
-      this.advance();
-    }
-    
-    this.consume(")", "Expected ')' after parameters");
-    return params;
-  }
-  
-  private parseParameter(): AST.Param {
-    const start = this.current;
-    
-    // Parse parameter decorators (e.g., @NotNull, @Range(...))
-    const decorators: AST.Decorator[] = [];
-    while (this.check("@")) {
-      this.advance(); // consume @
-      
-      // Parse the decorator name
-      if (this.peek().type === TokenType.Identifier) {
-        const name = this.parseIdentifier();
-        let args: AST.Expr[] | undefined;
-        
-        // Parse decorator arguments if present
-        if (this.check("(")) {
-          this.advance(); // consume (
-          args = [];
-          
-          if (!this.check(")")) {
-            do {
-              args.push(this.parseExpression());
-            } while (this.match(","));
-          }
-          
-          this.consume(")", "Expected ')' after decorator arguments");
-        }
-        
-        decorators.push({
-          kind: "Decorator",
-          name,
-          args,
-          span: this.createSpan(start, this.current - 1)
-        });
-      }
-    }
-    
-    // Handle TypeScript visibility modifiers in constructor params
-    let visibility: "public" | "private" | "protected" | undefined;
-    if (this.match("public", "private", "protected")) {
-      visibility = this.previous()!.value as any;
-    }
-    
-    // Handle readonly modifier  
-    let readonly = false;
-    if (this.match("readonly")) {
-      readonly = true;
-    }
-    
-    // Handle Ruby-style block parameter (&param)
-    let isBlockParam = false;
-    if (this.match("&")) {
-      isBlockParam = true;
-    }
-    
-    // Handle spread parameter (...param), Python *args, or Python **kwargs
-    let isSpread = false;
-    if (this.match("...")) {
-      isSpread = true;
-    } else if (this.check("**")) {
-      // Python-style **kwargs (double-splat)
-      this.advance(); // consume **
-      isSpread = true;
-    } else if (this.check("*") &&
-               (this.peekNext()?.type === TokenType.Identifier || this.peekNext()?.type === TokenType.Keyword)) {
-      // Python-style *args (single-splat)
-      this.advance(); // consume *
-      isSpread = true;
-    }
-    
-    // Parse parameter name - allow keywords as parameter names
-    let name: AST.Identifier | AST.ArrayPattern | AST.ObjectPattern;
-    const token = this.peek();
-    
-    // Handle destructuring patterns { a, b } or [ a, b ]
-    if (token.value === "{" || token.value === "[") {
-      name = this.parseDestructuringPattern();
-    }
-    // In parameter context, allow any keyword or identifier as parameter name
-    else if (token.type === TokenType.Identifier || 
-        token.type === TokenType.Keyword ||
-        token.type === TokenType.SigilIdentifier) {
-      this.advance();
-      name = {
-        kind: "Identifier",
-        name: token.value,
-        originalSpelling: token.value,
-        span: this.createSpanFrom(token)
-      };
-    } else {
-      // Fall back to regular identifier parsing for error reporting
-      name = this.parseIdentifier();
-    }
-    
-    // Handle optional parameter marker (?)
-    let optional = false;
-    if (this.match("?")) {
-      optional = true;
-    }
-
-    let type: AST.TypeNode | undefined;
-    if (this.match(":")) {
-      type = this.parseType();
-    } else if (name.kind === "Identifier" &&
-               !this.check(",") && !this.check(")") && !this.check("=") && !this.check("?") && !this.check("|") &&
-               (this.peek().type === TokenType.Identifier ||
-                // Go interface{}, struct{}, chan, *Type, []Type, map[K]V
-                this.check("interface") || this.check("struct") || this.check("chan") ||
-                this.check("map") || this.check("*") ||
-                (this.check("[") && this.peekAt(1)?.value === "]"))) {
-      // Go-style type annotation: name Type (no colon separator)
-      type = this.parseGoTypeAnnotation();
-    }
-
-    let defaultValue: AST.Expr | undefined;
-    if (this.match("=")) {
-      defaultValue = this.parseExpression();
-    }
-
-    const param: AST.Param = {
-      name,
-      type,
-      defaultValue,
-      visibility,
-      readonly,
-      spread: isSpread,
-      blockParam: isBlockParam,
-      span: this.createSpan(start, this.current - 1)
-    };
-    
-    // Add decorators if present
-    if (decorators.length > 0) {
-      param.decorators = decorators;
-    }
-    
-    return param;
-  }
-
-  /**
-   * Parse a Go-style type in parameter position: handles interface{}, *Type,
-   * chan/chan<-/chan-> Type, []Type, map[K]V, and dotted paths (http.Request).
-   */
-  private parseGoTypeAnnotation(): AST.TypeNode {
-    const start = this.current;
-    const mkId = (n: string, span: AST.Span): AST.Identifier => ({ kind: "Identifier", name: n, span });
-    const mkSpan = () => this.createSpan(start, this.current - 1);
-
-    // Pointer type: *Type
-    if (this.match("*")) {
-      const inner = this.parseGoTypeAnnotation();
-      return { kind: "SimpleType", id: mkId("*" + (inner.kind === "SimpleType" ? (inner as any).id.name : ""), inner.span), span: inner.span } as any;
-    }
-
-    // Slice type: []Type
-    if (this.check("[") && this.peekAt(1)?.value === "]") {
-      this.advance(); // [
-      this.advance(); // ]
-      const elem = this.parseGoTypeAnnotation();
-      return { kind: "GenericType", base: mkId("[]", mkSpan()), args: [elem], span: mkSpan() } as AST.TypeNode;
-    }
-
-    // map[K]V
-    if (this.check("map") && this.peekAt(1)?.value === "[") {
-      this.advance(); // map
-      this.advance(); // [
-      const keyType = this.parseGoTypeAnnotation();
-      this.consume("]", "Expected ']' after map key type");
-      const valType = this.parseGoTypeAnnotation();
-      return { kind: "GenericType", base: mkId("map", mkSpan()), args: [keyType, valType], span: mkSpan() } as AST.TypeNode;
-    }
-
-    // chan<- Type, <-chan Type, chan Type
-    if (this.check("chan")) {
-      this.advance(); // chan
-      if (this.match("<-")) { /* chan<- Type (send-only) */ }
-      const chanType = this.parseGoTypeAnnotation();
-      return { kind: "ChanType", direction: "both", elementType: chanType, span: mkSpan() } as any;
-    }
-    if (this.check("<-") && this.peekAt(1)?.value === "chan") {
-      this.advance(); // <-
-      this.advance(); // chan
-      const chanType = this.parseGoTypeAnnotation();
-      return { kind: "ChanType", direction: "recv", elementType: chanType, span: mkSpan() } as any;
-    }
-
-    // interface{}
-    if (this.check("interface") && this.peekAt(1)?.value === "{") {
-      this.advance(); this.advance();
-      this.consume("}", "Expected '}' after interface{}");
-      return { kind: "SimpleType", id: mkId("interface{}", mkSpan()), span: mkSpan() } as AST.TypeNode;
-    }
-
-    // struct{}
-    if (this.check("struct") && this.peekAt(1)?.value === "{") {
-      this.advance(); this.advance();
-      this.consume("}", "Expected '}' after struct{}");
-      return { kind: "SimpleType", id: mkId("struct{}", mkSpan()), span: mkSpan() } as AST.TypeNode;
-    }
-
-    // Fall back to regular type parsing (handles dotted types, generics, etc.)
-    return this.parseType();
-  }
 
   /**
    * Parse a Go composite literal: map[K]V{...}, []Type{...}, Type{...}
@@ -3430,7 +2589,7 @@ export class Parser extends ParserCursor {
   private parseGoCompositeLiteral(): AST.Expr {
     const start = this.current;
     // Parse the Go type
-    const goType = this.parseGoTypeAnnotation();
+    const goType = Types.parseGoTypeAnnotation(this);
 
     // If followed by { ... }, parse the composite literal body
     if (this.check("{")) {
@@ -3517,7 +2676,7 @@ export class Parser extends ParserCursor {
     return typeName;
   }
 
-  private parseDestructuringPattern(): AST.ArrayPattern | AST.ObjectPattern {
+  public parseDestructuringPattern(): AST.ArrayPattern | AST.ObjectPattern {
     const start = this.current;
     const token = this.peek();
     
@@ -3612,7 +2771,7 @@ export class Parser extends ParserCursor {
     }
   }
   
-  private parseExpressionBody(): AST.Block {
+  public parseExpressionBody(): AST.Block {
     const expr = this.parseExpression();
     return {
       kind: "Block",
@@ -3736,7 +2895,7 @@ export class Parser extends ParserCursor {
     };
   }
   
-  private parseSwitch(): AST.Switch | AST.Match {
+  public parseSwitch(): AST.Switch | AST.Match {
     const start = this.current - 1;
     const prevVal = this.previous()?.value;
     const isMatch = prevVal === "match" || prevVal === "when";
@@ -3849,10 +3008,10 @@ export class Parser extends ParserCursor {
         // Go type switch case: case []map[string]string: or case map[K]V:
         if ((this.check("[") && this.peekAt(1)?.value === "]") ||
             (this.check("map") && this.peekAt(1)?.value === "[")) {
-          const goType = this.parseGoTypeAnnotation();
+          const goType = Types.parseGoTypeAnnotation(this);
           // Convert type to an identifier expression for case matching
           const typeName = goType.kind === "SimpleType" ? ((goType as any).id?.name || "GoType") :
-                           goType.kind === "GenericType" ? this.typeNodeToString(goType) : "GoType";
+                           goType.kind === "GenericType" ? Types.typeNodeToString(goType) : "GoType";
           patterns.push({
             kind: "Identifier",
             name: typeName,
@@ -3974,11 +3133,11 @@ export class Parser extends ParserCursor {
     
     // Check for literal patterns (numbers, strings, booleans)
     if (this.peek().type === TokenType.NumericLiteral) {
-      return this.parseNumericLiteral();
+      return Literals.parseNumericLiteral(this);
     }
     
     if (this.peek().type === TokenType.StringLiteral) {
-      return this.parseStringLiteral();
+      return Literals.parseStringLiteral(this);
     }
     
     if (this.match("true", "false")) {
@@ -3999,12 +3158,12 @@ export class Parser extends ParserCursor {
     
     // Check for array/list patterns [head, ...tail]
     if (this.match("[")) {
-      return this.parseArrayLiteral();
+      return Literals.parseArrayLiteral(this);
     }
     
     // Check for object patterns {type: "user", name}
     if (this.match("{")) {
-      return this.parseObjectLiteral();
+      return Literals.parseObjectLiteral(this);
     }
     
     // Parse constructor pattern like Some(v) or simple identifier
@@ -4165,7 +3324,7 @@ export class Parser extends ParserCursor {
       const params: AST.Param[] = [];
       if (!this.check("|")) {
         do {
-          params.push(this.parseParameter());
+          params.push(Functions.parseParameter(this));
         } while (this.match(","));
       }
       this.consume("|", "Expected '|' after block parameters");
@@ -5295,633 +4454,11 @@ export class Parser extends ParserCursor {
   }
   
   // Type parsing
-  private parseType(): AST.TypeNode {
-    // Check for type predicates: paramName is Type
-    if (this.peek().type === TokenType.Identifier) {
-      const checkpoint = this.current;
-      const paramName = this.advance();
-      
-      if (this.peek().value === "is") {
-        this.advance(); // consume 'is'
-        const predicateType = this.parseSimpleType();
-        
-        // Create a type predicate node
-        // For now, we'll represent it as a special kind of type
-        return {
-          kind: "PredicateType",
-          param: { 
-            kind: "Identifier", 
-            name: paramName.value, 
-            span: this.createSpan(checkpoint, checkpoint) 
-          },
-          type: predicateType,
-          span: this.createSpan(checkpoint, this.current - 1)
-        } as any; // Cast to any since PredicateType may not be in AST yet
-      } else {
-        // Not a type predicate, backtrack
-        this.current = checkpoint;
-      }
-    }
-    
-    let type = this.parseSimpleType();
-    
-    // Handle array type suffix: Type[] or indexed access Type["property"]
-    while (this.check("[")) {
-      const checkpoint = this.current;
-      this.advance(); // consume [
-      
-      // Check if it's an empty [] for array type
-      if (this.check("]")) {
-        this.advance(); // consume ]
-        // Create a generic type Array<Type>
-        type = {
-          kind: "GenericType",
-          base: { 
-            kind: "Identifier", 
-            name: "Array", 
-            span: this.createSpan(checkpoint, this.current - 1) 
-          } as AST.Identifier,
-          args: [type],
-          span: this.createSpanFrom(type)
-        };
-      } else if (this.peek().type === TokenType.StringLiteral) {
-        // Indexed access type: Type["property"]
-        const indexToken = this.advance();
-        this.consume("]", "Expected ']' after indexed access property");
-        
-        type = {
-          kind: "IndexedAccessType",
-          object: type,
-          index: indexToken.value,
-          span: this.createSpanFrom(type)
-        } as any; // Cast to any since IndexedAccessType may not be in AST yet
-      } else {
-        // Not an array type or indexed access, restore position
-        this.current = checkpoint;
-        break;
-      }
-    }
-    
-    // Handle nullable types
-    if (this.match("?")) {
-      type = {
-        kind: "NullableType",
-        inner: type,
-        span: this.createSpanFrom(type)
-      };
-    }
-    
-    // Handle function types with -> (right-associative)
-    // A -> B -> C is parsed as A -> (B -> C)
-    if (this.check("->")) {
-      this.advance(); // consume ->
-      const ret = this.parseType(); // recursive call for right-associativity
-      type = {
-        kind: "FuncType",
-        params: [{
-          type: type,
-          span: type.span
-        }],
-        ret,
-        span: this.createSpanFrom(type)
-      };
-    }
-    
-    // Handle union types
-    else if (this.match("|")) {
-      const types: AST.TypeNode[] = [type];
-      do {
-        types.push(this.parseSimpleType());
-      } while (this.match("|"));
-      
-      type = {
-        kind: "UnionType",
-        types,
-        span: this.createSpanFrom(types[0])
-      };
-    }
-    
-    return type;
+  public parseType(): AST.TypeNode {
+    return Types.parseType(this);
   }
   
-  private parseSimpleType(): AST.TypeNode {
-    const start = this.current;
-    
-    // Array type prefix: []Type
-    if (this.check("[") && this.peekNext()?.value === "]") {
-      this.advance(); // consume [
-      this.advance(); // consume ]
-      const elementType = this.parseSimpleType();
-      
-      // Return as a GenericType Array<Type> for compatibility
-      return {
-        kind: "GenericType",
-        base: { 
-          kind: "Identifier", 
-          name: "Array",
-          span: this.createSpan(start, start + 1)
-        },
-        args: [elementType],
-        span: this.createSpan(start, this.current - 1)
-      };
-    }
-    
-    // String literal type
-    if (this.peek().type === TokenType.StringLiteral) {
-      const literal = this.advance();
-      // Treat string literals in type position as a simple type with the literal value as the name
-      return {
-        kind: "SimpleType",
-        id: { kind: "Identifier", name: literal.value, span: this.createSpan(start, start) },
-        span: this.createSpan(start, this.current - 1)
-      };
-    }
-    
-    // Channel type: <-chan T or chan<- T
-    if (this.match("<-")) {
-      this.consume("chan", "Expected 'chan' after '<-'");
-      let elementType: AST.TypeNode | undefined;
-      if (this.peek().type === TokenType.Identifier || this.check("(")) {
-        elementType = this.parseSimpleType();
-      }
-      return {
-        kind: "ChanType",
-        direction: "receive",
-        elementType,
-        span: this.createSpan(start, this.current - 1)
-      };
-    }
-    
-    if (this.peek().value === "chan") {
-      this.advance(); // consume 'chan'
-      if (this.match("<-")) {
-        // Send-only channel: chan<- T
-        let elementType: AST.TypeNode | undefined;
-        if (this.peek().type === TokenType.Identifier || this.check("(")) {
-          elementType = this.parseSimpleType();
-        }
-        return {
-          kind: "ChanType",
-          direction: "send",
-          elementType,
-          span: this.createSpan(start, this.current - 1)
-        };
-      } else if (this.check("<")) {
-        // Generic channel syntax: chan<T> - return as GenericType for compatibility
-        this.advance(); // consume <
-        const args: AST.TypeNode[] = [];
-        args.push(this.parseType());
-        
-        while (this.match(",")) {
-          args.push(this.parseType());
-        }
-        
-        // Handle >> and >>> as closing brackets
-        if (this.check(">>")) {
-          // Treat >> as a single > and leave the second > for the next parse
-          const originalToken = this.tokens[this.current];
-          // Replace >> with > at current position
-          this.tokens[this.current] = { ...originalToken, value: ">" };
-          // Insert another > after it
-          const syntheticToken = { ...originalToken, value: ">" };
-          this.tokens.splice(this.current + 1, 0, syntheticToken);
-          // Now consume the first >
-          this.advance();
-        } else if (this.check(">>>")) {
-          // Treat >>> as a single > and leave >> for the next parse
-          const originalToken = this.tokens[this.current];
-          // Replace >>> with > at current position
-          this.tokens[this.current] = { ...originalToken, value: ">" };
-          // Insert >> after it
-          const syntheticToken = { ...originalToken, value: ">>" };
-          this.tokens.splice(this.current + 1, 0, syntheticToken);
-          // Now consume the first >
-          this.advance();
-        } else {
-          this.consume(">", "Expected '>' after channel element type");
-        }
-        
-        // Return as GenericType instead of ChanType for test compatibility
-        return {
-          kind: "GenericType",
-          base: { 
-            kind: "Identifier", 
-            name: "chan",
-            originalSpelling: "chan",
-            span: this.createSpan(start, start)
-          },
-          args,
-          span: this.createSpan(start, this.current - 1)
-        };
-      } else {
-        // Bidirectional channel: chan T
-        let elementType: AST.TypeNode | undefined;
-        if (this.peek().type === TokenType.Identifier || this.check("(")) {
-          elementType = this.parseSimpleType();
-        }
-        return {
-          kind: "ChanType",
-          direction: "both",
-          elementType,
-          span: this.createSpan(start, this.current - 1)
-        };
-      }
-    }
-    
-    // Object type literal: { prop: type, ... }
-    if (this.check("{")) {
-      this.advance(); // consume {
-      
-      const properties: AST.ObjectTypeProperty[] = [];
-      
-      while (!this.check("}") && !this.isAtEnd()) {
-        // Skip virtual semicolons
-        while (this.peek().virtualSemi) {
-          this.advance();
-        }
-        
-        if (this.check("}")) break;
-        
-        // Parse readonly modifier
-        let readonly = false;
-        if (this.match("readonly")) {
-          readonly = true;
-        }
-        
-        // Parse property name (identifier or string literal)
-        let name: string;
-        if (this.peek().type === TokenType.StringLiteral) {
-          const token = this.advance();
-          name = token.value.slice(1, -1); // strip quotes
-        } else if (this.peek().type === TokenType.Keyword) {
-          name = this.advance().value; // allow keywords as property names
-        } else {
-          name = this.parseIdentifier().name;
-        }
-        
-        // Parse optional marker
-        let optional = false;
-        if (this.match("?")) {
-          optional = true;
-        }
-        
-        // Expect colon
-        this.consume(":", "Expected ':' after property name in object type");
-        
-        // Parse property type
-        const type = this.parseType();
-        
-        properties.push({
-          name,
-          type,
-          optional,
-          readonly
-        });
-        
-        // Skip comma or semicolon separators
-        if (this.match(",", ";")) {
-          // consumed
-        }
-        
-        // Skip virtual semicolons
-        while (this.peek().virtualSemi) {
-          this.advance();
-        }
-      }
-      
-      this.consume("}", "Expected '}' in object type literal");
-      
-      return {
-        kind: "ObjectType",
-        properties,
-        span: this.createSpan(start, this.current - 1)
-      };
-    }
-    
-    // Function type with parenthesized parameters or parenthesized type
-    if (this.check("(")) {
-      // Look ahead to see if this is a function type
-      const checkpoint = this.current;
-      this.advance(); // (
-      
-      // Skip to matching )
-      let depth = 1;
-      while (depth > 0 && !this.isAtEnd()) {
-        if (this.check("(")) depth++;
-        if (this.check(")")) depth--;
-        this.advance();
-      }
-      
-      // Check if followed by => or ->
-      const isFuncType = this.check("=>") || this.check("->");
-      const arrow = this.check("=>") ? "=>" : "->";
-      this.current = checkpoint;
-      
-      if (isFuncType) {
-        this.advance(); // (
-        const params: AST.FuncTypeParam[] = [];
-        
-        if (!this.check(")")) {
-          // Parse parameter types with optional names
-          do {
-            const paramStart = this.current;
-            let name: AST.Identifier | undefined;
-            let optional = false;
-            
-            // Check if parameter has a name
-            if (this.peek().type === TokenType.Identifier) {
-              const next = this.peekNext();
-              if (next?.value === ":" || next?.value === "?") {
-                name = this.parseIdentifier();
-                
-                // Check for optional marker (?) before the colon
-                if (this.match("?")) {
-                  optional = true;
-                }
-                
-                // Now consume the colon
-                if (this.match(":")) {
-                  // Type annotation follows
-                } else if (!optional) {
-                  // Error: expected : after parameter name (unless it was optional)
-                  throw this.error(this.peek(), "Expected ':' after parameter name");
-                }
-              }
-            }
-            
-            // Parse the type
-            const type = this.parseType();
-            
-            params.push({
-              name,
-              type,
-              optional,
-              span: this.createSpan(paramStart, this.current - 1)
-            });
-          } while (this.match(","));
-        }
-        
-        this.consume(")", "Expected ')' in function type");
-        this.consume(arrow, `Expected '${arrow}' in function type`);
-        const ret = this.parseType();
-        
-        return {
-          kind: "FuncType",
-          params,
-          ret,
-          span: this.createSpan(start, this.current - 1)
-        };
-      } else {
-        // Not a function type - it's a parenthesized type or tuple type
-        this.advance(); // consume '('
-        
-        // Check for empty tuple
-        if (this.check(")")) {
-          this.advance();
-          // Return empty tuple as a simple type
-          return {
-            kind: "SimpleType",
-            id: { kind: "Identifier", name: "()", span: this.createSpan(start, this.current - 1) },
-            span: this.createSpan(start, this.current - 1)
-          };
-        }
-        
-        const firstType = this.parseType();
-        
-        // Check if this is a tuple type (has comma)
-        if (this.match(",")) {
-          const elements: AST.TypeNode[] = [firstType];
-          do {
-            elements.push(this.parseType());
-          } while (this.match(","));
-          
-          this.consume(")", "Expected ')' after tuple type");
-          
-          // Create a string representation of the tuple for compatibility
-          // Since we don't have a TupleType in AST, represent as SimpleType
-          const tupleStr = `(${elements.map(e => this.typeNodeToString(e)).join(", ")})`;
-          
-          return {
-            kind: "SimpleType",
-            id: { kind: "Identifier", name: tupleStr, span: this.createSpan(start, this.current - 1) },
-            span: this.createSpan(start, this.current - 1)
-          };
-        } else {
-          // Single parenthesized type
-          this.consume(")", "Expected ')' after parenthesized type");
-          return firstType;
-        }
-      }
-    }
-    
-    // Simple or generic type
-    // Allow keywords as type names (void, undefined, number, boolean, string, etc.)
-    let id: AST.Identifier;
-    const token = this.peek();
-    if (token.type === TokenType.Keyword && 
-        (token.value === "void" || token.value === "undefined" || 
-         token.value === "number" || token.value === "boolean" || 
-         token.value === "string" || token.value === "object" ||
-         token.value === "any" || token.value === "never" ||
-         token.value === "unknown" || token.value === "null")) {
-      this.advance();
-      id = {
-        kind: "Identifier",
-        name: token.value,
-        span: this.createSpanFrom(token)
-      };
-    } else {
-      id = this.parseIdentifier();
-    }
-    
-    // Handle qualified type names (e.g., AST.Program, React.Component)
-    let qualifiedId = id;
-    while (this.match(".")) {
-      const member = this.parseIdentifier();
-      // Create a new identifier with the full qualified name
-      qualifiedId = {
-        kind: "Identifier",
-        name: `${qualifiedId.name}.${member.name}`,
-        span: this.createSpanFrom(qualifiedId)
-      };
-    }
-    
-    // Handle "keyof Type" pattern (TypeScript-style type operator)
-    if (qualifiedId.name === "keyof" && (this.peek().type === TokenType.Identifier || this.peek().type === TokenType.Keyword)) {
-      const innerType = this.parseSimpleType();
-      return {
-        kind: "SimpleType",
-        id: { kind: "Identifier", name: "keyof", span: this.createSpan(start, this.current - 1) },
-        inner: innerType,
-        span: this.createSpan(start, this.current - 1)
-      } as any;
-    }
-
-    // Handle "impl Trait" pattern (Rust-style)
-    if (qualifiedId.name === "impl" && this.peek().type === TokenType.Identifier) {
-      const traitType = this.parseSimpleType();
-      return {
-        kind: "ImplType",
-        trait: traitType,
-        span: this.createSpan(start, this.current - 1)
-      };
-    }
-    
-    // Handle "dyn Trait" pattern (Rust-style trait objects)
-    if (qualifiedId.name === "dyn" && this.peek().type === TokenType.Identifier) {
-      const traitType = this.parseSimpleType();
-      return {
-        kind: "DynType",
-        trait: traitType,
-        span: this.createSpan(start, this.current - 1)
-      };
-    }
-    
-    // Special handling for chan<T> syntax
-    if (qualifiedId.name === "chan") {
-      if (this.check("<")) {
-        // Parse as GenericType for chan<T> syntax
-        this.advance(); // consume '<'
-        const args: AST.TypeNode[] = [];
-        args.push(this.parseType());
-        
-        while (this.match(",")) {
-          args.push(this.parseType());
-        }
-        
-        // Handle >> and >>> as closing brackets
-        if (this.check(">>")) {
-          // Treat >> as a single > and leave the second > for the next parse
-          const originalToken = this.tokens[this.current];
-          // Replace >> with > at current position
-          this.tokens[this.current] = { ...originalToken, value: ">" };
-          // Insert another > after it
-          const syntheticToken = { ...originalToken, value: ">" };
-          this.tokens.splice(this.current + 1, 0, syntheticToken);
-          // Now consume the first >
-          this.advance();
-        } else if (this.check(">>>")) {
-          // Treat >>> as a single > and leave >> for the next parse
-          const originalToken = this.tokens[this.current];
-          // Replace >>> with > at current position
-          this.tokens[this.current] = { ...originalToken, value: ">" };
-          // Insert >> after it
-          const syntheticToken = { ...originalToken, value: ">>" };
-          this.tokens.splice(this.current + 1, 0, syntheticToken);
-          // Now consume the first >
-          this.advance();
-        } else {
-          this.consume(">", "Expected '>' after channel element type");
-        }
-        
-        // Return GenericType instead of ChanType for compatibility
-        return {
-          kind: "GenericType",
-          base: qualifiedId,
-          args,
-          span: this.createSpan(start, this.current - 1)
-        };
-      } else {
-        // chan without type parameter - treat as simple chan type
-        return {
-          kind: "ChanType",
-          direction: "both",
-          elementType: undefined,
-          span: this.createSpan(start, this.current - 1)
-        };
-      }
-    }
-    
-    // Check for generic arguments
-    if (this.match("<") || this.match("[")) {
-      const closeBracket = this.previous()?.value === "<" ? ">" : "]";
-      const args: AST.TypeNode[] = [];
-      
-      if (!this.check(closeBracket)) {
-        do {
-          // Check for associated type constraint (e.g., Item = V in Rust)
-          const checkpoint = this.current;
-          const firstType = this.parseType();
-          
-          // Check if this is an associated type constraint
-          if (this.check("=") && firstType.kind === "SimpleType") {
-            // This is an associated type constraint like "Item = V"
-            this.advance(); // consume '='
-            const constraintType = this.parseType();
-            // For now, treat the whole constraint as a special type
-            // We'll just use the constraint type since we don't have full support
-            args.push(constraintType);
-          } else {
-            args.push(firstType);
-          }
-        } while (this.match(","));
-      }
-      
-      // Handle >> and >>> as closing brackets in generic types
-      if (closeBracket === ">") {
-        if (this.check(">>")) {
-          // Treat >> as a single > and leave the second > for the next parse
-          const originalToken = this.tokens[this.current];
-          // Replace >> with > at current position
-          this.tokens[this.current] = { ...originalToken, value: ">" };
-          // Insert another > after it
-          const syntheticToken = { ...originalToken, value: ">" };
-          this.tokens.splice(this.current + 1, 0, syntheticToken);
-          // Now consume the first >
-          this.advance();
-        } else if (this.check(">>>")) {
-          // Treat >>> as a single > and leave >> for the next parse
-          const originalToken = this.tokens[this.current];
-          // Replace >>> with > at current position
-          this.tokens[this.current] = { ...originalToken, value: ">" };
-          // Insert >> after it
-          const syntheticToken = { ...originalToken, value: ">>" };
-          this.tokens.splice(this.current + 1, 0, syntheticToken);
-          // Now consume the first >
-          this.advance();
-        } else {
-          // Debug: log what token we actually have
-          const actualToken = this.peek();
-          if (actualToken.value !== ">") {
-            throw this.error(actualToken, `Expected '>' but got '${actualToken.value}'`);
-          }
-          this.consume(">", "Expected '>'");
-        }
-      } else {
-        this.consume(closeBracket, `Expected '${closeBracket}'`);
-      }
-      
-      return {
-        kind: "GenericType",
-        base: qualifiedId,
-        args,
-        span: this.createSpan(start, this.current - 1)
-      };
-    }
-    
-    return {
-      kind: "SimpleType",
-      id: qualifiedId,
-      span: qualifiedId.span
-    };
-  }
   
-  private isType(): boolean {
-    const token = this.peek();
-    return token.type === TokenType.Identifier && (
-      token.value === "any" || token.value === "never" ||
-      token.value === "bool" || token.value === "bytes" ||
-      token.value === "string" || token.value === "char" ||
-      token.value === "bigint" || token.value === "i8" ||
-      token.value === "i16" || token.value === "i32" ||
-      token.value === "i64" || token.value === "u8" ||
-      token.value === "u16" || token.value === "u32" ||
-      token.value === "u64" || token.value === "f32" ||
-      token.value === "f64" || token.value === "chan" ||
-      // Could be a user-defined type
-      token.type === TokenType.Identifier
-    );
-  }
   
   // Other declaration parsing
   private parseTypeDecl(): AST.TypeDecl {
@@ -6096,14 +4633,14 @@ export class Parser extends ParserCursor {
         
         // Handle Ruby-style def...end methods
         if (this.match("def")) {
-          const method = this.parseFuncDecl();
+          const method = Functions.parseFuncDecl(this, );
           members.push(method as any);
           continue;
         }
         
         // Handle regular function declarations
         if (this.match("fn", "fun", "function", "func")) {
-          const method = this.parseFuncDecl();
+          const method = Functions.parseFuncDecl(this, );
           members.push(method as any);
           continue;
         }
@@ -6118,7 +4655,7 @@ export class Parser extends ParserCursor {
             span: this.createSpanFrom(opToken)
           };
           // Skip optional `const` qualifier after params (C++ const methods)
-          const params = this.parseParameterList();
+          const params = Functions.parseParameterList(this);
           if (this.peek().value === "const") this.advance();
           const body = this.parseBlock();
           members.push({
@@ -6135,7 +4672,7 @@ export class Parser extends ParserCursor {
         if (this.match("async")) {
           // Check if followed by function keyword
           if (this.match("fn", "fun", "function", "func", "def")) {
-            const method = this.parseFuncDecl(true);
+            const method = Functions.parseFuncDecl(this, true);
             members.push(method as any);
             continue;
           }
@@ -6163,7 +4700,7 @@ export class Parser extends ParserCursor {
             }
 
             // Parse parameters
-            const params = this.parseParameterList();
+            const params = Functions.parseParameterList(this);
             
             // Parse return type if present
             let returnType: AST.TypeNode | undefined;
@@ -6201,7 +4738,7 @@ export class Parser extends ParserCursor {
           
           // Constructor with parentheses
           if (this.check("(")) {
-            const params = this.parseParameterList();
+            const params = Functions.parseParameterList(this);
             
             // Constructor body
             const body = this.parseBlock();
@@ -6227,7 +4764,7 @@ export class Parser extends ParserCursor {
           const accessorName = this.parseIdentifier();
           
           // Parse parameters (setters have one parameter)
-          const params = this.parseParameterList();
+          const params = Functions.parseParameterList(this);
           
           // Parse return type if present
           let returnType: AST.TypeNode | undefined;
@@ -6335,7 +4872,7 @@ export class Parser extends ParserCursor {
             name: "operator" + opToken.value,
             span: this.createSpanFrom(opToken)
           };
-          const params = this.parseParameterList();
+          const params = Functions.parseParameterList(this);
           if (this.peek().value === "const") this.advance();
           const body = this.parseBlock();
           const member: any = {
@@ -6496,7 +5033,7 @@ export class Parser extends ParserCursor {
           
           // Method with parentheses: methodName(params): returnType { body }
           if (this.check("(")) {
-            const params = this.parseParameterList();
+            const params = Functions.parseParameterList(this);
             
             // Optional return type
             let returnType: AST.TypeNode | undefined;
@@ -6874,7 +5411,7 @@ export class Parser extends ParserCursor {
       // Check if it's a method (has parentheses) or property
       if (this.check("(")) {
         // It's a method signature
-        const params = this.parseParameterList();
+        const params = Functions.parseParameterList(this);
 
         // Parse return type — but not if ':' is followed by a statement keyword (Python block)
         let returnType: AST.TypeNode | undefined;
@@ -7012,7 +5549,7 @@ export class Parser extends ParserCursor {
         // Check if this is "const fn" (const function)
         if (this.peek().value === "fn") {
           this.advance(); // consume 'fn'
-          const func = this.parseFuncDecl(false, false, false);
+          const func = Functions.parseFuncDecl(this, false, false, false);
           members.push({
             kind: "Method",
             name: func.name!,
@@ -7046,7 +5583,7 @@ export class Parser extends ParserCursor {
         }
       } else if (this.match("fn", "fun", "func", "function")) {
         const isGenerator = this.previous()?.value === "function" && this.match("*");
-        const func = this.parseFuncDecl(false, false, isGenerator);
+        const func = Functions.parseFuncDecl(this, false, false, isGenerator);
         members.push({
           kind: "Method",
           name: func.name!,
@@ -7076,7 +5613,7 @@ export class Parser extends ParserCursor {
         const name = this.parseIdentifier();
         if (this.check("(")) {
           // Method without fn keyword
-          const params = this.parseParameterList();
+          const params = Functions.parseParameterList(this);
           let returnType: AST.TypeNode | undefined;
           if (this.match("->", ":")) {
             returnType = this.parseType();
@@ -7414,932 +5951,11 @@ export class Parser extends ParserCursor {
   }
   
   // Literal parsing
-  private parseNumericLiteral(): AST.NumericLiteral {
-    const token = this.advance();
-    let base: "decimal" | "hex" | "octal" | "binary" = "decimal";
-    
-    if (token.value.startsWith("0x") || token.value.startsWith("0X")) {
-      base = "hex";
-    } else if (token.value.startsWith("0o") || token.value.startsWith("0O")) {
-      base = "octal";
-    } else if (token.value.startsWith("0b") || token.value.startsWith("0B")) {
-      base = "binary";
-    }
-    
-    // Extract suffix if present
-    let suffix: string | undefined;
-    const suffixMatch = token.value.match(/[nulfiULFI][\w]*$/);
-    if (suffixMatch) {
-      suffix = suffixMatch[0];
-    }
-    
-    return {
-      kind: "NumericLiteral",
-      raw: token.value,
-      base,
-      suffix,
-      span: this.createSpanFrom(token)
-    };
-  }
-  
-  private parseStringLiteral(): AST.StringLiteral {
-    const token = this.advance();
-    
-    // Parse string flags and delimiter
-    let flags: AST.StringLiteral["flags"] = {};
-    let delimiter = token.value[0];
-    
-    // Check for prefixes
-    let prefixEnd = 0;
-    for (let i = 0; i < token.value.length; i++) {
-      const char = token.value[i];
-      if (char === 'r') flags.raw = true;
-      else if (char === 'b') flags.bytes = true;
-      else if (char === 'f') flags.format = true;
-      else if (char === 'c') flags.const = true;
-      else if (char === '"' || char === "'" || char === '`') {
-        prefixEnd = i;
-        delimiter = char;
-        break;
-      }
-    }
-    
-    // Parse content and handle interpolations
-    const content = token.value.slice(prefixEnd + 1, -1); // Remove quotes
-    const parts: AST.StringPart[] = [];
-    
-    // If it's an f-string or template literal, parse interpolations
-    if (flags.format || delimiter === '`') {
-      let current = "";
-      let i = 0;
-      
-      while (i < content.length) {
-        if ((flags.format && content[i] === '{' && content[i + 1] !== '{') ||
-            (delimiter === '`' && content[i] === '$' && content[i + 1] === '{')) {
-          // Save text before interpolation
-          if (current) {
-            parts.push({ kind: "Text", value: current });
-            current = "";
-          }
-          
-          // Find the end of interpolation
-          const start = flags.format ? i + 1 : i + 2;
-          let depth = 1;
-          let end = start;
-          
-          while (end < content.length && depth > 0) {
-            if (content[end] === '{') depth++;
-            else if (content[end] === '}') depth--;
-            end++;
-          }
-          
-          if (depth === 0) {
-            // Extract interpolation expression
-            const exprStr = content.slice(start, end - 1);
-            parts.push({
-              kind: "Interpolation",
-              value: exprStr // This would ideally be parsed as an expression
-            });
-            i = end;
-          } else {
-            // Unclosed interpolation
-            current += content[i];
-            i++;
-          }
-        } else if ((flags.format && content[i] === '{' && content[i + 1] === '{') ||
-                   (flags.format && content[i] === '}' && content[i + 1] === '}')) {
-          // Escaped braces in f-strings
-          current += content[i];
-          i += 2;
-        } else {
-          current += content[i];
-          i++;
-        }
-      }
-      
-      // Add remaining text
-      if (current) {
-        parts.push({ kind: "Text", value: current });
-      }
-    } else {
-      // Regular string
-      parts.push({ kind: "Text", value: content });
-    }
-    
-    return {
-      kind: "StringLiteral",
-      parts,
-      flags,
-      delimiter,
-      span: this.createSpanFrom(token)
-    };
-  }
-  
-  private parseTemplateLiteral(): AST.StringLiteral {
-    const token = this.advance();
-    
-    // Parse template literal with interpolations
-    const content = token.value.slice(1, -1); // Remove backticks
-    const parts: AST.StringPart[] = [];
-    
-    let current = "";
-    let i = 0;
-    
-    while (i < content.length) {
-      if (content[i] === '$' && content[i + 1] === '{') {
-        // Save text before interpolation
-        if (current) {
-          parts.push({ kind: "Text", value: current });
-          current = "";
-        }
-        
-        // Find the end of interpolation
-        let depth = 1;
-        let end = i + 2;
-        
-        while (end < content.length && depth > 0) {
-          if (content[end] === '{') depth++;
-          else if (content[end] === '}') depth--;
-          end++;
-        }
-        
-        if (depth === 0) {
-          // Extract interpolation expression
-          const exprStr = content.slice(i + 2, end - 1);
-          parts.push({
-            kind: "Interpolation",
-            value: exprStr
-          });
-          i = end;
-        } else {
-          // Unclosed interpolation
-          current += content[i];
-          i++;
-        }
-      } else if (content[i] === '\\' && i + 1 < content.length) {
-        // Handle escape sequences
-        i++;
-        switch (content[i]) {
-          case 'n': current += '\n'; break;
-          case 't': current += '\t'; break;
-          case 'r': current += '\r'; break;
-          case '\\': current += '\\'; break;
-          case '`': current += '`'; break;
-          default: current += content[i];
-        }
-        i++;
-      } else {
-        current += content[i];
-        i++;
-      }
-    }
-    
-    // Add remaining text
-    if (current || parts.length === 0) {
-      parts.push({ kind: "Text", value: current });
-    }
-    
-    return {
-      kind: "StringLiteral",
-      parts,
-      flags: { format: true },
-      delimiter: "`",
-      span: this.createSpanFrom(token)
-    };
-  }
-  
-  private parseRegexLiteral(): AST.RegexLiteral {
-    const token = this.advance();
-    
-    // Extract pattern and flags
-    const lastSlash = token.value.lastIndexOf('/');
-    const pattern = token.value.slice(1, lastSlash);
-    const flags = token.value.slice(lastSlash + 1);
-    
-    return {
-      kind: "RegexLiteral",
-      pattern,
-      flags,
-      span: this.createSpanFrom(token)
-    };
-  }
-  
-  private parseListComprehension(expr: AST.Expr, start: number): AST.ListComprehension {
-    // Parse: [expr for var in iterable if condition]
-    // For simplicity, we'll support single-level comprehensions first
-    
-    this.consume("for", "Expected 'for' in list comprehension");
-    
-    // Parse the target variable(s) - can be multiple like "item, i"
-    const targets: AST.Identifier[] = [];
-    targets.push(this.parseIdentifier());
-    
-    // Handle multiple variables separated by commas (e.g., "item, i")
-    while (this.match(",")) {
-      targets.push(this.parseIdentifier());
-    }
-    
-    this.consume("in", "Expected 'in' in list comprehension");
-    
-    // Parse the iterable expression
-    const iterable = this.parseExpression();
-
-    // Skip virtual semicolons before optional filter/chained for
-    while (this.peek().virtualSemi) this.advance();
-
-    // Parse optional filter
-    let filter: AST.Expr | undefined;
-    if (this.match("if")) {
-      filter = this.parseExpression();
-    }
-
-    // Skip virtual semicolons before closing bracket
-    while (this.peek().virtualSemi) this.advance();
-
-    this.consume("]", "Expected ']' after list comprehension");
-    
-    return {
-      kind: "ListComprehension",
-      expression: expr,
-      targets,
-      iterable,
-      filter,
-      span: this.createSpan(start, this.current - 1)
-    };
-  }
-  
-  private parseArrayLiteral(): AST.ArrayLiteral | AST.ListComprehension {
-    const start = this.current - 1;
-    const elements: AST.Expr[] = [];
-    
-    if (!this.check("]")) {
-      // Parse first element or expression
-      let firstExpr: AST.Expr;
-      
-      // Check for spread operator
-      if (this.match("...")) {
-        const spreadStart = this.current - 1;
-        // Check for optional spread (...?)
-        const optional = this.match("?");
-        const argument = this.parseAssignmentExpression();
-        firstExpr = {
-          kind: "Spread",
-          argument,
-          optional,
-          span: this.createSpan(spreadStart, this.current - 1)
-        };
-        elements.push(firstExpr);
-      } else {
-        // Check for match expression in comprehension context
-        if (this.check("match")) {
-          const matchResult = this.attempt(() => this.parseSwitch() as any as AST.Expr);
-          if (matchResult) {
-            firstExpr = matchResult;
-          } else {
-            firstExpr = this.parseAssignmentExpression();
-          }
-        } else {
-          firstExpr = this.parseAssignmentExpression();
-        }
-        
-        // Skip virtual semicolons before checking for comprehension
-        while (this.peek().virtualSemi) {
-          this.advance();
-        }
-        
-        // Check for list comprehension (expression followed by 'for')
-        if (this.check("for")) {
-          // This is a list comprehension
-          return this.parseListComprehension(firstExpr, start);
-        } else {
-          elements.push(firstExpr);
-        }
-      }
-      
-      // If not a comprehension, continue parsing regular array elements
-      if (!this.check("for")) {
-        while (this.match(",")) {
-          // Skip virtual semicolons after comma
-          while (this.peek().virtualSemi) {
-            this.advance();
-          }
-          
-          if (this.check("]")) break; // Allow trailing comma
-          
-          // Check for spread operator
-          if (this.match("...")) {
-            const spreadStart = this.current - 1;
-            // Check for optional spread (...?)
-            const optional = this.match("?");
-            const argument = this.parseAssignmentExpression();
-            elements.push({
-              kind: "Spread",
-              argument,
-              optional,
-              span: this.createSpan(spreadStart, this.current - 1)
-            });
-          } else {
-            elements.push(this.parseAssignmentExpression());
-          }
-          
-          // Skip trailing virtual semicolons
-          while (this.peek().virtualSemi) {
-            this.advance();
-          }
-        }
-      }
-    }
-    
-    // Skip virtual semicolons before closing bracket
-    while (this.peek().virtualSemi) {
-      this.advance();
-    }
-    
-    this.consume("]", "Expected ']' after array elements");
-    
-    return {
-      kind: "ArrayLiteral",
-      elements,
-      span: this.createSpan(start, this.current - 1)
-    };
-  }
-  
-  private parseObjectLiteral(): AST.ObjectLiteral | AST.SetLiteral {
-    const start = this.current - 1;
-    
-    if (!this.check("}")) {
-      // Parse first element to determine if it's a set/dict comprehension
-      const checkpoint = this.current;
-      
-      // Try to parse as expression first, but catch errors for object literals
-      try {
-        // Skip this check if we see a keyword followed by colon (object literal)
-        if (this.peek().type === TokenType.Keyword && this.peekNext()?.value === ":") {
-          // This is likely an object literal with keyword property
-          // Skip the comprehension check
-        } else {
-          const errorCheckpoint = this.errors.length;
-          const firstExpr = this.parseAssignmentExpression();
-
-          // Check for set comprehension: {expr for var in iterable}
-          if (this.check("for")) {
-            return this.parseSetComprehension(firstExpr, start);
-          }
-
-          // Check for set literal: {expr, expr, ...} or {expr}
-          // A set is detected when the first element is NOT followed by ':'
-          // (which would indicate an object literal key:value pair)
-          if (this.check(",") || this.check("}")) {
-            // This looks like a set literal, not an object
-            const elements: AST.Expr[] = [firstExpr];
-            while (this.match(",")) {
-              while (this.peek().virtualSemi) this.advance();
-              if (this.check("}")) break;
-              elements.push(this.parseAssignmentExpression());
-            }
-            this.consume("}", "Expected '}' after set literal");
-            // Restore errors from speculative parsing
-            this.errors.length = errorCheckpoint;
-            return {
-              kind: "SetLiteral",
-              elements,
-              span: this.createSpan(start, this.current - 1)
-            };
-          }
-        }
-      } catch {
-        // Failed to parse as expression, continue as object literal
-      }
-
-      // Reset for regular object/dict parsing
-      this.current = checkpoint;
-      
-      const properties: AST.ObjectProperty[] = [];
-      
-      do {
-        // Skip virtual semicolons between properties
-        while (this.peek().virtualSemi) {
-          this.advance();
-        }
-        
-        // Check for closing brace (end of object)
-        if (this.check("}")) {
-          break;
-        }
-        
-        const propStart = this.current;
-        
-        // Check for spread property
-        if (this.match("...")) {
-          // Check for optional spread (...?)
-          const optional = this.match("?");
-          const argument = this.parseAssignmentExpression();
-          
-          properties.push({
-            key: {
-              kind: "Identifier",
-              name: "...",
-              span: this.createSpan(propStart, propStart)
-            },
-            value: {
-              kind: "Spread",
-              argument,
-              optional,
-              span: this.createSpan(propStart, this.current - 1)
-            } as AST.Expr,
-            shorthand: false,
-            computed: false,
-            span: this.createSpan(propStart, this.current - 1)
-          });
-        } else {
-          // Parse regular property (not spread)
-          // Parse property key
-        let key: AST.Identifier | AST.StringLiteral | AST.NumericLiteral | AST.Expr;
-        let computed = false;
-        
-        if (this.match("[")) {
-          // Computed property
-          computed = true;
-          key = this.parseExpression();
-          this.consume("]", "Expected ']' after computed property");
-        } else if (this.peek().type === TokenType.StringLiteral) {
-          key = this.parseStringLiteral();
-        } else if (this.peek().type === TokenType.NumericLiteral) {
-          key = this.parseNumericLiteral();
-        } else if (this.peek().type === TokenType.Keyword) {
-          // Allow keywords as property keys in object literals
-          const keyToken = this.advance();
-          key = {
-            kind: "Identifier",
-            name: keyToken.value,
-            span: this.createSpanFrom(keyToken)
-          };
-        } else {
-          key = this.parseIdentifier();
-        }
-        
-        // Check for shorthand
-        let value: AST.Expr;
-        let shorthand = false;
-        
-        if (this.match(":")) {
-          value = this.parseAssignmentExpression();
-          
-          // Check for dict comprehension after first key:value pair
-          if (this.check("for")) {
-            // This is a dict comprehension
-            const dictExpr = {
-              kind: "ObjectLiteral" as const,
-              properties: [{
-                key,
-                value,
-                shorthand: false,
-                computed,
-                span: this.createSpan(propStart, this.current - 1)
-              }],
-              span: this.createSpan(propStart, this.current - 1)
-            };
-            return this.parseDictComprehension(dictExpr, start);
-          }
-        } else if (key.kind === "Identifier" && this.check("(")) {
-          // Shorthand method: method() { ... }
-          this.advance(); // consume '('
-          const params: AST.Param[] = [];
-          if (!this.check(")")) {
-            do {
-              params.push(this.parseParameter());
-            } while (this.match(","));
-          }
-          this.consume(")", "Expected ')' after method parameters");
-          const methodBody = this.parseBlockOrStatement();
-          value = {
-            kind: "Lambda",
-            params,
-            body: methodBody,
-            span: this.createSpan(propStart, this.current - 1)
-          } as AST.Lambda;
-        } else if (key.kind === "Identifier") {
-          // Shorthand property
-          shorthand = true;
-          value = key;
-        } else {
-          throw this.error(this.peek(), "Expected ':' after property key");
-        }
-        
-        properties.push({
-          key,
-          value,
-          shorthand,
-          computed,
-          span: this.createSpan(propStart, this.current - 1)
-        });
-        } // End of else block for non-spread properties
-      } while (this.match(","));
-      
-      // Skip virtual semicolons before closing brace
-      while (this.peek().virtualSemi) {
-        this.advance();
-      }
-      
-      this.consume("}", "Expected '}' after object properties");
-      
-      return {
-        kind: "ObjectLiteral",
-        properties,
-        span: this.createSpan(start, this.current - 1)
-      };
-    }
-    
-    // Skip virtual semicolons before closing brace (for empty object)
-    while (this.peek().virtualSemi) {
-      this.advance();
-    }
-    
-    this.consume("}", "Expected '}' after object properties");
-    
-    return {
-      kind: "ObjectLiteral",
-      properties: [],
-      span: this.createSpan(start, this.current - 1)
-    };
-  }
-  
-  private parseSetComprehension(expr: AST.Expr, start: number): AST.SetLiteral {
-    // Parse: {expr for var in iterable if condition}
-    const comprehensions: any[] = [];
-    
-    while (this.match("for")) {
-      // Parse one or more variables (e.g., "x" or "item, i")
-      const variables: AST.Identifier[] = [];
-      variables.push(this.parseIdentifier());
-      
-      // Handle multiple variables separated by commas
-      while (this.match(",")) {
-        variables.push(this.parseIdentifier());
-      }
-      
-      this.consume("in", "Expected 'in' in set comprehension");
-      const iterable = this.parseExpression();
-      
-      let condition: AST.Expr | undefined;
-      if (this.match("if")) {
-        condition = this.parseExpression();
-      }
-      
-      comprehensions.push({
-        variables,
-        iterable,
-        condition
-      });
-      
-      // Check for nested comprehensions
-      if (!this.check("for")) {
-        break;
-      }
-    }
-    
-    this.consume("}", "Expected '}' after set comprehension");
-    
-    // Return as a SetLiteral
-    return {
-      kind: "SetLiteral",
-      elements: [expr], // Store the expression
-      span: this.createSpan(start, this.current - 1)
-    };
-  }
-  
-  private parseDictComprehension(firstPair: AST.ObjectLiteral, start: number): AST.ObjectLiteral {
-    // Parse: {k: v for k, v in iterable if condition}
-    const comprehensions: any[] = [];
-    
-    while (this.match("for")) {
-      // Parse variable(s) - can be single or multiple
-      const variables: AST.Identifier[] = [];
-      variables.push(this.parseIdentifier());
-      
-      while (this.match(",")) {
-        variables.push(this.parseIdentifier());
-      }
-      
-      this.consume("in", "Expected 'in' in dict comprehension");
-      const iterable = this.parseExpression();
-      
-      let condition: AST.Expr | undefined;
-      if (this.match("if")) {
-        condition = this.parseExpression();
-      }
-      
-      comprehensions.push({
-        variables,
-        iterable,
-        condition
-      });
-      
-      // Check for nested comprehensions
-      if (!this.check("for")) {
-        break;
-      }
-    }
-    
-    this.consume("}", "Expected '}' after dict comprehension");
-    
-    // Return as ObjectLiteral with comprehension metadata
-    return {
-      kind: "ObjectLiteral",
-      properties: firstPair.properties,
-      span: this.createSpan(start, this.current - 1)
-    };
-  }
-  
-  private parseGeneratorComprehension(expr: AST.Expr, start: number): AST.Call {
-    // Parse: (expr for var in iterable if condition)
-    const comprehensions: any[] = [];
-    
-    while (this.match("for")) {
-      // Parse one or more variables (e.g., "x" or "item, i")
-      const variables: AST.Identifier[] = [];
-      variables.push(this.parseIdentifier());
-      
-      // Handle multiple variables separated by commas
-      while (this.match(",")) {
-        variables.push(this.parseIdentifier());
-      }
-      
-      this.consume("in", "Expected 'in' in generator comprehension");
-      const iterable = this.parseExpression();
-      
-      let condition: AST.Expr | undefined;
-      if (this.match("if")) {
-        condition = this.parseExpression();
-      }
-      
-      comprehensions.push({
-        variables,
-        iterable,
-        condition
-      });
-      
-      // Check for nested comprehensions
-      if (!this.check("for")) {
-        break;
-      }
-    }
-    
-    this.consume(")", "Expected ')' after generator comprehension");
-    
-    // Return as a special Call node representing a generator
-    return {
-      kind: "Call",
-      callee: {
-        kind: "Identifier",
-        name: "__generator",
-        span: this.createSpan(start, start)
-      },
-      args: [expr], // Store the expression
-      span: this.createSpan(start, this.current - 1)
-    };
-  }
-  
-  private parseLambda(): AST.Lambda {
-    const start = this.current - 1; // Account for already consumed (
-    
-    // Parse parameters
-    let params: AST.Param[] = [];
-    
-    // We already consumed the opening paren
-    if (!this.check(")")) {
-      do {
-        params.push(this.parseParameter());
-      } while (this.match(","));
-    }
-    this.consume(")", "Expected ')' after lambda parameters");
-    
-    // Parse return type
-    let returnType: AST.TypeNode | undefined;
-    if (this.match(":")) {
-      returnType = this.parseType();
-    }
-    
-    // Parse arrow
-    this.consume("=>", "Expected '=>' in lambda");
-    
-    // Skip virtual semicolons after => in arrow functions
-    while (this.peek().virtualSemi) {
-      this.advance();
-    }
-    
-    // Parse body — use parseAssignmentExpression to stop at comma (not parseExpression)
-    const body = this.check("{") ? this.parseBlock() : this.parseAssignmentExpression();
-
-    return {
-      kind: "Lambda",
-      params,
-      returnType,
-      body,
-      span: this.createSpan(start, this.current - 1)
-    };
+  // Literals extracted to src/parselets/literals.ts (Chunk 6)
+  public parseStringLiteral(): AST.StringLiteral {
+    return Literals.parseStringLiteral(this);
   }
 
-  private parseAsyncLambda(start: number): AST.Lambda {
-    // Check for async block (no parameters, just a block)
-    if (this.check("{")) {
-      const block = this.parseBlock();
-      // Return an async block expression (wrapped in a lambda with no params)
-      return {
-        kind: "Lambda",
-        params: [],
-        returnType: undefined,
-        body: block,
-        async: true,
-        span: this.createSpan(start, this.current - 1)
-      } as AST.Lambda;
-    }
-    
-    // Parse parameters - can be single identifier or parenthesized list
-    let params: AST.Param[] = [];
-    
-    if (this.match("(")) {
-      if (!this.check(")")) {
-        do {
-          params.push(this.parseParameter());
-        } while (this.match(","));
-      }
-      this.consume(")", "Expected ')' after lambda parameters");
-    } else if (this.peek().type === TokenType.Identifier) {
-      // Single parameter without parentheses
-      const name = this.parseIdentifier();
-      params.push({
-        name,
-        type: undefined,
-        defaultValue: undefined,
-        span: name.span
-      });
-    }
-    
-    // Parse return type
-    let returnType: AST.TypeNode | undefined;
-    if (this.match(":")) {
-      returnType = this.parseType();
-    }
-    
-    // Parse arrow
-    this.consume("=>", "Expected '=>' in async lambda");
-
-    // Parse body — use parseAssignmentExpression to stop at comma
-    const body = this.check("{") ? this.parseBlock() : this.parseAssignmentExpression();
-    
-    return {
-      kind: "Lambda",
-      params,
-      returnType,
-      body,
-      async: true,
-      span: this.createSpan(start, this.current - 1)
-    } as AST.Lambda;
-  }
-  
-  private checkLambda(): boolean {
-    // Check for arrow function patterns
-    if (this.check("(")) {
-      const checkpoint = this.current;
-      this.advance(); // (
-      
-      // Skip parameters
-      let depth = 1;
-      while (depth > 0 && !this.isAtEnd()) {
-        if (this.check("(")) depth++;
-        if (this.check(")")) depth--;
-        this.advance();
-      }
-      
-      let hasArrow = this.check("=>");
-      if (!hasArrow && this.check(":")) {
-        // Skip return type annotation to find =>
-        // e.g. (mode: string): void => { ... }
-        // e.g. (x: number): Promise<string> => { ... }
-        const savePos = this.current;
-        this.advance(); // skip :
-        let typeDepth = 0;
-        while (!this.isAtEnd()) {
-          if (this.check("<") || this.check("[")) {
-            typeDepth++;
-          } else if (this.check(">") || this.check("]")) {
-            typeDepth--;
-          } else if (typeDepth === 0 && this.check("=>")) {
-            hasArrow = true;
-            break;
-          } else if (typeDepth === 0 && (this.check("{") || this.check(";") || this.check(",") || this.check(")") || this.isAtEnd())) {
-            break;
-          }
-          this.advance();
-        }
-        this.current = savePos;
-      }
-      this.current = checkpoint;
-      return hasArrow;
-    }
-    
-    // Single parameter arrow function
-    if (this.peek().type === TokenType.Identifier) {
-      const next = this.peekNext();
-      return next?.value === "=>" || 
-             (next?.value === ":" && this.peekAt(2)?.value === "=>");
-    }
-    
-    return false;
-  }
-  
-  private checkParenthesizedLambda(): boolean {
-    // We already consumed the opening paren
-    // Check for lambda parameter pattern
-    
-    // First check: if we see identifier : type, it's likely a lambda parameter
-    if (this.peek().type === TokenType.Identifier) {
-      const next = this.peekNext();
-      if (next && next.value === ":") {
-        // This looks like a typed parameter
-        // Scan ahead to find the closing paren and check for =>
-        let depth = 1;
-        let pos = this.current + 2; // Skip identifier and :
-
-        while (depth > 0 && pos < this.tokens.length) {
-          const tok = this.tokens[pos];
-          if (tok.value === "(") depth++;
-          else if (tok.value === ")") {
-            depth--;
-            if (depth === 0) {
-              // Check if followed by =>
-              const nextTok = this.tokens[pos + 1];
-              if (nextTok && nextTok.value === "=>") return true;
-              // Check for return type annotation: ): Type =>
-              if (nextTok && nextTok.value === ":") {
-                let rpos = pos + 2; // skip ) and :
-                let rtypeDepth = 0;
-                while (rpos < this.tokens.length) {
-                  const rt = this.tokens[rpos];
-                  if (rt.value === "<" || rt.value === "[") rtypeDepth++;
-                  else if (rt.value === ">" || rt.value === "]") rtypeDepth--;
-                  else if (rtypeDepth === 0 && rt.value === "=>") return true;
-                  else if (rtypeDepth === 0 && (rt.value === "{" || rt.value === ";" || rt.value === ",")) break;
-                  rpos++;
-                }
-              }
-              return false;
-            }
-          }
-          pos++;
-        }
-      }
-    }
-    
-    // Fallback: scan to closing paren and check for =>
-    let depth = 1;
-    
-    while (depth > 0 && !this.isAtEnd()) {
-      if (this.check("(")) {
-        depth++;
-        this.advance();
-      } else if (this.check(")")) {
-        depth--;
-        this.advance();
-      } else {
-        this.advance();
-      }
-    }
-    
-    // After closing paren, check for => or : (return type) then =>
-    if (this.check("=>")) {
-      return true;
-    }
-    
-    // Check for return type annotation
-    if (this.check(":")) {
-      // Save position and scan ahead through the type to find =>
-      const savePos = this.current;
-      this.advance(); // consume :
-      
-      // Skip through the type expression
-      let typeDepth = 0;
-      while (!this.isAtEnd()) {
-        if (this.check("<")) {
-          typeDepth++;
-        } else if (this.check(">")) {
-          typeDepth--;
-        } else if (typeDepth === 0 && this.check("=>")) {
-          this.current = savePos;
-          return true;
-        } else if (typeDepth === 0 && (this.check("{") || this.check(";") || this.check(",") || this.isAtEnd())) {
-          // Not a lambda - stop scanning
-          break;
-        }
-        this.advance();
-      }
-      this.current = savePos;
-    }
-    
-    return false;
-  }
-  
   private parseNewExpression(): AST.Call {
     const start = this.current - 1;
     const callee = this.parsePrimary();
@@ -8368,35 +5984,8 @@ export class Parser extends ParserCursor {
   }
   
   // Helper methods
-  private typeNodeToString(type: AST.TypeNode): string {
-    switch (type.kind) {
-      case "SimpleType":
-        return type.id.name;
-      case "ChanType":
-        const prefix = type.direction === "receive" ? "<-chan" : 
-                      type.direction === "send" ? "chan<-" : "chan";
-        return type.elementType ? `${prefix} ${this.typeNodeToString(type.elementType)}` : prefix;
-      case "NullableType":
-        return `${this.typeNodeToString(type.inner)}?`;
-      case "UnionType":
-        return type.types.map(t => this.typeNodeToString(t)).join(" | ");
-      case "GenericType":
-        return `${type.base.name}<${type.args.map(a => this.typeNodeToString(a)).join(", ")}>`;
-      case "FuncType":
-        return `(${type.params.map(p => {
-          const name = p.name ? p.name.name + ": " : "";
-          return name + this.typeNodeToString(p.type);
-        }).join(", ")}) => ${this.typeNodeToString(type.ret)}`;
-      case "ImplType":
-        return `impl ${this.typeNodeToString(type.trait)}`;
-      case "DynType":
-        return `dyn ${this.typeNodeToString(type.trait)}`;
-      default:
-        return "unknown";
-    }
-  }
   
-  private parseIdentifier(): AST.Identifier {
+  public parseIdentifier(): AST.Identifier {
     const token = this.peek();
     
     // Allow keywords as identifiers in member access context
@@ -8482,7 +6071,7 @@ export class Parser extends ParserCursor {
       // This is actually a template literal with interpolations, not a backtick identifier
       // Return it as-is to be handled as a string literal
       this.current--; // Put the token back
-      return this.parseTemplateLiteral() as any; // Treat as expression
+      return Literals.parseTemplateLiteral(this) as any; // Treat as expression
     }
     
     // Extract content from backticks
@@ -8492,7 +6081,7 @@ export class Parser extends ParserCursor {
     if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(content)) {
       // If not a valid identifier, treat it as a string literal
       this.current--; // Put the token back
-      return this.parseTemplateLiteral() as any;
+      return Literals.parseTemplateLiteral(this) as any;
     }
     
     return {
@@ -8588,7 +6177,7 @@ export class Parser extends ParserCursor {
     return args;
   }
   
-  private parseAssignmentExpression(): AST.Expr {
+  public parseAssignmentExpression(): AST.Expr {
     // Parse everything except comma operator
     return this.parseExpression(this.getPrecedence({value: ","} as Token) + 1);
   }
@@ -8749,7 +6338,7 @@ export class Parser extends ParserCursor {
   }
 
   // Override synchronize to include isDeclStart() check
-  protected override synchronize(): void {
+  public override synchronize(): void {
     this.advance();
 
     while (!this.isAtEnd()) {
@@ -8774,949 +6363,5 @@ export class Parser extends ParserCursor {
     }
   }
 
-  // ============ JSX Parsing Methods ============
-
-  private isJSXElement(): boolean {
-    // JSX disambiguation based on spec 10.6
-    const saved = this.current;
-
-    try {
-      // Check for JSXTagStart or < token
-      const token = this.peek();
-      if (token.type !== TokenType.JSXTagStart && token.value !== "<") {
-        return false;
-      }
-      this.advance(); // consume JSXTagStart or <
-
-      // Check what follows < to apply JSX recognition patterns (spec 10.6.2)
-      const next = this.peek();
-
-      // Pattern 1: Fragment <>
-      if (next.value === ">") {
-        this.current = saved;
-        return true;
-      }
-
-      // Pattern 2: Closing tag </
-      if (next.value === "/") {
-        this.current = saved;
-        return true;
-      }
-
-      // Pattern 3 & 4: Identifier (component or HTML element)
-      if (next.type !== TokenType.Identifier) {
-        this.current = saved;
-        return false;
-      }
-
-      const elementName = next.value;
-
-      // Pattern 3: Capital letter → JSX Component (but check for type assertion)
-      if (/^[A-Z]/.test(elementName)) {
-        this.current = saved;
-
-        // Check if this could be a type assertion <Type>expr
-        // Type assertions have the pattern <Identifier>expression
-        // JSX has patterns like <Identifier attr=... or <Identifier>...content...</Identifier>
-        if (this.couldBeTypeAssertion()) {
-          return false;
-        }
-
-        return this.isValidJSXContinuation();
-      }
-
-      // Pattern 4: HTML tag name → JSX Element
-      if (this.isHTMLTag(elementName)) {
-        this.current = saved;
-        return this.isValidJSXContinuation();
-      }
-
-      // Pattern 5: Qualified name (namespace.component)
-      this.advance(); // consume identifier
-      if (this.peek().value === ".") {
-        this.current = saved;
-        return this.isValidJSXContinuation();
-      }
-
-      // Not a JSX pattern - check if it's a primitive type (non-JSX pattern)
-      if (this.isPrimitiveType(elementName)) {
-        this.current = saved;
-        return false;
-      }
-      
-      // For other identifiers, use lookahead to disambiguate
-      // This could be a generic, comparison, or unrecognized JSX pattern
-      this.current = saved;
-      return this.isValidJSXContinuation();
-    } catch {
-      this.current = saved;
-      return false;
-    }
-  }
-
-  private isPrimitiveType(name: string): boolean {
-    const primitiveTypes = new Set([
-      'string', 'number', 'boolean', 'object', 'undefined', 'null',
-      'bigint', 'symbol', 'any', 'unknown', 'never', 'void'
-    ]);
-    return primitiveTypes.has(name);
-  }
-
-  private couldBeTypeAssertion(): boolean {
-    // Check if <Identifier>expr pattern matches type assertion
-    // Be conservative - only return true if we're confident it's a type assertion
-    // We're at position before <, need to look ahead
-    const saved = this.current;
-    
-    try {
-      this.advance(); // consume <
-      const identifier = this.advance(); // consume identifier
-      
-      // Check if we have a simple > (not >> or >>>)
-      if (this.peek().value !== ">") {
-        this.current = saved;
-        return false;
-      }
-      
-      this.advance(); // consume >
-      
-      // Now check what follows - for type assertion, it should be an expression
-      const next = this.peek();
-      
-      // IMPORTANT: Check for JSX closing tag pattern first
-      // If we see text/whitespace followed by </Identifier>, it's definitely JSX
-      if (next.type === TokenType.Identifier || 
-          next.type === TokenType.JSXText || 
-          next.type === TokenType.StringLiteral) {
-        // Look ahead for closing tag
-        let checkPos = this.current;
-        let foundNonWhitespace = false;
-        
-        while (checkPos < this.tokens.length && checkPos < this.current + 10) {
-          const tok = this.tokens[checkPos];
-          
-          // Skip whitespace and newlines
-          if (tok.type === TokenType.StringLiteral && /^\s+$/.test(tok.value)) {
-            checkPos++;
-            continue;
-          }
-          
-          // If we find a closing tag, it's definitely JSX
-          if (tok.value === "<" && 
-              checkPos + 1 < this.tokens.length && 
-              this.tokens[checkPos + 1].value === "/") {
-            this.current = saved;
-            return false; // Definitely JSX
-          }
-          
-          // If we find non-whitespace that's not a closing tag, stop checking
-          if (tok.value && tok.value.trim()) {
-            foundNonWhitespace = true;
-            break;
-          }
-          
-          checkPos++;
-        }
-      }
-      
-      // Only consider it a type assertion if followed by clear expression starters
-      // Be more restrictive here to avoid false positives
-      if (next.type === TokenType.Identifier) {
-        // Check if the identifier is followed by something that confirms it's an expression
-        const afterIdent = this.tokens[this.current + 1];
-        if (afterIdent && (
-            afterIdent.value === "." ||   // member access
-            afterIdent.value === "(" ||   // function call
-            afterIdent.value === "[" ||   // array access
-            afterIdent.value === ";" ||   // statement end
-            afterIdent.value === "," ||   // in sequence
-            afterIdent.value === ")" ||   // in parens
-            afterIdent.type === TokenType.Operator)) {  // binary op
-          this.current = saved;
-          return true;
-        }
-        // Just an identifier alone - could be JSX text content
-        this.current = saved;
-        return false;
-      }
-      
-      // Clear type assertion patterns
-      if (next.value === "(" ||  // <Type>(expr)
-          next.value === "[" ||  // <Type>[...]
-          next.type === TokenType.NumericLiteral) {  // <Type>123
-        this.current = saved;
-        return true;
-      }
-      
-      // Special case: { could be object literal OR JSX expression
-      // Need more context to decide
-      if (next.value === "{") {
-        // Look for closing tag to determine if it's JSX
-        let checkPos = this.current;
-        let braceDepth = 0;
-        
-        while (checkPos < this.tokens.length && checkPos < this.current + 20) {
-          const tok = this.tokens[checkPos];
-          
-          if (tok.value === "{") braceDepth++;
-          else if (tok.value === "}") {
-            braceDepth--;
-            if (braceDepth === 0) {
-              // Found matching close brace, check what's after
-              if (checkPos + 1 < this.tokens.length) {
-                const after = this.tokens[checkPos + 1];
-                // If we see </ after }, it's JSX not type assertion
-                if (after.value === "<" && 
-                    checkPos + 2 < this.tokens.length &&
-                    this.tokens[checkPos + 2].value === "/") {
-                  this.current = saved;
-                  return false; // It's JSX
-                }
-              }
-              break;
-            }
-          }
-          
-          checkPos++;
-        }
-        
-        // If we couldn't determine, default to JSX (more common)
-        this.current = saved;
-        return false;
-      }
-      
-      // Default to JSX interpretation for ambiguous cases
-      this.current = saved;
-      return false;
-    } catch {
-      this.current = saved;
-      return false;
-    }
-  }
-
-  private isInJSXExpressionContext(): boolean {
-    // Based on spec 10.6.1 - JSX is valid in these expression contexts
-    if (this.current === 0) return true; // Start of program
-    
-    // Look at recent meaningful tokens to determine context
-    const meaningfulTokens: Token[] = [];
-    
-    // Collect last few meaningful tokens
-    for (let i = this.current - 1; i >= 0 && meaningfulTokens.length < 5; i--) {
-      const token = this.tokens[i];
-      
-      // Skip whitespace and comments
-      if (token.type === TokenType.Whitespace || 
-          token.type === TokenType.Comment ||
-          token.virtualSemi) {
-        continue;
-      }
-      
-      meaningfulTokens.unshift(token); // Add to beginning for correct order
-      
-      // Stop at statement boundaries to avoid looking too far back
-      if (token.value === ';' || token.value === '}' || token.newline) {
-        break;
-      }
-    }
-    
-    if (meaningfulTokens.length === 0) return true;
-    
-    // Check last token for immediate context
-    const lastToken = meaningfulTokens[meaningfulTokens.length - 1];
-    
-    // JSX expression contexts (spec 10.6.1)
-    switch (lastToken.value) {
-      // Assignment operators
-      case '=':
-      case ':=':
-      case '+=':
-      case '-=':
-      case '*=':
-      case '/=':
-        return true;
-        
-      // Control flow
-      case 'return':
-        return true;
-        
-      // Ternary operators  
-      case '?':
-      case ':':
-        return true;
-        
-      // Logical operators
-      case '&&':
-      case '||':
-      case '!':
-        return true;
-        
-      // Array/object literals
-      case '[':
-      case '{':
-      case ',':
-        return true;
-        
-      // Function calls and parentheses
-      case '(':
-        return true;
-        
-      // Arrow functions
-      case '=>':
-        return true;
-        
-      // After keywords that expect expressions
-      case 'yield':
-      case 'throw':
-      case 'await':
-        return true;
-        
-      // Type contexts (NOT JSX contexts)
-      case 'extends':
-      case 'implements':
-      case 'instanceof':
-        return false;
-    }
-    
-    // Check for patterns in recent token sequence
-    if (meaningfulTokens.length >= 2) {
-      const recent = meaningfulTokens.slice(-2);
-      
-      // Pattern: identifier ? (ternary condition)
-      if (recent[0].type === TokenType.Identifier && recent[1].value === '?') {
-        return true;
-      }
-      
-      // Pattern: ) ? (complex condition in ternary)
-      if (recent[0].value === ')' && recent[1].value === '?') {
-        return true;
-      }
-    }
-    
-    return true; // Default to allowing JSX in expression contexts
-  }
-
-  private isValidJSXContinuation(): boolean {
-    // Use lookahead to check for valid JSX continuation patterns
-    const saved = this.current;
-    
-    try {
-      // Skip < and identifier  
-      this.advance(); // consume <
-      this.advance(); // consume identifier
-      
-      // Handle generic type parameters for JSX components
-      if (this.peek().value === "<") {
-        this.advance(); // consume <
-        let depth = 1;
-        while (!this.isAtEnd() && depth > 0) {
-          const token = this.peek();
-          if (token.value === "<") {
-            depth++;
-          } else if (token.value === ">") {
-            depth--;
-          }
-          this.advance();
-        }
-        // After consuming generics, continue checking
-      }
-      
-      while (!this.isAtEnd()) {
-        const token = this.peek();
-        
-        // JSX continuation patterns
-        if (token.value === ">" || token.value === "/") {
-          return true; // <Tag> or <Tag/>
-        }
-        
-        if (token.type === TokenType.Identifier || token.type === TokenType.Keyword || token.value === "{") {
-          return true; // <Tag attr= or <Tag {...props}
-        }
-        
-        if (token.value === ".") {
-          // Qualified name <Form.Input
-          this.advance();
-          if (this.peek().type === TokenType.Identifier) {
-            this.advance();
-            continue;
-          }
-          return false;
-        }
-        
-        // Space is ok - keep looking (whitespace may be StringLiteral in JSX)
-        if (token.type === TokenType.Whitespace || 
-            (token.type === TokenType.StringLiteral && /^\s+$/.test(token.value))) {
-          this.advance();
-          continue;
-        }
-        
-        // Anything else is not JSX
-        return false;
-      }
-      
-      return false;
-    } finally {
-      this.current = saved;
-    }
-  }
-
-  private isHTMLTag(name: string): boolean {
-    // Common HTML tags
-    const htmlTags = new Set([
-      'a', 'abbr', 'address', 'area', 'article', 'aside', 'audio',
-      'b', 'base', 'bdi', 'bdo', 'blockquote', 'body', 'br', 'button',
-      'canvas', 'caption', 'cite', 'code', 'col', 'colgroup',
-      'data', 'datalist', 'dd', 'del', 'details', 'dfn', 'dialog', 'div', 'dl', 'dt',
-      'em', 'embed',
-      'fieldset', 'figcaption', 'figure', 'footer', 'form',
-      'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'head', 'header', 'hgroup', 'hr', 'html',
-      'i', 'iframe', 'img', 'input', 'ins',
-      'kbd', 'label', 'legend', 'li', 'link',
-      'main', 'map', 'mark', 'menu', 'meta', 'meter',
-      'nav', 'noscript',
-      'object', 'ol', 'optgroup', 'option', 'output',
-      'p', 'param', 'picture', 'pre', 'progress',
-      'q', 'rp', 'rt', 'ruby',
-      's', 'samp', 'script', 'section', 'select', 'slot', 'small', 'source', 'span', 
-      'strong', 'style', 'sub', 'summary', 'sup', 'svg',
-      'table', 'tbody', 'td', 'template', 'textarea', 'tfoot', 'th', 'thead', 'time', 
-      'title', 'tr', 'track',
-      'u', 'ul',
-      'var', 'video',
-      'wbr'
-    ]);
-    
-    return htmlTags.has(name.toLowerCase());
-  }
-
-  private parseJSXElement(): AST.JSXElement {
-    const start = this.current;
-    const openingElement = this.parseJSXOpeningElement();
-    
-    if (openingElement.selfClosing) {
-      return {
-        kind: "JSXElement",
-        openingElement,
-        closingElement: null,
-        children: [],
-        span: this.createSpan(start, this.current - 1)
-      };
-    }
-    
-    const children = this.parseJSXChildren();
-    const closingElement = this.parseJSXClosingElement();
-    
-    // Verify matching tags
-    const openName = this.getJSXElementNameString(openingElement.name);
-    const closeName = this.getJSXElementNameString(closingElement.name);
-    
-    if (openName !== closeName) {
-      throw this.error(this.previous()!, 
-        `JSX closing tag </${closeName}> doesn't match opening tag <${openName}>`);
-    }
-    
-    return {
-      kind: "JSXElement",
-      openingElement,
-      closingElement,
-      children,
-      span: this.createSpan(start, this.current - 1)
-    };
-  }
-
-  private parseJSXFragment(): AST.JSXFragment {
-    const start = this.current;
-    
-    // We're already at '<', so advance past it
-    this.advance(); // consume '<'
-    this.consume(">", "Expected '>'");
-    
-    const children = this.parseJSXChildren();
-    
-    // Consume </>
-    this.consume("<", "Expected '</'");
-    this.consume("/", "Expected '/'");
-    this.consume(">", "Expected '>'");
-    
-    return {
-      kind: "JSXFragment",
-      children,
-      span: this.createSpan(start, this.current - 1)
-    };
-  }
-
-  private parseJSXOpeningElement(): AST.JSXOpeningElement {
-    const start = this.current;
-    
-    // We're already at '<', so advance past it
-    this.advance(); // consume '<'
-    const name = this.parseJSXElementName();
-    
-    // Check for generic type arguments (per spec: JSXGenericElement)
-    // <ComponentName<TypeArg1, TypeArg2> ...>
-    // NOTE: Check for generics BEFORE skipping whitespace, as generics come immediately after the name
-    let typeArguments: AST.TypeNode[] | undefined;
-    
-    if (this.peek().value === "<") {
-      // Save position in case this isn't actually generics
-      const checkpoint = this.current;
-      try {
-        this.advance(); // consume '<'
-        typeArguments = [];
-        
-        // Parse type arguments
-        do {
-          typeArguments.push(this.parseType());
-        } while (this.match(","));
-        
-        // Handle >> and >>> tokens that might remain after generic parsing
-        if (this.peek().value === ">") {
-          this.advance();
-        } else if (this.peek().value === ">>") {
-          // Split >> into two > tokens
-          const originalToken = this.tokens[this.current];
-          this.tokens[this.current] = { ...originalToken, value: ">" };
-          this.advance();
-        } else if (this.peek().value === ">>>") {
-          // Split >>> into three > tokens  
-          const originalToken = this.tokens[this.current];
-          this.tokens[this.current] = { ...originalToken, value: ">" };
-          this.advance();
-        } else {
-          // Not valid generics, restore position
-          this.current = checkpoint;
-          typeArguments = undefined;
-        }
-      } catch {
-        // Failed to parse as generics, restore position
-        this.current = checkpoint;
-        typeArguments = undefined;
-      }
-    }
-    
-    const attributes = this.parseJSXAttributes();
-    
-    // Skip whitespace tokens before checking for self-closing
-    this.skipJSXWhitespace();
-    
-    const selfClosing = this.match("/");
-    this.consume(">", "Expected '>'");
-    
-    const result: any = {
-      kind: "JSXOpeningElement",
-      name,
-      attributes,
-      selfClosing,
-      span: this.createSpan(start, this.current - 1)
-    };
-    
-    // Add typeArguments if present
-    if (typeArguments) {
-      result.typeArguments = typeArguments;
-    }
-    
-    return result;
-  }
-
-  private parseJSXClosingElement(): AST.JSXClosingElement {
-    const start = this.current;
-    
-    // We're already at '<', so advance past it
-    this.advance(); // consume '<'
-    this.consume("/", "Expected '/'");
-    const name = this.parseJSXElementName();
-    this.consume(">", "Expected '>'");
-    
-    return {
-      kind: "JSXClosingElement",
-      name,
-      span: this.createSpan(start, this.current - 1)
-    };
-  }
-
-  private parseJSXElementName(): AST.JSXElementName {
-    const start = this.current;
-    
-    if (!this.peek() || this.peek().type !== TokenType.Identifier) {
-      throw this.error(this.peek(), "Expected JSX element name");
-    }
-    
-    let name: AST.JSXElementName = {
-      kind: "JSXIdentifier",
-      name: this.advance().value,
-      span: this.createSpan(start, this.current - 1)
-    };
-    
-    // Handle member expressions like <Form.Input>
-    while (this.match(".")) {
-      const propStart = this.current;
-      if (this.peek().type !== TokenType.Identifier) {
-        throw this.error(this.peek(), "Expected identifier after '.'");
-      }
-      
-      const property: AST.JSXIdentifier = {
-        kind: "JSXIdentifier",
-        name: this.advance().value,
-        span: this.createSpan(propStart, this.current - 1)
-      };
-      
-      name = {
-        kind: "JSXMemberExpression",
-        object: name,
-        property,
-        span: this.createSpan(start, this.current - 1)
-      };
-    }
-    
-    // NOTE: Generic type parameters are now handled in parseJSXOpeningElement
-    // so we don't consume them here
-    
-    return name;
-  }
-
-  private parseJSXAttributes(): AST.JSXAttribute[] {
-    const attributes: AST.JSXAttribute[] = [];
-    
-    while (!this.isAtEnd() && !this.check(">") && !this.check("/")) {
-      // Skip virtual semicolons
-      while (this.peek().virtualSemi) {
-        this.advance();
-      }
-      
-      // Skip whitespace tokens
-      this.skipJSXWhitespace();
-      
-      // Check again after skipping whitespace
-      if (this.check(">") || this.check("/")) {
-        break;
-      }
-      
-      if (this.check("{")) {
-        // Spread attribute
-        attributes.push(this.parseJSXSpreadAttribute());
-      } else if (this.peek().type === TokenType.Identifier || this.peek().type === TokenType.Keyword) {
-        // Normal attribute (can be identifier or keyword)
-        attributes.push(this.parseJSXAttribute());
-      } else {
-        break;
-      }
-    }
-    
-    return attributes;
-  }
-
-  private parseJSXAttribute(): AST.JSXNormalAttribute {
-    const start = this.current;
-    const name = this.parseJSXAttributeName();
-    
-    let value: AST.JSXAttributeValue | null = null;
-    
-    if (this.match("=")) {
-      if (this.check("{")) {
-        // Expression value
-        value = this.parseJSXExpressionContainer();
-      } else if (this.peek().type === TokenType.StringLiteral) {
-        // String value
-        value = this.parseStringLiteral();
-      } else if (this.check("<")) {
-        // JSX element as value
-        value = this.parseJSXElement();
-      }
-    }
-    
-    return {
-      kind: "JSXAttribute",
-      name,
-      value,
-      span: this.createSpan(start, this.current - 1)
-    };
-  }
-
-  private parseJSXAttributeName(): AST.JSXIdentifier | AST.JSXNamespacedName {
-    const start = this.current;
-    
-    // JSX attribute names can be identifiers or keywords
-    const token = this.peek();
-    if (token.type !== TokenType.Identifier && token.type !== TokenType.Keyword) {
-      throw this.error(this.peek(), "Expected attribute name");
-    }
-    
-    const namespace: AST.JSXIdentifier = {
-      kind: "JSXIdentifier",
-      name: this.advance().value,
-      span: this.createSpan(start, this.current - 1)
-    };
-    
-    // Check for namespaced attribute like xmlns:xlink
-    if (this.match(":")) {
-      const nameStart = this.current;
-      if (this.peek().type !== TokenType.Identifier && this.peek().type !== TokenType.Keyword) {
-        throw this.error(this.peek(), "Expected identifier after ':'");
-      }
-      
-      const name: AST.JSXIdentifier = {
-        kind: "JSXIdentifier",
-        name: this.advance().value,
-        span: this.createSpan(nameStart, this.current - 1)
-      };
-      
-      return {
-        kind: "JSXNamespacedName",
-        namespace,
-        name,
-        span: this.createSpan(start, this.current - 1)
-      };
-    }
-    
-    // Check for hyphenated attributes like data-testid
-    if (this.match("-")) {
-      // Concatenate hyphenated name
-      let fullName = namespace.name + "-";
-      while (this.peek().type === TokenType.Identifier) {
-        fullName += this.advance().value;
-        if (!this.match("-")) break;
-        fullName += "-";
-      }
-      
-      return {
-        kind: "JSXIdentifier",
-        name: fullName,
-        span: this.createSpan(start, this.current - 1)
-      };
-    }
-    
-    return namespace;
-  }
-
-  private parseJSXSpreadAttribute(): AST.JSXSpreadAttribute {
-    const start = this.current;
-    
-    this.consume("{", "Expected '{'");
-    this.consume("...", "Expected '...'");
-    const argument = this.parseExpression();
-    this.consume("}", "Expected '}'");
-    
-    return {
-      kind: "JSXSpreadAttribute",
-      argument,
-      span: this.createSpan(start, this.current - 1)
-    };
-  }
-
-  private parseJSXChildren(): AST.JSXChild[] {
-    const children: AST.JSXChild[] = [];
-    
-    while (!this.isAtEnd()) {
-      // Check for closing tag
-      if (this.check("<") && this.peekNext()?.value === "/") {
-        break;
-      }
-      
-      // Skip virtual semicolons
-      while (this.peek().virtualSemi) {
-        this.advance();
-      }
-      
-      if (this.check("{")) {
-        // Check if it's a spread child
-        if (this.peekNext()?.value === "...") {
-          // Spread child
-          const start = this.current;
-          this.advance(); // consume {
-          this.advance(); // consume ...
-          const expression = this.parseExpression();
-          this.consume("}", "Expected '}'");
-          
-          children.push({
-            kind: "JSXSpreadChild",
-            expression,
-            span: this.createSpan(start, this.current - 1)
-          });
-        } else {
-          // Regular expression container (including empty {})
-          children.push(this.parseJSXExpressionContainer());
-        }
-      } else if (this.check("<")) {
-        // Nested element or fragment
-        if (this.peekNext()?.value === ">") {
-          children.push(this.parseJSXFragment());
-        } else {
-          children.push(this.parseJSXElement());
-        }
-      } else {
-        // Text content
-        const text = this.parseJSXText();
-        if (text) {
-          children.push(text);
-        }
-      }
-    }
-    
-    return children;
-  }
-
-  private parseJSXText(): AST.JSXText | null {
-    const start = this.current;
-    let text = "";
-    let raw = "";
-    let lastTokenEnd = -1;
-    
-    while (!this.isAtEnd()) {
-      const token = this.peek();
-      
-      // Stop at JSX boundaries
-      if (token.value === "<" || token.value === "{") {
-        break;
-      }
-      
-      // Skip virtual semicolons but preserve the whitespace
-      if (token.virtualSemi) {
-        this.advance();
-        continue;
-      }
-      
-      // Check if we need to add space between tokens
-      if (lastTokenEnd >= 0 && token.start > lastTokenEnd) {
-        // There was whitespace between tokens
-        text += " ";
-        raw += " ";
-      }
-      
-      // Accumulate text
-      if (token.type === TokenType.Identifier || 
-          token.type === TokenType.Keyword ||
-          token.type === TokenType.NumericLiteral ||
-          token.type === TokenType.StringLiteral) {
-        text += token.value;
-        raw += token.value;
-        lastTokenEnd = token.end;
-        this.advance();
-      } else if (token.value === ">" || token.value === "}") {
-        // These shouldn't appear in text
-        break;
-      } else {
-        // Other tokens become part of text
-        text += token.value;
-        raw += token.value;
-        lastTokenEnd = token.end;
-        this.advance();
-      }
-    }
-    
-    // Return null for empty text, but preserve meaningful whitespace
-    if (text === "") {
-      return null;
-    }
-    
-    return {
-      kind: "JSXText",
-      value: text,
-      raw,
-      span: this.createSpan(start, this.current - 1)
-    };
-  }
-
-  private parseJSXExpressionContainer(): AST.JSXExpressionContainer {
-    const start = this.current;
-    
-    this.consume("{", "Expected '{'");
-    
-    // Skip whitespace inside JSX expression
-    this.skipJSXWhitespace();
-    
-    if (this.check("}")) {
-      // Empty expression
-      this.advance();
-      return {
-        kind: "JSXExpressionContainer",
-        expression: {
-          kind: "JSXEmptyExpression",
-          span: this.createSpan(start + 1, this.current - 1)
-        },
-        span: this.createSpan(start, this.current - 1)
-      };
-    }
-    
-    const expression = this.parseExpression();
-    
-    // Skip whitespace before closing brace
-    this.skipJSXWhitespace();
-    this.consume("}", "Expected '}'");
-    
-    return {
-      kind: "JSXExpressionContainer",
-      expression,
-      span: this.createSpan(start, this.current - 1)
-    };
-  }
-
-  private parseJSXExpression(): AST.Expr {
-    // Parse expression while filtering out JSX whitespace tokens
-    // Create a temporary filtered token array that excludes JSX whitespace
-    const originalTokens = this.tokens;
-    const originalCurrent = this.current;
-    
-    // Filter tokens to remove JSX whitespace StringLiterals  
-    const filteredTokens: Token[] = [];
-    const indexMap: number[] = []; // Maps filtered index to original index
-    
-    for (let i = originalCurrent; i < originalTokens.length; i++) {
-      const token = originalTokens[i];
-      
-      // Stop at the closing brace
-      if (token.value === "}" && token.type === TokenType.Operator) {
-        filteredTokens.push(token);
-        indexMap.push(i);
-        break;
-      }
-      
-      // Skip JSX whitespace StringLiterals  
-      if (token.type === TokenType.StringLiteral && /^\s+$/.test(token.value)) {
-        continue;
-      }
-      
-      filteredTokens.push(token);
-      indexMap.push(i);
-    }
-    
-    // Temporarily replace tokens and reset position
-    this.tokens = [...originalTokens.slice(0, originalCurrent), ...filteredTokens];
-    this.current = originalCurrent;
-    
-    try {
-      const expr = this.parseExpression();
-      
-      // Calculate how far we moved in filtered tokens
-      const movedInFiltered = this.current - originalCurrent;
-      
-      // Restore original tokens and adjust position
-      this.tokens = originalTokens;
-      this.current = indexMap[movedInFiltered - 1] + 1;
-      
-      return expr;
-    } catch (error) {
-      // Restore original state on error
-      this.tokens = originalTokens;
-      this.current = originalCurrent;
-      throw error;
-    }
-  }
-
-  private getJSXElementNameString(name: AST.JSXElementName): string {
-    switch (name.kind) {
-      case "JSXIdentifier":
-        return name.name;
-      case "JSXMemberExpression":
-        return this.getJSXElementNameString(name.object) + "." + name.property.name;
-      case "JSXNamespacedName":
-        return name.namespace.name + ":" + name.name.name;
-    }
-  }
-
-  private skipJSXWhitespace(): void {
-    // Skip StringLiteral tokens that contain only whitespace
-    while (this.peek().type === TokenType.StringLiteral && /^\s*$/.test(this.peek().value)) {
-      this.advance();
-    }
-  }
+  // JSX methods extracted to src/parselets/jsx.ts (Chunk 2)
 }

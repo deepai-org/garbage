@@ -32,9 +32,9 @@ export interface ParserContext {
 }
 
 export class ParserCursor {
-  protected tokens: Token[] = [];
-  protected current = 0;
-  protected errors: ParseError[] = [];
+  public tokens: Token[] = [];
+  public current = 0;
+  public errors: ParseError[] = [];
 
   // Block delimiter stacks
   protected braceDepth = 0;
@@ -77,7 +77,7 @@ export class ParserCursor {
    * Returns the result on success, or null on failure.
    * Does NOT roll back errors by default — use attemptClean() for that.
    */
-  protected attempt<T>(fn: () => T): T | null {
+  public attempt<T>(fn: () => T): T | null {
     const checkpoint = this.current;
     try {
       const result = fn();
@@ -165,18 +165,18 @@ export class ParserCursor {
 
   // ============ Token Navigation ============
 
-  protected peek(): Token {
+  public peek(): Token {
     if (this.isAtEnd()) {
       return this.tokens[this.tokens.length - 1];
     }
     return this.tokens[this.current];
   }
 
-  protected peekNext(): Token | undefined {
+  public peekNext(): Token | undefined {
     return this.tokens[this.current + 1];
   }
 
-  protected peekAt(offset: number): Token | undefined {
+  public peekAt(offset: number): Token | undefined {
     return this.tokens[this.current + offset];
   }
 
@@ -189,7 +189,7 @@ export class ParserCursor {
     return pos < this.tokens.length ? this.tokens[pos] : undefined;
   }
 
-  protected previous(): Token | undefined {
+  public previous(): Token | undefined {
     return this.tokens[this.current - 1];
   }
 
@@ -206,23 +206,23 @@ export class ParserCursor {
     return false;
   }
 
-  protected advance(): Token {
+  public advance(): Token {
     if (!this.isAtEnd()) this.current++;
     return this.previous()!;
   }
 
-  protected isAtEnd(): boolean {
+  public isAtEnd(): boolean {
     if (this.current >= this.tokens.length) return true;
     const token = this.tokens[this.current];
     return token && token.type === TokenType.EOF;
   }
 
-  protected check(value: string): boolean {
+  public check(value: string): boolean {
     if (this.isAtEnd()) return false;
     return this.peek().value === value;
   }
 
-  protected match(...values: string[]): boolean {
+  public match(...values: string[]): boolean {
     for (const value of values) {
       if (this.check(value)) {
         this.advance();
@@ -232,7 +232,7 @@ export class ParserCursor {
     return false;
   }
 
-  protected consume(expected: TokenType | string, message: string): Token {
+  public consume(expected: TokenType | string, message: string): Token {
     const token = this.peek();
 
     if (typeof expected === "string") {
@@ -267,7 +267,7 @@ export class ParserCursor {
     }
   }
 
-  protected consumeSemicolon(): void {
+  public consumeSemicolon(): void {
     if (this.match(";") || this.peek().virtualSemi) {
       if (this.peek().virtualSemi) {
         return;
@@ -291,7 +291,7 @@ export class ParserCursor {
    * Synchronize after an error by advancing to the next statement boundary.
    * Override in Parser to add isDeclStart() check.
    */
-  protected synchronize(): void {
+  public synchronize(): void {
     this.advance();
 
     while (!this.isAtEnd()) {
@@ -312,7 +312,7 @@ export class ParserCursor {
     }
   }
 
-  protected error(token: Token, message: string): ParseError {
+  public error(token: Token, message: string): ParseError {
     return new ParseError(message, token);
   }
 
@@ -353,7 +353,7 @@ export class ParserCursor {
     };
   }
 
-  protected must(expected: string, options?: { recoverWithSynthetic?: boolean }): boolean {
+  public must(expected: string, options?: { recoverWithSynthetic?: boolean }): boolean {
     while (this.peek().virtualSemi) {
       this.advance();
     }
@@ -377,7 +377,7 @@ export class ParserCursor {
 
   // ============ Span Creation ============
 
-  protected createSpan(start: number, end: number): AST.Span {
+  public createSpan(start: number, end: number): AST.Span {
     const startToken = this.tokens[start] || this.tokens[0];
     const endToken = this.tokens[end] || this.tokens[this.tokens.length - 1];
 
@@ -389,7 +389,7 @@ export class ParserCursor {
     };
   }
 
-  protected createSpanFrom(node: { span: AST.Span } | Token): AST.Span {
+  public createSpanFrom(node: { span: AST.Span } | Token): AST.Span {
     if ('span' in node) {
       return {
         ...node.span,
