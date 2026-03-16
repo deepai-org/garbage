@@ -510,10 +510,6 @@ export class Parser extends ParserCursor {
       return ControlFlow.parseGo(this);
     }
     
-    if (this.match("defer")) {
-      return ControlFlow.parseDefer(this);
-    }
-    
     if (this.match("pass")) {
       return ControlFlow.parsePass(this);
     }
