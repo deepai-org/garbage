@@ -506,8 +506,8 @@ export class Parser {
       this.advance();
       return this.parseSwitch() as AST.Stmt;
     }
-    // match keyword — but not when followed by = (assignment target, e.g. match = str =~ rx)
-    if (this.check("match") && !this.isAssignmentOp(this.peekAt(1)!)) {
+    // match keyword — but not when followed by = or { (assignment or variable reference)
+    if (this.check("match") && !this.isAssignmentOp(this.peekAt(1)!) && this.peekAt(1)?.value !== "{") {
       this.advance();
       return this.parseSwitch() as AST.Stmt;
     }
@@ -1909,12 +1909,13 @@ export class Parser {
     }
     
     // match expression — but not when followed by assignment (e.g. match = str =~ rx)
-    if (this.check("match") && !this.isAssignmentOp(this.peekAt(1)!)) {
+    // or { (e.g. if match { ... } where match is a variable name used as condition)
+    if (this.check("match") && !this.isAssignmentOp(this.peekAt(1)!) && this.peekAt(1)?.value !== "{") {
       this.advance();
       const switchExpr = this.parseSwitch();
       return switchExpr as any;
     }
-    // match as identifier (assignment target)
+    // match as identifier (assignment target or variable reference)
     if (this.check("match")) {
       const token = this.advance();
       const id: AST.Identifier = {
@@ -8658,7 +8659,23 @@ export class Parser {
         while (this.peek().virtualSemi) {
           this.advance();
         }
-        
+
+        // Python implicit string concatenation: adjacent string literals without comma
+        while (this.peek().type === TokenType.StringLiteral && !this.check(")")) {
+          const right = this.parseAssignmentExpression();
+          const left = args[args.length - 1];
+          args[args.length - 1] = {
+            kind: "Binary",
+            op: "+",
+            left,
+            right,
+            span: this.createSpan((left.span as any).start ?? this.current - 2, this.current - 1)
+          } as any;
+          while (this.peek().virtualSemi) {
+            this.advance();
+          }
+        }
+
         if (!this.match(",")) {
           break;
         }
