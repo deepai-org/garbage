@@ -113,7 +113,9 @@ export function parseConstDecl(host: DeclHost): AST.ConstDecl {
     type = host.parseType();
   }
 
-  host.consume("=", "Const declaration requires initialization");
+  if (!host.match("=") && !host.match(":=")) {
+    host.consume("=", "Const declaration requires initialization");
+  }
   const values = host.parseExpressionList();
 
   host.consumeSemicolon();

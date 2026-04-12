@@ -476,45 +476,37 @@ class AppComponent {
     expect(ast.body.length).toBeGreaterThanOrEqual(1);
   });
 
-  test('parses polyglot DSL with mixed syntax', () => {
+  test('parses polyglot pipe chains with async and closures', () => {
     const code = `
-# DSL mixing multiple language features
-pipeline "data-processor" {
-  stage('extract') {
-    from source: 's3://bucket/data/*.json'
-    where created_at > '2024-01-01'
-    limit 1000
-  }
-  
-  stage('transform') |> async (data) => {
-    data
-      |> filter(x => x.valid)
-      |> map(x => {
-        ...x,
-        processed: true,
-        timestamp: Date.now()
-      })
-      |> reduce((acc, x) => [...acc, x], [])
-  }
-  
-  stage('load') {
-    to sink: 'postgres://db/table'
-    on_conflict: 'update'
-    batch_size: 100
-  }
-  
-  on_error {
-    retry times: 3, delay: '5s'
-    then {
-      notify slack: '#alerts'
-      log level: 'error'
+# Real syntax: Elixir pipes, JS async/arrows, Go short decls, Python defs
+def extract(source) {
+  return fetch(source)
+    |> filter(x => x.valid)
+    |> map(x => x.value)
+    |> reduce((acc, x) => acc + x, 0)
+}
+
+async fn transform(data) {
+  results := data
+    |> filter(item => item.active)
+    |> map(item => item.name)
+  return results
+}
+
+function load(items, config) {
+  for item in items {
+    try {
+      db.insert(item)
+    } catch (e) {
+      console.error("Failed:", e)
+      retry(item, config.max_retries)
     }
   }
 }
 `;
 
     const ast = parseCode(code);
-    expect(ast.body.length).toBeGreaterThanOrEqual(1);
+    expect(ast.body.length).toBeGreaterThanOrEqual(3);
   });
 
   test('parses mixed macro and metaprogramming', () => {

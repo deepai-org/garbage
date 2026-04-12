@@ -435,10 +435,16 @@ export function parseParameter(host: FunctionHost): AST.Param {
       token.type === TokenType.Keyword ||
       token.type === TokenType.SigilIdentifier) {
     host.advance();
+    const isSigil = token.type === TokenType.SigilIdentifier;
+    let nameStr = token.value;
+    // Rust macro repetition modifier: $(...)*  $(...)+
+    if (isSigil && (host.check("*") || host.check("+"))) {
+      nameStr += host.advance().value;
+    }
     name = {
       kind: "Identifier",
-      name: token.value,
-      originalSpelling: token.value,
+      name: nameStr,
+      originalSpelling: nameStr,
       span: host.createSpanFrom(token)
     };
   } else {
@@ -453,7 +459,7 @@ export function parseParameter(host: FunctionHost): AST.Param {
   let type: AST.TypeNode | undefined;
   if (host.match(":")) {
     type = host.parseType();
-  } else if (name.kind === "Identifier" &&
+  } else if (name.kind === "Identifier" && !name.originalSpelling?.startsWith("$") &&
              !host.check(",") && !host.check(")") && !host.check("=") && !host.check("?") && !host.check("|") &&
              (host.peek().type === TokenType.Identifier ||
               host.check("interface") || host.check("struct") || host.check("chan") ||

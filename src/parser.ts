@@ -413,8 +413,22 @@ export class Parser extends ParserCursor {
       return Blocks.parseSwitch(this) as AST.Stmt;
     }
     if (keyword === "when" && (this.peekAt(1)?.value === "(" || this.peekAt(1)?.value === "{")) {
-      this.advance();
-      return Blocks.parseSwitch(this) as AST.Stmt;
+      // Don't trigger match if when(...) is followed by `do` (Elixir-style macro def)
+      let triggerMatch = true;
+      if (this.peekAt(1)?.value === "(") {
+        let scanPos = this.current + 2, depth = 1;
+        while (scanPos < this.tokens.length && depth > 0) {
+          if (this.tokens[scanPos].value === "(") depth++;
+          if (this.tokens[scanPos].value === ")") depth--;
+          scanPos++;
+        }
+        while (scanPos < this.tokens.length && this.tokens[scanPos].virtualSemi) scanPos++;
+        if (this.tokens[scanPos]?.value === "do") triggerMatch = false;
+      }
+      if (triggerMatch) {
+        this.advance();
+        return Blocks.parseSwitch(this) as AST.Stmt;
+      }
     }
 
     // Bash case...in...esac
@@ -935,7 +949,8 @@ export class Parser extends ParserCursor {
     const op = token.value;
     return op === "!" || op === "~" || op === "+" || op === "-" ||
            op === "typeof" || op === "void" || op === "delete" ||
-           op === "await" || op === "++" || op === "--" || op === "&" || op === "*" || op === "**";
+           op === "await" || op === "++" || op === "--" || op === "&" || op === "*" || op === "**" ||
+           op === "->";
   }
 
   // Override synchronize to include isDeclStart() check

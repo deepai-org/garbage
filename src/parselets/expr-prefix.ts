@@ -348,11 +348,25 @@ export function parsePrimary(host: PrefixHost, ): AST.Expr {
   }
 
   // Kotlin-style `when` as match expression
+  // But not if when(...) is followed by `do` (Elixir-style macro def)
   if (host.peek().value === "when" &&
       (host.peekAt(1)?.value === "(" || host.peekAt(1)?.value === "{")) {
-    host.advance(); // consume 'when'
-    const switchExpr = Blocks.parseSwitch(host as any);
-    return switchExpr as any;
+    let triggerMatch = true;
+    if (host.peekAt(1)?.value === "(") {
+      let scanPos = host.current + 2, depth = 1;
+      while (scanPos < host.tokens.length && depth > 0) {
+        if (host.tokens[scanPos].value === "(") depth++;
+        if (host.tokens[scanPos].value === ")") depth--;
+        scanPos++;
+      }
+      while (scanPos < host.tokens.length && host.tokens[scanPos].virtualSemi) scanPos++;
+      if (host.tokens[scanPos]?.value === "do") triggerMatch = false;
+    }
+    if (triggerMatch) {
+      host.advance(); // consume 'when'
+      const switchExpr = Blocks.parseSwitch(host as any);
+      return switchExpr as any;
+    }
   }
 
   // Go composite literals: map[K]V{...}, []Type{...}
@@ -383,6 +397,20 @@ export function parsePrimary(host: PrefixHost, ): AST.Expr {
     host.current = checkpoint;
   }
 
+  // C++20 requires expression: requires(T a, T b) { constraints }
+  if (host.peek().value === "requires" && host.peekAt(1)?.value === "(") {
+    const reqStart = host.current;
+    host.advance(); // consume 'requires'
+    const params = Functions.parseParameterList(host as any);
+    const body = Blocks.parseBlock(host as any);
+    return {
+      kind: "Lambda",
+      params,
+      body,
+      span: host.createSpan(reqStart, host.current - 1)
+    } as AST.Lambda;
+  }
+
   // Identifiers and sigil identifiers
   // Also allow keywords as identifiers in expression context when they can't start a statement
   if (host.peek().type === TokenType.Identifier ||
@@ -397,6 +425,23 @@ export function parsePrimary(host: PrefixHost, ): AST.Expr {
       id = {
         kind: "Identifier",
         name: token.value,
+        span: host.createSpanFrom(token)
+      };
+    } else if (token.type === TokenType.SigilIdentifier) {
+      // Sigil identifiers ($var, $(...))
+      host.advance();
+      let name = token.value.slice(1); // Strip $ prefix
+      let originalSpelling = token.value;
+      // Rust macro repetition modifier: $(...)*  $(...)+
+      if (host.check("*") || host.check("+")) {
+        const mod = host.advance().value;
+        name += mod;
+        originalSpelling += mod;
+      }
+      id = {
+        kind: "Identifier",
+        name,
+        originalSpelling,
         span: host.createSpanFrom(token)
       };
     } else {
