@@ -1,0 +1,341 @@
+/**
+ * Cross-Runtime Coercion Rules
+ *
+ * Defines what happens when a value of type A crosses from runtime X to runtime Y.
+ * Three outcomes:
+ *   - Safe: no conversion needed (or lossless widening)
+ *   - Coerce: conversion needed but always succeeds (e.g., i32 → f64)
+ *   - Check: conversion that may fail at runtime (e.g., f64 → i32, narrowing)
+ *
+ * Philosophy: structural at boundaries (duck typing for cross-runtime), nominal within.
+ */
+
+import * as C from './canonical';
+
+export type Compatibility = "safe" | "coerce" | "check" | "incompatible";
+
+export interface CoercionResult {
+  compat: Compatibility;
+  reason?: string;
+  bridgeOp?: BridgeOp;
+}
+
+/**
+ * Bridge operations that OmniVM must perform at runtime boundaries.
+ */
+export type BridgeOp =
+  | { op: "identity" }                         // No conversion
+  | { op: "widen"; from: string; to: string }  // Lossless widening (i32 → i64)
+  | { op: "narrow"; from: string; to: string } // Lossy narrowing (f64 → i32, may truncate)
+  | { op: "wrap_option" }                      // T → Option<T>
+  | { op: "unwrap_option" }                    // Option<T> → T (may panic)
+  | { op: "wrap_result" }                      // T → Result<T, E> (exceptions → Result)
+  | { op: "unwrap_result" }                    // Result<T, E> → T (may throw)
+  | { op: "serialize"; format: "json" | "msgpack" | "arrow" }  // Complex type → bytes
+  | { op: "deserialize"; format: "json" | "msgpack" | "arrow"; target: C.CanonicalType }
+  | { op: "copy_array" }                       // Deep copy collection across boundary
+  | { op: "proxy_iterator" }                   // Lazy proxy instead of copy
+  | { op: "await_resolve" }                    // Async<T> → T at boundary
+  | { op: "to_string" }                        // Anything → string
+  | { op: "parse_int" }                        // string → int
+  | { op: "parse_float" }                      // string → float
+  | { op: "struct_to_dict" }                   // Named struct → dict/object
+  | { op: "dict_to_struct"; target: string }   // dict/object → named struct
+  | { op: "channel_bridge"; direction: "send" | "recv" | "both" };
+
+/**
+ * Check if a value of type `from` can flow into a slot of type `to`.
+ * This is directional: from → to.
+ */
+export function checkCompatibility(from: C.CanonicalType, to: C.CanonicalType): CoercionResult {
+  // Any accepts anything
+  if (to.kind === "any") return safe();
+  // Any can be used as anything (unsafe but tolerant)
+  if (from.kind === "any") return coerce("any narrows to target type");
+
+  // Never flows into anything (bottom type)
+  if (from.kind === "never") return safe();
+  // Nothing flows into never
+  if (to.kind === "never") return incompatible("cannot assign to never");
+
+  // Same kind — delegate to specific checker
+  if (from.kind === to.kind) {
+    return checkSameKind(from, to);
+  }
+
+  // Cross-kind compatibility rules
+  return checkCrossKind(from, to);
+}
+
+function checkSameKind(from: C.CanonicalType, to: C.CanonicalType): CoercionResult {
+  switch (from.kind) {
+    case "int": {
+      const f = from as C.IntType;
+      const t = to as C.IntType;
+      if (f.size === t.size && f.signed === t.signed) return safe();
+      if (f.size === "big" || t.size === "big") {
+        return t.size === "big" ? safe() : check("big int may not fit in fixed-size int");
+      }
+      const fBits = typeof f.size === "number" ? f.size : 64;
+      const tBits = typeof t.size === "number" ? t.size : 64;
+      if (fBits <= tBits && f.signed === t.signed) return coerce("integer widening");
+      if (fBits <= tBits && !f.signed && t.signed) return coerce("unsigned to wider signed");
+      return check("integer narrowing may truncate");
+    }
+
+    case "float": {
+      const f = from as C.FloatType;
+      const t = to as C.FloatType;
+      if (f.size === t.size) return safe();
+      if (f.size < t.size) return coerce("float widening");
+      return check("float narrowing loses precision");
+    }
+
+    case "bool": case "string": case "bytes": case "void": case "null":
+      return safe();
+
+    case "array": {
+      const f = from as C.ArrayType;
+      const t = to as C.ArrayType;
+      const elem = checkCompatibility(f.element, t.element);
+      if (elem.compat === "incompatible") return incompatible("array element " + elem.reason);
+      if (f.fixedSize && t.fixedSize && f.fixedSize !== t.fixedSize) {
+        return incompatible("fixed-size array length mismatch");
+      }
+      return elem;
+    }
+
+    case "map": {
+      const f = from as C.MapType;
+      const t = to as C.MapType;
+      const key = checkCompatibility(f.key, t.key);
+      const val = checkCompatibility(f.value, t.value);
+      if (key.compat === "incompatible") return incompatible("map key " + key.reason);
+      if (val.compat === "incompatible") return incompatible("map value " + val.reason);
+      return worst(key, val);
+    }
+
+    case "option": {
+      const f = from as C.OptionType;
+      const t = to as C.OptionType;
+      return checkCompatibility(f.inner, t.inner);
+    }
+
+    case "result": {
+      const f = from as C.ResultType;
+      const t = to as C.ResultType;
+      const ok = checkCompatibility(f.ok, t.ok);
+      const err = checkCompatibility(f.err, t.err);
+      return worst(ok, err);
+    }
+
+    case "async": {
+      const f = from as C.AsyncType;
+      const t = to as C.AsyncType;
+      return checkCompatibility(f.inner, t.inner);
+    }
+
+    case "func": {
+      const f = from as C.FuncType;
+      const t = to as C.FuncType;
+      // Contravariant params, covariant return
+      const ret = checkCompatibility(f.returns, t.returns);
+      if (ret.compat === "incompatible") return incompatible("return type " + ret.reason);
+      // Check param count
+      const requiredFrom = f.params.filter(p => !p.optional).length;
+      const requiredTo = t.params.filter(p => !p.optional).length;
+      if (requiredFrom > t.params.length) return incompatible("too many required params");
+      // Check each param (contravariant: to-param must flow into from-param)
+      let result: CoercionResult = ret;
+      for (let i = 0; i < Math.min(f.params.length, t.params.length); i++) {
+        const paramCompat = checkCompatibility(t.params[i].type, f.params[i].type);
+        result = worst(result, paramCompat);
+      }
+      return result;
+    }
+
+    case "struct": {
+      const f = from as C.StructType;
+      const t = to as C.StructType;
+      // Nominal: must be exact same type
+      if (t.nominal && f.nominal) {
+        if (f.name !== t.name || f.origin !== t.origin) {
+          return incompatible(`nominal type mismatch: ${f.name} vs ${t.name}`);
+        }
+        return safe();
+      }
+      // Structural: from must have all fields that to requires
+      return checkStructural(f, t);
+    }
+
+    case "interface": {
+      const f = from as C.InterfaceType;
+      const t = to as C.InterfaceType;
+      // Check that f has all methods of t
+      for (const method of t.methods) {
+        const fMethod = f.methods.find(m => m.name === method.name);
+        if (!fMethod) return incompatible(`missing method: ${method.name}`);
+        const compat = checkCompatibility(fMethod.type, method.type);
+        if (compat.compat === "incompatible") return compat;
+      }
+      return safe();
+    }
+
+    case "channel": {
+      const f = from as C.ChannelType;
+      const t = to as C.ChannelType;
+      const elem = checkCompatibility(f.element, t.element);
+      if (elem.compat === "incompatible") return elem;
+      // Direction compatibility
+      if (t.direction === "both") return elem;
+      if (f.direction === "both") return elem; // Narrowing direction is ok
+      if (f.direction !== t.direction) return incompatible("channel direction mismatch");
+      return elem;
+    }
+
+    default:
+      return coerce("same kind, assuming compatible");
+  }
+}
+
+function checkCrossKind(from: C.CanonicalType, to: C.CanonicalType): CoercionResult {
+  // int → float: always safe (i32 → f64 is lossless)
+  if (from.kind === "int" && to.kind === "float") {
+    const intSize = typeof (from as C.IntType).size === "number" ? (from as C.IntType).size as number : 64;
+    if (intSize <= 32 && (to as C.FloatType).size === 64) return coerce("int to float64 is lossless");
+    return check("large int to float may lose precision");
+  }
+
+  // float → int: check (truncation)
+  if (from.kind === "float" && to.kind === "int") {
+    return check("float to int truncates");
+  }
+
+  // T → Option<T>: always safe (wrapping)
+  if (to.kind === "option") {
+    const inner = checkCompatibility(from, (to as C.OptionType).inner);
+    if (inner.compat !== "incompatible") {
+      return { compat: inner.compat, bridgeOp: { op: "wrap_option" } };
+    }
+  }
+
+  // Option<T> → T: check (may be null)
+  if (from.kind === "option" && to.kind !== "option") {
+    const inner = checkCompatibility((from as C.OptionType).inner, to);
+    if (inner.compat !== "incompatible") {
+      return { compat: "check", reason: "optional may be null", bridgeOp: { op: "unwrap_option" } };
+    }
+  }
+
+  // Result<T, E> → T: check (may be error)
+  if (from.kind === "result") {
+    const inner = checkCompatibility((from as C.ResultType).ok, to);
+    if (inner.compat !== "incompatible") {
+      return { compat: "check", reason: "result may be error", bridgeOp: { op: "unwrap_result" } };
+    }
+  }
+
+  // T → Result<T, E>: safe (wrapping in Ok)
+  if (to.kind === "result") {
+    const inner = checkCompatibility(from, (to as C.ResultType).ok);
+    if (inner.compat !== "incompatible") {
+      return { compat: inner.compat, bridgeOp: { op: "wrap_result" } };
+    }
+  }
+
+  // Async<T> → T: needs await
+  if (from.kind === "async") {
+    const inner = checkCompatibility((from as C.AsyncType).inner, to);
+    if (inner.compat !== "incompatible") {
+      return { compat: "coerce", reason: "must await", bridgeOp: { op: "await_resolve" } };
+    }
+  }
+
+  // T → Async<T>: safe (already resolved)
+  if (to.kind === "async") {
+    return checkCompatibility(from, (to as C.AsyncType).inner);
+  }
+
+  // struct → interface: structural check
+  if (from.kind === "struct" && to.kind === "interface") {
+    return checkStructSatisfiesInterface(from as C.StructType, to as C.InterfaceType);
+  }
+
+  // null → option: safe
+  if (from.kind === "null" && to.kind === "option") {
+    return safe();
+  }
+
+  // string → int/float: parse
+  if (from.kind === "string" && to.kind === "int") {
+    return { compat: "check", reason: "string to int requires parsing", bridgeOp: { op: "parse_int" } };
+  }
+  if (from.kind === "string" && to.kind === "float") {
+    return { compat: "check", reason: "string to float requires parsing", bridgeOp: { op: "parse_float" } };
+  }
+
+  // int/float/bool → string: to_string
+  if ((from.kind === "int" || from.kind === "float" || from.kind === "bool") && to.kind === "string") {
+    return { compat: "coerce", bridgeOp: { op: "to_string" } };
+  }
+
+  // array ↔ set: coerce
+  if (from.kind === "array" && to.kind === "set") {
+    return checkCompatibility((from as C.ArrayType).element, (to as C.SetType).element);
+  }
+  if (from.kind === "set" && to.kind === "array") {
+    return checkCompatibility((from as C.SetType).element, (to as C.ArrayType).element);
+  }
+
+  // union member → target: check if any member is compatible
+  if (from.kind === "union") {
+    const members = (from as C.UnionType).members;
+    const results = members.map(m => checkCompatibility(m, to));
+    if (results.every(r => r.compat !== "incompatible")) {
+      return { compat: "check", reason: "union member may not match target" };
+    }
+  }
+
+  // target is a union → check if from matches any member
+  if (to.kind === "union") {
+    const members = (to as C.UnionType).members;
+    for (const m of members) {
+      const r = checkCompatibility(from, m);
+      if (r.compat === "safe" || r.compat === "coerce") return r;
+    }
+    return incompatible("does not match any union member");
+  }
+
+  return incompatible(`cannot convert ${from.kind} to ${to.kind}`);
+}
+
+function checkStructural(from: C.StructType, to: C.StructType): CoercionResult {
+  let result: CoercionResult = safe();
+  for (const field of to.fields) {
+    if (field.optional) continue;
+    const fField = from.fields.find(f => f.name === field.name);
+    if (!fField) return incompatible(`missing field: ${field.name}`);
+    const compat = checkCompatibility(fField.type, field.type);
+    if (compat.compat === "incompatible") return incompatible(`field ${field.name}: ${compat.reason}`);
+    result = worst(result, compat);
+  }
+  return result;
+}
+
+function checkStructSatisfiesInterface(s: C.StructType, i: C.InterfaceType): CoercionResult {
+  // For cross-runtime, we just check field names exist (duck typing)
+  // A proper check would need method info on the struct
+  return coerce("struct-to-interface crossing uses structural duck typing");
+}
+
+// ---- Helpers ----
+
+function safe(): CoercionResult { return { compat: "safe" }; }
+function coerce(reason: string): CoercionResult { return { compat: "coerce", reason }; }
+function check(reason: string): CoercionResult { return { compat: "check", reason }; }
+function incompatible(reason: string): CoercionResult { return { compat: "incompatible", reason }; }
+
+function worst(a: CoercionResult, b: CoercionResult): CoercionResult {
+  const order: Compatibility[] = ["safe", "coerce", "check", "incompatible"];
+  return order.indexOf(a.compat) >= order.indexOf(b.compat) ? a : b;
+}
