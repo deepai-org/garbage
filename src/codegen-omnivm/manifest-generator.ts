@@ -370,17 +370,89 @@ export class ManifestCodeGenerator {
 
   /**
    * Try to infer the canonical type of an expression.
-   * Currently handles: calls to known functions (uses return type).
+   * Handles:
+   * - Calls to known functions (return type)
+   * - Member access on known structs (field type)
+   * - Array/object literals
+   * - Identifiers (bound type)
+   * - Generic calls with type arguments (instantiation)
    */
   private inferExprType(expr: AST.Expr): C.CanonicalType | undefined {
-    if (expr.kind === "Call" && expr.callee.kind === "Identifier") {
-      const binding = this.typeChecker.getBinding(expr.callee.name);
-      if (binding && binding.type.kind === "func") {
-        return (binding.type as C.FuncType).returns;
+    switch (expr.kind) {
+      case "Call": {
+        if (expr.callee.kind === "Identifier") {
+          const binding = this.typeChecker.getBinding(expr.callee.name);
+          if (binding && binding.type.kind === "func") {
+            return (binding.type as C.FuncType).returns;
+          }
+        }
+        // Method call: x.method() — infer from x's type if known
+        if (expr.callee.kind === "Member" && (expr.callee as AST.Member).object.kind === "Identifier") {
+          const member = expr.callee as AST.Member;
+          const objBinding = this.typeChecker.getBinding((member.object as AST.Identifier).name);
+          if (objBinding && objBinding.type.kind === "struct") {
+            const field = (objBinding.type as C.StructType).fields.find(
+              f => f.name === member.property.name
+            );
+            if (field && field.type.kind === "func") {
+              return (field.type as C.FuncType).returns;
+            }
+          }
+        }
+        return undefined;
       }
+      case "Member": {
+        const member = expr as AST.Member;
+        if (member.object.kind === "Identifier") {
+          const binding = this.typeChecker.getBinding((member.object as AST.Identifier).name);
+          if (binding && binding.type.kind === "struct") {
+            const field = (binding.type as C.StructType).fields.find(f => f.name === member.property.name);
+            if (field) return field.type;
+          }
+          // Map access: infer value type
+          if (binding && binding.type.kind === "map") {
+            return (binding.type as C.MapType).value;
+          }
+        }
+        return undefined;
+      }
+      case "Index": {
+        const idx = expr as AST.Index;
+        if (idx.object.kind === "Identifier") {
+          const binding = this.typeChecker.getBinding((idx.object as AST.Identifier).name);
+          if (binding) {
+            if (binding.type.kind === "array") return (binding.type as C.ArrayType).element;
+            if (binding.type.kind === "map") return (binding.type as C.MapType).value;
+          }
+        }
+        return undefined;
+      }
+      case "Identifier": {
+        const binding = this.typeChecker.getBinding((expr as AST.Identifier).name);
+        if (binding) return binding.type;
+        return undefined;
+      }
+      case "StringLiteral":
+        return C.STRING;
+      case "NumericLiteral":
+        return C.FLOAT64;
+      case "BooleanLiteral":
+        return C.BOOL;
+      case "ArrayLiteral": {
+        const arr = expr as AST.ArrayLiteral;
+        if (arr.elements.length > 0) {
+          const elemType = this.inferExprType(arr.elements[0]);
+          if (elemType) return C.array(elemType);
+        }
+        return C.array(C.ANY);
+      }
+      case "ObjectLiteral":
+        return { kind: "struct", fields: [], nominal: false };
+      default:
+        return undefined;
     }
-    return undefined;
   }
+
 
   /**
    * Convert a FuncDecl to a canonical FuncType for the type checker.

@@ -18,6 +18,18 @@ export interface CoercionResult {
   compat: Compatibility;
   reason?: string;
   bridgeOp?: BridgeOp;
+  /** Runtime guard hint: code snippets OmniVM can use for runtime type checks. */
+  guard?: RuntimeGuard;
+}
+
+/**
+ * Runtime guard hint — generated code snippets for "check" compatibility results.
+ * OmniVM can insert these at boundary points to validate values at runtime.
+ */
+export interface RuntimeGuard {
+  js?: string;
+  python?: string;
+  go?: string;
 }
 
 /**
@@ -50,6 +62,8 @@ export type BridgeOp =
   | { op: "proxy_with_finalizer"; disposer?: string }      // Cross-boundary proxy with GC release hook
   | { op: "attach_disposer"; disposer: string }            // Wrap in Disposable for resource management
   | { op: "proxy_callable" }                               // Cross-boundary function proxy (can't serialize closures)
+  | { op: "tag_dispatch"; variants: string[] }             // Enum/tagged union → discriminated union mapping
+  | { op: "struct_reshape"; fieldMap: Record<string, string> }  // Rename/reorder struct fields at boundary
   | { op: "compose"; steps: BridgeOp[] };                  // Composed chain of bridge ops for nested generics
 
 /**
@@ -168,14 +182,20 @@ function checkSameKind(from: C.CanonicalType, to: C.CanonicalType): CoercionResu
     case "struct": {
       const f = from as C.StructType;
       const t = to as C.StructType;
-      // Nominal: must be exact same type
-      if (t.nominal && f.nominal) {
-        if (f.name !== t.name || f.origin !== t.origin) {
-          return incompatible(`nominal type mismatch: ${f.name} vs ${t.name}`);
-        }
-        return safe();
+      // Same nominal type in same runtime: exact match
+      if (t.nominal && f.nominal && f.origin === t.origin) {
+        if (f.name === t.name) return safe();
+        // Different nominal types in same runtime: incompatible
+        return incompatible(`nominal type mismatch: ${f.name} vs ${t.name}`);
       }
-      // Structural: from must have all fields that to requires
+      // Cross-runtime or structural: use structural field matching
+      // This is the key insight: at boundaries, everything is structural
+      if (f.fields.length === 0 && t.fields.length === 0) {
+        // Both are opaque named types with no known fields — coerce by name similarity
+        if (f.name && t.name && f.name === t.name) return coerce("same-named struct across runtimes");
+        if (f.name && t.name) return incompatible(`nominal type mismatch across runtimes: ${f.name} vs ${t.name}`);
+        return coerce("opaque struct crossing");
+      }
       return checkStructural(f, t);
     }
 
@@ -190,6 +210,22 @@ function checkSameKind(from: C.CanonicalType, to: C.CanonicalType): CoercionResu
         if (compat.compat === "incompatible") return compat;
       }
       return safe();
+    }
+
+    case "enum":
+      return checkEnumToEnum(from as C.EnumType, to as C.EnumType);
+
+    case "tuple": {
+      const f = from as C.TupleType;
+      const t = to as C.TupleType;
+      if (f.elements.length !== t.elements.length) return incompatible("tuple length mismatch");
+      let result: CoercionResult = safe();
+      for (let i = 0; i < f.elements.length; i++) {
+        const elem = checkCompatibility(f.elements[i], t.elements[i]);
+        if (elem.compat === "incompatible") return incompatible(`tuple element ${i}: ${elem.reason}`);
+        result = worst(result, elem);
+      }
+      return result;
     }
 
     case "channel": {
@@ -251,7 +287,16 @@ function checkCrossKind(from: C.CanonicalType, to: C.CanonicalType): CoercionRes
 
   // float → int: check (truncation)
   if (from.kind === "float" && to.kind === "int") {
-    return check("float to int truncates");
+    return {
+      compat: "check",
+      reason: "float to int truncates",
+      bridgeOp: { op: "narrow", from: `f${(from as C.FloatType).size}`, to: `i${(to as C.IntType).size}` },
+      guard: {
+        js: `Number.isInteger(value) && value >= ${intMin(to as C.IntType)} && value <= ${intMax(to as C.IntType)}`,
+        python: `isinstance(value, (int, float)) and float(value).is_integer()`,
+        go: `_, ok := value.(int64)`,
+      },
+    };
   }
 
   // T → Option<T>: always safe (wrapping)
@@ -340,6 +385,23 @@ function checkCrossKind(from: C.CanonicalType, to: C.CanonicalType): CoercionRes
     return checkStructSatisfiesInterface(from as C.StructType, to as C.InterfaceType);
   }
 
+  // struct → struct (cross-kind won't fire, but included for completeness via same-kind)
+
+  // enum → union: tag dispatch (Rust enum → TS discriminated union)
+  if (from.kind === "enum" && to.kind === "union") {
+    return checkEnumToUnion(from as C.EnumType, to as C.UnionType);
+  }
+
+  // union → enum: reverse tag dispatch
+  if (from.kind === "union" && to.kind === "enum") {
+    return checkUnionToEnum(from as C.UnionType, to as C.EnumType);
+  }
+
+  // struct cross-runtime (different origins): structural check
+  if (from.kind === "struct" && to.kind === "struct") {
+    return checkStructural(from as C.StructType, to as C.StructType);
+  }
+
   // null → option: safe
   if (from.kind === "null" && to.kind === "option") {
     return safe();
@@ -347,10 +409,28 @@ function checkCrossKind(from: C.CanonicalType, to: C.CanonicalType): CoercionRes
 
   // string → int/float: parse
   if (from.kind === "string" && to.kind === "int") {
-    return { compat: "check", reason: "string to int requires parsing", bridgeOp: { op: "parse_int" } };
+    return {
+      compat: "check",
+      reason: "string to int requires parsing",
+      bridgeOp: { op: "parse_int" },
+      guard: {
+        js: `!isNaN(parseInt(value, 10))`,
+        python: `value.lstrip("-").isdigit()`,
+        go: `_, err := strconv.ParseInt(value, 10, 64); err == nil`,
+      },
+    };
   }
   if (from.kind === "string" && to.kind === "float") {
-    return { compat: "check", reason: "string to float requires parsing", bridgeOp: { op: "parse_float" } };
+    return {
+      compat: "check",
+      reason: "string to float requires parsing",
+      bridgeOp: { op: "parse_float" },
+      guard: {
+        js: `!isNaN(parseFloat(value))`,
+        python: `try: float(value); True\nexcept: False`,
+        go: `_, err := strconv.ParseFloat(value, 64); err == nil`,
+      },
+    };
   }
 
   // int/float/bool → string: to_string
@@ -448,13 +528,87 @@ function checkStructural(from: C.StructType, to: C.StructType): CoercionResult {
     if (compat.compat === "incompatible") return incompatible(`field ${field.name}: ${compat.reason}`);
     result = worst(result, compat);
   }
+  // If from has extra fields, it's still structurally compatible (Go-style duck typing)
+  // but we note it as coerce if cross-runtime
+  if (from.origin !== to.origin && result.compat === "safe" && from.fields.length > to.fields.length) {
+    result = coerce("source struct has extra fields (structural subtyping)");
+  }
   return result;
 }
 
 function checkStructSatisfiesInterface(s: C.StructType, i: C.InterfaceType): CoercionResult {
-  // For cross-runtime, we just check field names exist (duck typing)
-  // A proper check would need method info on the struct
+  // If the struct has fields that match the interface method names, duck-type it
+  if (s.fields.length > 0 && i.methods.length > 0) {
+    for (const method of i.methods) {
+      const hasField = s.fields.find(f => f.name === method.name);
+      if (!hasField) {
+        return { compat: "check", reason: `struct may not satisfy interface: missing '${method.name}'` };
+      }
+    }
+    return coerce("struct satisfies interface structurally");
+  }
   return coerce("struct-to-interface crossing uses structural duck typing");
+}
+
+/**
+ * Enum → Union: map enum variants to union members by tag.
+ * Rust `enum Shape { Circle(f64), Rect(f64, f64) }` →
+ * TS `{ tag: "Circle", value: number } | { tag: "Rect", value: [number, number] }`
+ */
+function checkEnumToUnion(e: C.EnumType, u: C.UnionType): CoercionResult {
+  const variants = e.variants.map(v => v.name);
+  // Each variant should map to some union member — we can't deeply verify without
+  // knowing the union member structure, so we emit a tag_dispatch bridge op
+  return {
+    compat: "coerce",
+    reason: `enum '${e.name}' to union via tag dispatch`,
+    bridgeOp: { op: "tag_dispatch", variants },
+  };
+}
+
+/**
+ * Union → Enum: reverse tag dispatch.
+ */
+function checkUnionToEnum(u: C.UnionType, e: C.EnumType): CoercionResult {
+  const variants = e.variants.map(v => v.name);
+  return {
+    compat: "check",
+    reason: `union to enum '${e.name}' — runtime must validate variant tags`,
+    bridgeOp: { op: "tag_dispatch", variants },
+    guard: {
+      js: `["${variants.join('","')}"].includes(value.tag)`,
+      python: `value["tag"] in {${variants.map(v => `"${v}"`).join(", ")}}`,
+    },
+  };
+}
+
+/**
+ * Enum → Enum: variant name matching across runtimes.
+ */
+function checkEnumToEnum(from: C.EnumType, to: C.EnumType): CoercionResult {
+  const fromNames = new Set(from.variants.map(v => v.name));
+  const toNames = to.variants.map(v => v.name);
+  const missing = toNames.filter(n => !fromNames.has(n));
+  if (missing.length > 0) {
+    return incompatible(`enum '${from.name}' missing variants: ${missing.join(", ")}`);
+  }
+  // All target variants exist in source
+  if (from.variants.length === to.variants.length) {
+    // Check payloads
+    let result: CoercionResult = safe();
+    for (const tv of to.variants) {
+      const fv = from.variants.find(v => v.name === tv.name)!;
+      if (fv.payload && tv.payload) {
+        const compat = checkCompatibility(fv.payload, tv.payload);
+        result = worst(result, compat);
+      } else if (fv.payload !== tv.payload) {
+        return incompatible(`variant '${tv.name}' payload mismatch`);
+      }
+    }
+    return result;
+  }
+  // Source has extra variants — coerce (target is a subset)
+  return coerce(`enum '${from.name}' has extra variants not in '${to.name}'`);
 }
 
 // ---- Helpers ----
@@ -463,6 +617,15 @@ function safe(): CoercionResult { return { compat: "safe" }; }
 function coerce(reason: string): CoercionResult { return { compat: "coerce", reason }; }
 function check(reason: string): CoercionResult { return { compat: "check", reason }; }
 function incompatible(reason: string): CoercionResult { return { compat: "incompatible", reason }; }
+
+function intMin(t: C.IntType): string {
+  if (t.size === "big") return "-Infinity";
+  return t.signed ? String(-(2 ** (t.size as number - 1))) : "0";
+}
+function intMax(t: C.IntType): string {
+  if (t.size === "big") return "Infinity";
+  return t.signed ? String(2 ** (t.size as number - 1) - 1) : String(2 ** (t.size as number) - 1);
+}
 
 function worst(a: CoercionResult, b: CoercionResult): CoercionResult {
   const order: Compatibility[] = ["safe", "coerce", "check", "incompatible"];

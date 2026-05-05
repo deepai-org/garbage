@@ -22,5 +22,5 @@
 
 export * from './canonical';
 export { lowerType } from './lowering';
-export { checkCompatibility, type CoercionResult, type BridgeOp, type Compatibility } from './coercion';
+export { checkCompatibility, type CoercionResult, type BridgeOp, type Compatibility, type RuntimeGuard } from './coercion';
 export { BoundaryChecker, typeToString, type TypedBinding, type BoundaryCrossing, type TypeDiagnostic } from './boundary-checker';

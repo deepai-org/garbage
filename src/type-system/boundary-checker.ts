@@ -10,7 +10,7 @@
  */
 
 import * as C from './canonical';
-import { checkCompatibility, CoercionResult, BridgeOp } from './coercion';
+import { checkCompatibility, CoercionResult, BridgeOp, RuntimeGuard } from './coercion';
 import { lowerType } from './lowering';
 import * as AST from '../ast';
 

@@ -692,3 +692,221 @@ async function loadData(): Promise<string> {
     expect(bridge!.op).toBe('unwrap_result');
   });
 });
+
+// ════════════════════════════════════════════════════════════════
+// Level 9: Structural Struct Compatibility
+// ════════════════════════════════════════════════════════════════
+
+describe('Level 9: Structural Struct Compatibility', () => {
+  test('same-named structs across runtimes are coerce (not incompatible)', () => {
+    const goUser: CanonicalType = {
+      kind: 'struct', name: 'User', fields: [
+        { name: 'name', type: STRING },
+        { name: 'age', type: INT32 },
+      ], nominal: true, origin: 'go',
+    };
+    const tsUser: CanonicalType = {
+      kind: 'struct', name: 'User', fields: [
+        { name: 'name', type: STRING },
+        { name: 'age', type: FLOAT64 },
+      ], nominal: true, origin: 'typescript',
+    };
+    const r = checkCompatibility(goUser, tsUser);
+    // age: i32 → f64 is coerce, and cross-runtime so structural
+    expect(r.compat).not.toBe('incompatible');
+  });
+
+  test('differently-named opaque structs across runtimes are incompatible', () => {
+    const goVec: CanonicalType = { kind: 'struct', name: 'Vector', fields: [], nominal: true, origin: 'go' };
+    const rsPoint: CanonicalType = { kind: 'struct', name: 'Point', fields: [], nominal: true, origin: 'rust' };
+    const r = checkCompatibility(goVec, rsPoint);
+    expect(r.compat).toBe('incompatible');
+  });
+
+  test('struct with extra fields is structurally compatible (subtyping)', () => {
+    const full: CanonicalType = {
+      kind: 'struct', name: 'FullUser', fields: [
+        { name: 'name', type: STRING },
+        { name: 'age', type: INT32 },
+        { name: 'email', type: STRING },
+      ], nominal: true, origin: 'go',
+    };
+    const partial: CanonicalType = {
+      kind: 'struct', name: 'BasicUser', fields: [
+        { name: 'name', type: STRING },
+        { name: 'age', type: INT32 },
+      ], nominal: true, origin: 'typescript',
+    };
+    const r = checkCompatibility(full, partial);
+    expect(r.compat).toBe('coerce');
+    expect(r.reason).toContain('extra fields');
+  });
+
+  test('struct missing required field is incompatible', () => {
+    const from: CanonicalType = {
+      kind: 'struct', fields: [
+        { name: 'x', type: FLOAT64 },
+      ], nominal: false,
+    };
+    const to: CanonicalType = {
+      kind: 'struct', fields: [
+        { name: 'x', type: FLOAT64 },
+        { name: 'y', type: FLOAT64 },
+      ], nominal: false,
+    };
+    const r = checkCompatibility(from, to);
+    expect(r.compat).toBe('incompatible');
+    expect(r.reason).toContain('missing field');
+  });
+
+  test('same nominal type in same runtime is safe', () => {
+    const a: CanonicalType = { kind: 'struct', name: 'Foo', fields: [], nominal: true, origin: 'rust' };
+    const b: CanonicalType = { kind: 'struct', name: 'Foo', fields: [], nominal: true, origin: 'rust' };
+    expect(checkCompatibility(a, b).compat).toBe('safe');
+  });
+});
+
+// ════════════════════════════════════════════════════════════════
+// Level 10: Enum / Tagged Union Bridging
+// ════════════════════════════════════════════════════════════════
+
+describe('Level 10: Enum / Tagged Union Bridging', () => {
+  const shape: CanonicalType = {
+    kind: 'enum', name: 'Shape', variants: [
+      { name: 'Circle', payload: FLOAT64 },
+      { name: 'Rect', payload: { kind: 'tuple', elements: [FLOAT64, FLOAT64] } },
+    ],
+  };
+
+  test('enum → union emits tag_dispatch bridge op', () => {
+    const union: CanonicalType = {
+      kind: 'union', members: [
+        { kind: 'struct', name: 'Circle', fields: [], nominal: false },
+        { kind: 'struct', name: 'Rect', fields: [], nominal: false },
+      ],
+    };
+    const r = checkCompatibility(shape, union);
+    expect(r.compat).toBe('coerce');
+    expect(r.bridgeOp).toBeDefined();
+    expect(r.bridgeOp!.op).toBe('tag_dispatch');
+    expect((r.bridgeOp as any).variants).toEqual(['Circle', 'Rect']);
+  });
+
+  test('union → enum emits tag_dispatch with guard', () => {
+    const union: CanonicalType = {
+      kind: 'union', members: [
+        { kind: 'struct', name: 'Circle', fields: [], nominal: false },
+        { kind: 'struct', name: 'Rect', fields: [], nominal: false },
+      ],
+    };
+    const r = checkCompatibility(union, shape);
+    expect(r.compat).toBe('check');
+    expect(r.bridgeOp!.op).toBe('tag_dispatch');
+    expect(r.guard).toBeDefined();
+    expect(r.guard!.js).toContain('includes');
+  });
+
+  test('enum → enum with matching variants is safe', () => {
+    const other: CanonicalType = {
+      kind: 'enum', name: 'Shape2', variants: [
+        { name: 'Circle', payload: FLOAT64 },
+        { name: 'Rect', payload: { kind: 'tuple', elements: [FLOAT64, FLOAT64] } },
+      ],
+    };
+    const r = checkCompatibility(shape, other);
+    expect(r.compat).toBe('safe');
+  });
+
+  test('enum → enum with missing variant is incompatible', () => {
+    const smaller: CanonicalType = {
+      kind: 'enum', name: 'Shape3', variants: [
+        { name: 'Circle', payload: FLOAT64 },
+        { name: 'Triangle', payload: FLOAT64 },
+      ],
+    };
+    const r = checkCompatibility(shape, smaller);
+    expect(r.compat).toBe('incompatible');
+    expect(r.reason).toContain('Triangle');
+  });
+
+  test('enum → enum with incompatible payload type is rejected', () => {
+    const mismatch: CanonicalType = {
+      kind: 'enum', name: 'Shape4', variants: [
+        { name: 'Circle', payload: FLOAT64 },
+        { name: 'Rect', payload: INT32 }, // tuple(f64,f64) → i32 is incompatible
+      ],
+    };
+    const r = checkCompatibility(shape, mismatch);
+    expect(r.compat).toBe('incompatible');
+  });
+});
+
+// ════════════════════════════════════════════════════════════════
+// Level 11: Runtime Guards
+// ════════════════════════════════════════════════════════════════
+
+describe('Level 11: Runtime Guard Hints', () => {
+  test('float → int produces guard with range check', () => {
+    const r = checkCompatibility(FLOAT64, INT32);
+    expect(r.compat).toBe('check');
+    expect(r.guard).toBeDefined();
+    expect(r.guard!.js).toContain('Number.isInteger');
+    expect(r.guard!.python).toContain('is_integer');
+  });
+
+  test('string → int produces guard with parse check', () => {
+    const r = checkCompatibility(STRING, INT32);
+    expect(r.compat).toBe('check');
+    expect(r.guard).toBeDefined();
+    expect(r.guard!.js).toContain('parseInt');
+    expect(r.guard!.python).toContain('isdigit');
+    expect(r.guard!.go).toContain('ParseInt');
+  });
+
+  test('string → float produces guard', () => {
+    const r = checkCompatibility(STRING, FLOAT64);
+    expect(r.compat).toBe('check');
+    expect(r.guard).toBeDefined();
+    expect(r.guard!.js).toContain('parseFloat');
+  });
+
+  test('float → int bridge op has narrow with sizes', () => {
+    const r = checkCompatibility(FLOAT64, INT32);
+    expect(r.bridgeOp).toBeDefined();
+    expect(r.bridgeOp!.op).toBe('narrow');
+    expect((r.bridgeOp as any).from).toBe('f64');
+    expect((r.bridgeOp as any).to).toBe('i32');
+  });
+});
+
+// ════════════════════════════════════════════════════════════════
+// Level 12: Improved Type Inference
+// ════════════════════════════════════════════════════════════════
+
+describe('Level 12: Improved Type Inference', () => {
+  test('infers type from literal initializer in pipeline', () => {
+    const checker = new BoundaryChecker();
+    // Simulate: const name: string declared in JS
+    checker.declare('name', STRING, 'javascript');
+
+    // Then used in Python: process(name) where process expects int
+    const r = checker.checkCrossing('name', 'python', INT32);
+    expect(r.compat).toBe('check'); // string → int needs parsing
+    expect(r.bridgeOp!.op).toBe('parse_int');
+  });
+
+  test('member access on known struct type resolves field type', () => {
+    const checker = new BoundaryChecker();
+    const userType: CanonicalType = {
+      kind: 'struct', name: 'User', fields: [
+        { name: 'name', type: STRING },
+        { name: 'age', type: INT32 },
+      ], nominal: false,
+    };
+    checker.declare('user', userType, 'typescript');
+
+    // Checking user crossing — struct field types are known
+    const r = checker.checkCrossing('user', 'python', userType);
+    expect(r.compat).toBe('safe');
+  });
+});
