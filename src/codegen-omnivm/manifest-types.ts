@@ -25,6 +25,33 @@ export interface DispatchManifest {
   ops: ManifestOp[];
   /** Source file path (for error messages / debug). */
   source?: string;
+  /** Type system analysis: bridge operations needed at runtime boundaries. */
+  bridges?: ManifestBridgeOp[];
+  /** Type system summary: crossing statistics. */
+  typeSummary?: ManifestTypeSummary;
+}
+
+/** A bridge operation that OmniVM must perform at a runtime boundary. */
+export interface ManifestBridgeOp {
+  /** The binding name being bridged. */
+  binding: string;
+  /** The bridge operation to perform. */
+  op: string;
+  /** Source runtime. */
+  from?: string;
+  /** Target runtime. */
+  to?: string;
+  /** Additional operation metadata. */
+  meta?: Record<string, unknown>;
+}
+
+/** Summary of type checking across all boundary crossings. */
+export interface ManifestTypeSummary {
+  crossings: number;
+  safe: number;
+  coerce: number;
+  check: number;
+  errors: number;
 }
 
 // ─── Op Union ─────────────────────────────────────────────────────

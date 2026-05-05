@@ -26,6 +26,7 @@ import {
 import {
   DispatchManifest,
   ManifestOp,
+  ManifestBridgeOp,
   ExecOp,
   EvalOp,
   ExecCompiledOp,
@@ -55,6 +56,9 @@ import {
   CaptureMap,
   ConcatSegment,
 } from './manifest-types';
+import { BoundaryChecker, typeToString } from '../type-system/boundary-checker';
+import { lowerType } from '../type-system/lowering';
+import * as C from '../type-system/canonical';
 
 export class ManifestCodeGenerator {
   private affinityMap: Map<AST.Decl | AST.Stmt | AST.Expr, RuntimeAffinity> = new Map();
@@ -64,6 +68,8 @@ export class ManifestCodeGenerator {
   private bindingTable: Map<string, OmniRuntime> = new Map();
   /** Nesting depth inside func_def bodies. When > 0, captures include all external refs. */
   private funcDepth: number = 0;
+  /** Type system boundary checker — validates types at cross-runtime crossings. */
+  private typeChecker: BoundaryChecker = new BoundaryChecker();
 
   /**
    * Generate a dispatch manifest from an annotated program.
@@ -74,6 +80,10 @@ export class ManifestCodeGenerator {
     this.defaultRuntime = annotated.defaultRuntime;
     this.source = annotated.source;
     this.bindingTable = new Map();
+    this.typeChecker = new BoundaryChecker();
+
+    // Pass 1: Declare all typed bindings in the type checker
+    this.declareTypedBindings(annotated.program.body);
 
     const blocks = consolidateBlocks(annotated.program.body, this.affinityMap);
     const ops: ManifestOp[] = [];
@@ -82,11 +92,23 @@ export class ManifestCodeGenerator {
       ops.push(...this.emitBlock(block));
     }
 
-    return {
+    // Collect bridge ops and type summary from the checker
+    const bridgeOps = this.typeChecker.getBridgeOps();
+    const summary = this.typeChecker.getSummary();
+
+    const manifest: DispatchManifest = {
       version: 1,
       defaultRuntime: this.defaultRuntime,
       ops,
     };
+
+    // Only attach type info if there are actual crossings
+    if (summary.crossings > 0) {
+      manifest.bridges = bridgeOps.map(b => this.toBridgeManifestOp(b));
+      manifest.typeSummary = summary;
+    }
+
+    return manifest;
   }
 
   /**
@@ -117,8 +139,13 @@ export class ManifestCodeGenerator {
       // must be explicitly injected via captures.
       if (this.funcDepth > 0) {
         captures[name] = name;
+        // Type-check the crossing if it's actually cross-runtime
+        if (boundIn !== targetRuntime) {
+          this.checkTypeCrossing(name, targetRuntime);
+        }
       } else if (boundIn !== targetRuntime) {
         // Top-level: only capture cross-runtime references.
+        this.checkTypeCrossing(name, targetRuntime);
         captures[name] = name;
       }
     }
@@ -130,6 +157,270 @@ export class ManifestCodeGenerator {
    */
   private recordBinding(name: string, runtime: OmniRuntime): void {
     this.bindingTable.set(name, runtime);
+  }
+
+  // ─── Type System Integration ─────────────────────────────────────
+
+  /**
+   * Walk top-level declarations and register typed bindings with the BoundaryChecker.
+   */
+  private declareTypedBindings(body: (AST.Decl | AST.Stmt | AST.Expr)[]): void {
+    // Pass 1: Register all typed declarations
+    for (const node of body) {
+      const aff = this.affinityMap.get(node);
+      const runtime = (aff?.runtime || this.defaultRuntime) as string as
+        "javascript" | "typescript" | "python" | "go" | "rust" | "java" | "csharp" | "ruby" | "bash";
+
+      switch (node.kind) {
+        case "FuncDecl": {
+          const funcType = this.funcDeclToCanonical(node);
+          this.typeChecker.declare(node.name.name, funcType, runtime);
+          break;
+        }
+        case "VarDecl": {
+          const varType = node.type ? lowerType(node.type, runtime) : C.ANY;
+          for (const name of node.names) {
+            this.typeChecker.declare(name.name, varType, runtime);
+          }
+          break;
+        }
+        case "ConstDecl": {
+          const constType = node.type ? lowerType(node.type, runtime) : C.ANY;
+          for (const name of node.names) {
+            this.typeChecker.declare(name.name, constType, runtime);
+          }
+          break;
+        }
+        case "ShortDecl":
+          if (node.pairs) {
+            for (const pair of node.pairs) {
+              this.typeChecker.declare(pair.name.name, C.ANY, runtime);
+            }
+          }
+          break;
+      }
+    }
+
+    // Pass 2: Check cross-runtime function calls and variable assignments
+    this.checkCrossRuntimeCalls(body);
+  }
+
+  /**
+   * Walk the AST looking for cross-runtime interactions:
+   * 1. Function calls where callee is declared in a different runtime
+   * 2. Variable declarations that receive the return value of a cross-runtime call
+   *
+   * Recurses into function bodies to find nested cross-runtime calls.
+   */
+  private checkCrossRuntimeCalls(body: (AST.Decl | AST.Stmt | AST.Expr)[], callerRuntime?: string): void {
+    for (const node of body) {
+      const nodeAff = this.affinityMap.get(node);
+      const nodeRuntime = (nodeAff?.runtime || callerRuntime || this.defaultRuntime) as string as
+        "javascript" | "typescript" | "python" | "go" | "rust" | "java" | "csharp" | "ruby" | "bash";
+      // The "caller" runtime is the enclosing function's runtime.
+      // For cross-runtime call checking, we care about where the CALL happens,
+      // not what runtime the callee expression was assigned to.
+      const effectiveCallerRuntime = callerRuntime || nodeRuntime;
+
+      // Recurse into function bodies with the function's own runtime as caller context
+      if (node.kind === "FuncDecl" && node.body?.statements) {
+        const funcRuntime = (nodeAff?.runtime || callerRuntime || this.defaultRuntime) as string;
+        // Register variables declared inside the function body
+        this.declareInnerBindings(node.body.statements, funcRuntime);
+        this.checkCrossRuntimeCalls(node.body.statements, funcRuntime);
+      }
+
+      // Check const/var declarations: const x: TargetType = crossRuntimeCall()
+      if ((node.kind === "ConstDecl" || node.kind === "VarDecl") && node.type) {
+        const targetType = lowerType(node.type, effectiveCallerRuntime as any);
+        const values = node.kind === "ConstDecl" ? node.values : node.values;
+        if (values) {
+          for (const val of values) {
+            this.checkCallReturnType(val, effectiveCallerRuntime, targetType);
+          }
+        }
+      }
+
+      // Check expression statements: standalone calls like calculate(v)
+      if (node.kind === "ExprStmt") {
+        this.checkCallArgTypes(node.expr, effectiveCallerRuntime);
+      }
+    }
+  }
+
+  /**
+   * If expr is a call to a cross-runtime function, check that the return type
+   * is compatible with expectedType.
+   */
+  private checkCallReturnType(expr: AST.Expr, callerRuntime: string, expectedType: C.CanonicalType): void {
+    if (expr.kind !== "Call" || expr.callee.kind !== "Identifier") return;
+    const funcName = expr.callee.name;
+    const binding = this.typeChecker.getBinding(funcName);
+    if (!binding || binding.runtime === callerRuntime) return;
+    if (binding.type.kind !== "func") return;
+
+    const funcType = binding.type as C.FuncType;
+
+    // Register the return value as a temporary binding in the callee's runtime,
+    // then check crossing to the caller's runtime with the expected type.
+    const returnBindingName = `${funcName}()`;
+    this.typeChecker.declare(returnBindingName, funcType.returns, binding.runtime);
+    this.typeChecker.checkCrossing(
+      returnBindingName,
+      callerRuntime as any,
+      expectedType,
+    );
+
+    // Also check argument types
+    this.checkCallArgTypesForFunc(expr, callerRuntime, funcType, binding.runtime);
+  }
+
+  /**
+   * If expr is a call to a cross-runtime function, check argument types.
+   */
+  private checkCallArgTypes(expr: AST.Expr, callerRuntime: string): void {
+    if (expr.kind !== "Call" || expr.callee.kind !== "Identifier") return;
+    const funcName = expr.callee.name;
+    const binding = this.typeChecker.getBinding(funcName);
+    if (!binding || binding.runtime === callerRuntime) return;
+    if (binding.type.kind !== "func") return;
+
+    const funcType = binding.type as C.FuncType;
+    this.checkCallArgTypesForFunc(expr, callerRuntime, funcType, binding.runtime);
+  }
+
+  /**
+   * Check each argument's type against the function's parameter types.
+   */
+  private checkCallArgTypesForFunc(
+    call: AST.Call,
+    callerRuntime: string,
+    funcType: C.FuncType,
+    targetRuntime: string,
+  ): void {
+    for (let i = 0; i < call.args.length && i < funcType.params.length; i++) {
+      const arg = call.args[i];
+      const paramType = funcType.params[i].type;
+
+      // Try to resolve the argument's type
+      let argType: C.CanonicalType = C.ANY;
+      if (arg.kind === "Identifier") {
+        const argBinding = this.typeChecker.getBinding(arg.name);
+        if (argBinding) argType = argBinding.type;
+      } else if (arg.kind === "StringLiteral") {
+        argType = C.STRING;
+      } else if (arg.kind === "NumericLiteral") {
+        argType = C.FLOAT64; // JS numbers are f64
+      } else if (arg.kind === "BooleanLiteral") {
+        argType = C.BOOL;
+      }
+
+      if (argType.kind !== "any") {
+        const argBindingName = `arg${i}:${call.callee.kind === "Identifier" ? call.callee.name : "?"}`;
+        this.typeChecker.declare(argBindingName, argType, callerRuntime as any);
+        this.typeChecker.checkCrossing(
+          argBindingName,
+          targetRuntime as any,
+          paramType,
+          call.span,
+        );
+      }
+    }
+  }
+
+  /**
+   * Register typed bindings from inside a function body.
+   * If no type annotation, infer from the initializer (e.g., call to a known function).
+   */
+  private declareInnerBindings(body: (AST.Decl | AST.Stmt | AST.Expr)[], runtime: string): void {
+    type RT = "javascript" | "typescript" | "python" | "go" | "rust" | "java" | "csharp" | "ruby" | "bash";
+    for (const node of body) {
+      if (node.kind === "VarDecl" || node.kind === "ConstDecl") {
+        let t: C.CanonicalType | undefined;
+        if (node.type) {
+          t = lowerType(node.type, runtime as RT as any);
+        } else {
+          // Infer type from initializer: if it's a call to a known function, use its return type
+          const values = node.kind === "ConstDecl" ? node.values : node.values;
+          if (values && values.length > 0) {
+            t = this.inferExprType(values[0]);
+          }
+        }
+        if (t) {
+          const names = node.names;
+          // Determine the binding's runtime from the expression's affinity
+          const nodeAff = this.affinityMap.get(node);
+          const bindRuntime = (nodeAff?.runtime || runtime) as RT;
+          for (const name of names) {
+            this.typeChecker.declare(name.name, t, bindRuntime);
+          }
+        }
+      }
+    }
+  }
+
+  /**
+   * Try to infer the canonical type of an expression.
+   * Currently handles: calls to known functions (uses return type).
+   */
+  private inferExprType(expr: AST.Expr): C.CanonicalType | undefined {
+    if (expr.kind === "Call" && expr.callee.kind === "Identifier") {
+      const binding = this.typeChecker.getBinding(expr.callee.name);
+      if (binding && binding.type.kind === "func") {
+        return (binding.type as C.FuncType).returns;
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * Convert a FuncDecl to a canonical FuncType for the type checker.
+   */
+  private funcDeclToCanonical(node: AST.FuncDecl): C.FuncType {
+    const aff = this.affinityMap.get(node);
+    const runtime = (aff?.runtime || this.defaultRuntime) as string as
+      "javascript" | "typescript" | "python" | "go" | "rust" | "java" | "csharp" | "ruby" | "bash";
+
+    const params = node.params.map(p => ({
+      name: p.name?.kind === "Identifier" ? p.name.name : undefined,
+      type: p.type ? lowerType(p.type, runtime) : C.ANY,
+      optional: !!p.defaultValue,
+    }));
+    const returns = node.returnType ? lowerType(node.returnType, runtime) : C.ANY;
+    return { kind: "func", params, returns };
+  }
+
+  /**
+   * Convert a BridgeOp from the type checker into a ManifestBridgeOp.
+   */
+  private toBridgeManifestOp(b: { binding: string; op: { op: string; [k: string]: unknown } }): ManifestBridgeOp {
+    const crossing = this.typeChecker.getCrossings().find(c => c.binding === b.binding && c.result.bridgeOp);
+    const result: ManifestBridgeOp = {
+      binding: b.binding,
+      op: b.op.op,
+    };
+    if (crossing) {
+      result.from = crossing.from.runtime;
+      result.to = crossing.to.runtime;
+    }
+    // Extract any extra metadata from the bridge op
+    const { op: _, ...meta } = b.op;
+    if (Object.keys(meta).length > 0) {
+      result.meta = meta as Record<string, unknown>;
+    }
+    return result;
+  }
+
+  /**
+   * Check a cross-runtime reference and register the crossing with the type checker.
+   * Called when a capture crosses a runtime boundary.
+   */
+  checkTypeCrossing(name: string, targetRuntime: OmniRuntime, expectedType?: C.CanonicalType): void {
+    this.typeChecker.checkCrossing(
+      name,
+      targetRuntime as string as "javascript" | "typescript" | "python" | "go" | "rust" | "java" | "csharp" | "ruby" | "bash",
+      expectedType,
+    );
   }
 
   // ─── Parallel Pattern Detection ─────────────────────────────────

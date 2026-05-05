@@ -155,7 +155,7 @@ function lowerSimpleType(
 
     // === Collections ===
     case "Array": case "Vec": case "List": case "list": case "Slice":
-    case "ArrayList": case "Vector":
+    case "ArrayList": case "[]":
       if (args && args.length === 1) return C.array(args[0]);
       return C.array(C.ANY);
 
@@ -175,12 +175,42 @@ function lowerSimpleType(
       return C.async_(C.ANY);
 
     // === Channels ===
-    case "chan": case "Channel": case "Sender": case "Receiver":
-      if (args && args.length === 1) {
-        const dir = name === "Sender" ? "send" : name === "Receiver" ? "recv" : "both";
-        return { kind: "channel", element: args[0], direction: dir };
-      }
+    case "chan": case "Channel":
+      if (args && args.length === 1) return { kind: "channel", element: args[0], direction: "both" };
       return { kind: "channel", element: C.ANY, direction: "both" };
+    case "Sender": case "mpsc_Sender":
+      if (args && args.length === 1) return { kind: "channel", element: args[0], direction: "send" };
+      return { kind: "channel", element: C.ANY, direction: "send" };
+    case "Receiver": case "mpsc_Receiver":
+      if (args && args.length === 1) return { kind: "channel", element: args[0], direction: "recv" };
+      return { kind: "channel", element: C.ANY, direction: "recv" };
+
+    // === Streams ===
+    case "AsyncIterable": case "AsyncIterator": case "ReadableStream":
+    case "Stream": case "AsyncGenerator":
+      if (args && args.length === 1) return C.stream(args[0]);
+      return C.stream(C.ANY);
+
+    // === Buffer Views (Zero-Copy) ===
+    case "Uint8Array": case "Buffer":
+      return C.bufferView(C.UINT8, "owned");
+    case "Int8Array":
+      return C.bufferView({ kind: "int", size: 8, signed: true }, "owned");
+    case "Int16Array":
+      return C.bufferView({ kind: "int", size: 16, signed: true }, "owned");
+    case "Int32Array":
+      return C.bufferView(C.INT32, "owned");
+    case "Float32Array":
+      return C.bufferView(C.FLOAT32, "owned");
+    case "Float64Array":
+      return C.bufferView(C.FLOAT64, "owned");
+    case "ArrayBuffer": case "SharedArrayBuffer":
+      return C.bufferView(C.UINT8, name === "SharedArrayBuffer" ? "shared" : "owned");
+
+    // === Disposable ===
+    case "Disposable": case "Closer": case "AutoCloseable":
+      if (args && args.length === 1) return C.disposable(args[0], name === "Closer" ? "close" : "dispose");
+      return C.disposable(C.ANY, name === "Closer" ? "close" : "dispose");
 
     // === Generic with type args ===
     default:

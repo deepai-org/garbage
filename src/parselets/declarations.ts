@@ -86,6 +86,19 @@ export function parseVarDecl(host: DeclHost): AST.VarDecl {
   let type: AST.TypeNode | undefined;
   if (host.match(":")) {
     type = host.parseType();
+  } else if (!host.check("=") && !host.check(";") && !host.isAtEnd() && !host.peek().virtualSemi) {
+    // Go-style: var count int = 10 (type follows name without colon)
+    const next = host.peek();
+    if (next.type === "Identifier" || next.type === "Keyword") {
+      const val = next.value;
+      // Only parse as type if it looks like a type name, not an operator or value
+      if (val !== "=" && val !== "in" && val !== "of") {
+        type = host.parseType();
+      }
+    } else if (next.value === "[" || next.value === "*") {
+      // Go slice []type or pointer *type
+      type = host.parseType();
+    }
   }
 
   let values: AST.Expr[] | undefined;

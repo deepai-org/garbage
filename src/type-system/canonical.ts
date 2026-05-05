@@ -149,6 +149,60 @@ export interface AsyncType {
   inner: CanonicalType;       // Promise<T> / Future<T> / Coroutine → Async<T>
 }
 
+// ============ Stream Type (Multi-Value Async) ============
+
+/**
+ * Stream<T> — a multi-value async sequence.
+ *   Go:   <-chan T / chan T
+ *   TS:   AsyncIterable<T> / ReadableStream<T>
+ *   Rust: futures::Stream<Item = T> / tokio::sync::mpsc::Receiver<T>
+ *
+ * Distinct from Async<T> (single value) and Channel<T> (bidirectional primitive).
+ * Channels lower to Stream when used in a receive-only cross-boundary context.
+ */
+export interface StreamType {
+  kind: "stream";
+  element: CanonicalType;
+  backpressure?: boolean;     // true if the producer respects consumer speed
+}
+
+// ============ BufferView Type (Zero-Copy Memory) ============
+
+/**
+ * BufferView<T> — contiguous memory passed by reference, not copied.
+ *   Go:   []byte
+ *   TS:   Uint8Array / ArrayBuffer / TypedArray
+ *   Rust: &[u8] / &mut [u8] / Vec<u8>
+ *
+ * The bridge passes a pointer + length instead of serializing.
+ * Ownership semantics determine whether the receiver can mutate or must treat as read-only.
+ */
+export interface BufferViewType {
+  kind: "buffer_view";
+  element: CanonicalType;     // Usually u8, but could be i32 for Int32Array etc.
+  ownership: "owned" | "borrowed" | "shared";
+  mutable?: boolean;
+}
+
+// ============ Disposable Type (Cross-Boundary Resource Management) ============
+
+/**
+ * Disposable — a resource that must be explicitly released across boundaries.
+ *   TS:   Symbol.dispose / using keyword
+ *   Rust: Drop trait
+ *   Go:   io.Closer / defer close()
+ *
+ * When a proxy (e.g. callback, interface impl) crosses a boundary,
+ * the receiving runtime must signal when it's done so the source
+ * runtime can release the reference. Without this, cross-boundary
+ * proxies leak memory.
+ */
+export interface DisposableType {
+  kind: "disposable";
+  inner: CanonicalType;       // The underlying type being wrapped
+  disposer?: string;          // Method name: "close", "dispose", "drop"
+}
+
 // ============ Generic / Parametric Types ============
 
 export interface TypeVar {
@@ -201,6 +255,9 @@ export type CanonicalType =
   | ChannelType
   | RefType
   | AsyncType
+  | StreamType
+  | BufferViewType
+  | DisposableType
   | TypeVar
   | GenericType
   | InterfaceType
@@ -242,4 +299,20 @@ export function async_(inner: CanonicalType): AsyncType {
 
 export function result(ok: CanonicalType, err: CanonicalType): ResultType {
   return { kind: "result", ok, err };
+}
+
+export function stream(element: CanonicalType, backpressure?: boolean): StreamType {
+  return { kind: "stream", element, ...(backpressure ? { backpressure } : {}) };
+}
+
+export function bufferView(
+  element: CanonicalType = UINT8,
+  ownership: "owned" | "borrowed" | "shared" = "borrowed",
+  mutable?: boolean,
+): BufferViewType {
+  return { kind: "buffer_view", element, ownership, ...(mutable ? { mutable } : {}) };
+}
+
+export function disposable(inner: CanonicalType, disposer?: string): DisposableType {
+  return { kind: "disposable", inner, ...(disposer ? { disposer } : {}) };
 }

@@ -133,8 +133,8 @@ export function parseFuncDecl(
         returnType = { kind: "UnionType", types: parsed, span: host.createSpan(goRetStart, host.current - 1) } as any;
       }
     }
-  } else if (declKeywordValue === "func" && host.peek().type === TokenType.Identifier &&
-             !host.check("{") && !host.peek().virtualSemi) {
+  } else if (declKeywordValue === "func" && !host.check("{") && !host.peek().virtualSemi &&
+             (host.peek().type === TokenType.Identifier || host.check("[") || host.check("*") || host.check("map"))) {
     returnType = Types.parseGoTypeAnnotation(host);
   } else if (host.check(":")) {
     const checkpoint = host.current;

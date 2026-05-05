@@ -72,32 +72,46 @@ export class BoundaryChecker {
   }
 
   /**
+   * Look up a binding by name (for external callers that need type info).
+   */
+  getBinding(name: string): TypedBinding | undefined {
+    return this.bindings.get(name);
+  }
+
+  /**
    * Check a boundary crossing: binding `name` is used in `targetRuntime`
    * where it's expected to have type `expectedType`.
+   *
+   * @param fromTypeOverride If provided, use this as the source type instead of
+   *   the binding's declared type. Useful for checking a function's return type
+   *   rather than the function type itself.
    */
   checkCrossing(
     name: string,
     targetRuntime: Runtime,
     expectedType?: C.CanonicalType,
-    location?: AST.Span
+    location?: AST.Span,
+    fromTypeOverride?: C.CanonicalType,
   ): CoercionResult {
     const binding = this.bindings.get(name);
-    if (!binding) {
+    if (!binding && !fromTypeOverride) {
       // Unknown binding — can't check, assume ok
       return { compat: "safe" };
     }
 
+    const fromRuntime = binding?.runtime;
     // Same runtime — no boundary crossing
-    if (binding.runtime === targetRuntime) {
+    if (fromRuntime && fromRuntime === targetRuntime) {
       return { compat: "safe" };
     }
 
+    const from = fromTypeOverride || binding!.type;
     const to = expectedType || C.ANY;
-    const result = checkCompatibility(binding.type, to);
+    const result = checkCompatibility(from, to);
 
     const crossing: BoundaryCrossing = {
       binding: name,
-      from: { runtime: binding.runtime, type: binding.type },
+      from: { runtime: fromRuntime || targetRuntime, type: from },
       to: { runtime: targetRuntime, type: to },
       result,
       location,
@@ -109,7 +123,7 @@ export class BoundaryChecker {
     if (result.compat === "incompatible") {
       this.diagnostics.push({
         severity: "error",
-        message: `Type error at boundary: '${name}' (${typeToString(binding.type)} in ${binding.runtime}) ` +
+        message: `Type error at boundary: '${name}' (${typeToString(from)} in ${fromRuntime || '?'}) ` +
                  `cannot flow to ${targetRuntime} as ${typeToString(to)}: ${result.reason}`,
         location,
         crossing,
@@ -117,7 +131,7 @@ export class BoundaryChecker {
     } else if (result.compat === "check") {
       this.diagnostics.push({
         severity: "warning",
-        message: `Runtime check needed: '${name}' (${typeToString(binding.type)} in ${binding.runtime}) ` +
+        message: `Runtime check needed: '${name}' (${typeToString(from)} in ${fromRuntime || '?'}) ` +
                  `flowing to ${targetRuntime} may fail: ${result.reason}`,
         location,
         crossing,
@@ -244,6 +258,9 @@ export function typeToString(type: C.CanonicalType): string {
     case "typevar": return type.name;
     case "generic": return `${typeToString(type.base)}<${type.args.map(typeToString).join(", ")}>`;
     case "interface": return type.name || `interface{${type.methods.map(m => m.name).join(", ")}}`;
+    case "stream": return `Stream<${typeToString(type.element)}>`;
+    case "buffer_view": return `BufferView<${typeToString(type.element)}>`;
+    case "disposable": return `Disposable<${typeToString(type.inner)}>`;
     case "literal": return JSON.stringify(type.value);
   }
 }

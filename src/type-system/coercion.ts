@@ -41,7 +41,14 @@ export type BridgeOp =
   | { op: "parse_float" }                      // string → float
   | { op: "struct_to_dict" }                   // Named struct → dict/object
   | { op: "dict_to_struct"; target: string }   // dict/object → named struct
-  | { op: "channel_bridge"; direction: "send" | "recv" | "both" };
+  | { op: "channel_bridge"; direction: "send" | "recv" | "both" }
+  | { op: "stream_proxy"; backpressure?: boolean }         // Channel/Stream → AsyncIterable proxy
+  | { op: "share_memory"; ownership: "owned" | "borrowed" | "shared"; mutable?: boolean }  // Zero-copy buffer pass
+  | { op: "copy_buffer" }                                  // Fallback: copy buffer when ownership incompatible
+  | { op: "throw_typed"; errorKind?: string }              // Result.Err → typed exception with metadata
+  | { op: "catch_to_result" }                              // try/catch → Result (inverse of throw_typed)
+  | { op: "proxy_with_finalizer"; disposer?: string }      // Cross-boundary proxy with GC release hook
+  | { op: "attach_disposer"; disposer: string };           // Wrap in Disposable for resource management
 
 /**
  * Check if a value of type `from` can flow into a slot of type `to`.
@@ -193,6 +200,38 @@ function checkSameKind(from: C.CanonicalType, to: C.CanonicalType): CoercionResu
       return elem;
     }
 
+    case "stream": {
+      const f = from as C.StreamType;
+      const t = to as C.StreamType;
+      const elem = checkCompatibility(f.element, t.element);
+      if (elem.compat === "incompatible") return incompatible("stream element " + elem.reason);
+      // Backpressure: target wants backpressure but source doesn't support it → warning
+      if (t.backpressure && !f.backpressure) {
+        return { compat: "coerce", reason: "source stream lacks backpressure support", bridgeOp: { op: "stream_proxy", backpressure: false } };
+      }
+      return elem;
+    }
+
+    case "buffer_view": {
+      const f = from as C.BufferViewType;
+      const t = to as C.BufferViewType;
+      const elem = checkCompatibility(f.element, t.element);
+      if (elem.compat === "incompatible") return incompatible("buffer element " + elem.reason);
+      // Ownership: borrowed → owned is ok (copy), owned → borrowed is ok (lend)
+      // Mutable: immutable → mutable requires copy
+      if (t.mutable && !f.mutable) {
+        return { compat: "coerce", reason: "must copy buffer to make mutable", bridgeOp: { op: "copy_buffer" } };
+      }
+      // Shared memory is safe if element types match
+      return { compat: elem.compat, reason: elem.reason, bridgeOp: { op: "share_memory", ownership: t.ownership, mutable: t.mutable } };
+    }
+
+    case "disposable": {
+      const f = from as C.DisposableType;
+      const t = to as C.DisposableType;
+      return checkCompatibility(f.inner, t.inner);
+    }
+
     default:
       return coerce("same kind, assuming compatible");
   }
@@ -228,9 +267,14 @@ function checkCrossKind(from: C.CanonicalType, to: C.CanonicalType): CoercionRes
   }
 
   // Result<T, E> → T: check (may be error)
-  if (from.kind === "result") {
-    const inner = checkCompatibility((from as C.ResultType).ok, to);
+  // Use throw_typed when error is a named struct for fidelity
+  if (from.kind === "result" && to.kind !== "result") {
+    const f = from as C.ResultType;
+    const inner = checkCompatibility(f.ok, to);
     if (inner.compat !== "incompatible") {
+      if (f.err.kind === "struct" && (f.err as C.StructType).name) {
+        return { compat: "check", reason: "result may be typed error", bridgeOp: { op: "throw_typed", errorKind: (f.err as C.StructType).name } };
+      }
       return { compat: "check", reason: "result may be error", bridgeOp: { op: "unwrap_result" } };
     }
   }
@@ -248,6 +292,22 @@ function checkCrossKind(from: C.CanonicalType, to: C.CanonicalType): CoercionRes
     const inner = checkCompatibility((from as C.AsyncType).inner, to);
     if (inner.compat !== "incompatible") {
       return { compat: "coerce", reason: "must await", bridgeOp: { op: "await_resolve" } };
+    }
+  }
+
+  // Stream → Async: take first element (lossy)
+  if (from.kind === "stream" && to.kind === "async") {
+    const elem = checkCompatibility((from as C.StreamType).element, (to as C.AsyncType).inner);
+    if (elem.compat !== "incompatible") {
+      return { compat: "check", reason: "stream to single async takes only first element" };
+    }
+  }
+
+  // Channel → Async: receive one value
+  if (from.kind === "channel" && to.kind === "async") {
+    const elem = checkCompatibility((from as C.ChannelType).element, (to as C.AsyncType).inner);
+    if (elem.compat !== "incompatible") {
+      return { compat: "coerce", reason: "channel recv as async", bridgeOp: { op: "await_resolve" } };
     }
   }
 
@@ -277,6 +337,56 @@ function checkCrossKind(from: C.CanonicalType, to: C.CanonicalType): CoercionRes
   // int/float/bool → string: to_string
   if ((from.kind === "int" || from.kind === "float" || from.kind === "bool") && to.kind === "string") {
     return { compat: "coerce", bridgeOp: { op: "to_string" } };
+  }
+
+  // Channel → Stream: semantic upgrade (multi-value async)
+  if (from.kind === "channel" && to.kind === "stream") {
+    const elem = checkCompatibility((from as C.ChannelType).element, (to as C.StreamType).element);
+    if (elem.compat !== "incompatible") {
+      return { compat: "coerce", reason: "channel to stream proxy", bridgeOp: { op: "stream_proxy", backpressure: (to as C.StreamType).backpressure } };
+    }
+  }
+
+  // Stream → Channel: downgrade (stream into channel)
+  if (from.kind === "stream" && to.kind === "channel") {
+    const elem = checkCompatibility((from as C.StreamType).element, (to as C.ChannelType).element);
+    if (elem.compat !== "incompatible") {
+      return { compat: "coerce", reason: "stream to channel", bridgeOp: { op: "stream_proxy" } };
+    }
+  }
+
+  // Array/bytes → BufferView: zero-copy view if element matches
+  if ((from.kind === "array" || from.kind === "bytes") && to.kind === "buffer_view") {
+    const fromElem = from.kind === "bytes" ? C.UINT8 : (from as C.ArrayType).element;
+    const elem = checkCompatibility(fromElem, (to as C.BufferViewType).element);
+    if (elem.compat !== "incompatible") {
+      return { compat: "coerce", reason: "array to buffer view", bridgeOp: { op: "share_memory", ownership: (to as C.BufferViewType).ownership } };
+    }
+  }
+
+  // BufferView → Array/bytes: copy out
+  if (from.kind === "buffer_view" && (to.kind === "array" || to.kind === "bytes")) {
+    const toElem = to.kind === "bytes" ? C.UINT8 : (to as C.ArrayType).element;
+    const elem = checkCompatibility((from as C.BufferViewType).element, toElem);
+    if (elem.compat !== "incompatible") {
+      return { compat: "coerce", reason: "buffer view to array (copy)", bridgeOp: { op: "copy_buffer" } };
+    }
+  }
+
+  // T → Disposable<T>: wrap with finalizer
+  if (to.kind === "disposable") {
+    const inner = checkCompatibility(from, (to as C.DisposableType).inner);
+    if (inner.compat !== "incompatible") {
+      return { compat: "coerce", reason: "wrapping in disposable", bridgeOp: { op: "attach_disposer", disposer: (to as C.DisposableType).disposer || "dispose" } };
+    }
+  }
+
+  // Disposable<T> → T: unwrap (resource management responsibility transfers)
+  if (from.kind === "disposable") {
+    const inner = checkCompatibility((from as C.DisposableType).inner, to);
+    if (inner.compat !== "incompatible") {
+      return { compat: "check", reason: "unwrapping disposable — receiver must manage lifecycle" };
+    }
   }
 
   // array ↔ set: coerce

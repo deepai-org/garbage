@@ -13,10 +13,10 @@ import {
   lowerType,
   typeToString,
   // Canonical types
-  INT32, INT64, FLOAT64, STRING, BOOL, VOID, ANY, NULL, NEVER,
-  option, array, map, func, async_, result,
+  INT32, INT64, UINT8, FLOAT64, STRING, BOOL, VOID, ANY, NULL, NEVER,
+  option, array, map, func, async_, result, stream, bufferView, disposable,
   CanonicalType, StructType, FuncType, InterfaceType, OptionType,
-  ArrayType, MapType, ResultType, AsyncType,
+  ArrayType, MapType, ResultType, AsyncType, StreamType, BufferViewType, DisposableType,
 } from '../src/type-system';
 import * as AST from '../src/ast';
 
@@ -177,7 +177,7 @@ describe('End-to-End: Polyglot Data Pipeline', () => {
       'validationResult', 'javascript', ValidatedReport
     );
     expect(crossing3.compat).toBe('check');
-    expect(crossing3.bridgeOp?.op).toBe('unwrap_result');
+    expect(crossing3.bridgeOp?.op).toBe('throw_typed');
 
     // 4. JavaScript respond() returns Async<ApiResponse>
     //    If Go wants the result synchronously, it needs await
@@ -199,7 +199,7 @@ describe('End-to-End: Polyglot Data Pipeline', () => {
     // Bridge ops tell the manifest generator exactly what to do
     const ops = checker.getBridgeOps();
     expect(ops.length).toBeGreaterThanOrEqual(2);
-    expect(ops.some(o => o.op.op === 'unwrap_result')).toBe(true);
+    expect(ops.some(o => o.op.op === 'throw_typed')).toBe(true);
     expect(ops.some(o => o.op.op === 'await_resolve')).toBe(true);
   });
 });
@@ -230,11 +230,12 @@ describe('End-to-End: Error Handling Across Runtimes', () => {
       returns: result(STRING, ParseError),
     } as FuncType, 'rust');
 
-    // Rust Result flowing to JS: unwrap_result (Err becomes thrown exception)
+    // Rust Result flowing to JS: throw_typed (Err becomes typed exception with metadata)
     checker.declare('configResult', result(STRING, ParseError), 'rust');
     const toJS = checker.checkCrossing('configResult', 'javascript', STRING);
     expect(toJS.compat).toBe('check');
-    expect(toJS.bridgeOp?.op).toBe('unwrap_result');
+    expect(toJS.bridgeOp?.op).toBe('throw_typed');
+    expect((toJS.bridgeOp as any).errorKind).toBe('ParseError');
 
     // If JS wraps it back into a Result for Go, that's safe
     const toGo = checker.checkCrossing('configResult', 'go', result(STRING, ParseError));
@@ -244,7 +245,7 @@ describe('End-to-End: Error Handling Across Runtimes', () => {
     checker.declare('goInput', result(STRING, ParseError), 'rust');
     const goUnwrap = checker.checkCrossing('goInput', 'go', STRING);
     expect(goUnwrap.compat).toBe('check');
-    expect(goUnwrap.bridgeOp?.op).toBe('unwrap_result');
+    expect(goUnwrap.bridgeOp?.op).toBe('throw_typed');
   });
 });
 
@@ -627,5 +628,220 @@ describe('End-to-End: AST Type Lowering', () => {
     // Python int is bigint
     expect(((inner as MapType).value as ArrayType).element).toEqual({ kind: 'int', size: 'big', signed: true });
     expect(typeToString(lowered)).toBe('Option<Map<string, Array<ibig>>>');
+  });
+});
+
+// ============================================================
+// Advanced Type System Features
+// ============================================================
+
+describe('Advanced: Streams (Multi-Value Async)', () => {
+  test('Go channel → TS AsyncIterable via stream_proxy', () => {
+    const checker = new BoundaryChecker();
+    // Go: ch := make(chan string) — produces multiple values
+    checker.declare('logStream', { kind: 'channel', element: STRING, direction: 'recv' }, 'go');
+
+    // TS wants AsyncIterable<string> — a Stream
+    const r = checker.checkCrossing('logStream', 'javascript', stream(STRING));
+    expect(r.compat).toBe('coerce');
+    expect(r.bridgeOp?.op).toBe('stream_proxy');
+  });
+
+  test('Stream<i32> → Stream<f64> coerces element types', () => {
+    const r = checkCompatibility(stream(INT32), stream(FLOAT64));
+    expect(r.compat).toBe('coerce'); // i32→f64 widening propagates
+  });
+
+  test('Stream → Async is a lossy check (takes first element only)', () => {
+    const r = checkCompatibility(stream(STRING), async_(STRING));
+    expect(r.compat).toBe('check');
+    expect(r.reason).toContain('first element');
+  });
+
+  test('Channel → Async receives one value (coerce with await)', () => {
+    const r = checkCompatibility(
+      { kind: 'channel', element: INT32, direction: 'recv' },
+      async_(INT32)
+    );
+    expect(r.compat).toBe('coerce');
+    expect(r.bridgeOp?.op).toBe('await_resolve');
+  });
+
+  test('Stream → Channel is coerce (downgrade)', () => {
+    const r = checkCompatibility(stream(STRING), { kind: 'channel', element: STRING, direction: 'both' });
+    expect(r.compat).toBe('coerce');
+    expect(r.bridgeOp?.op).toBe('stream_proxy');
+  });
+
+  test('backpressure mismatch produces coerce warning', () => {
+    const source = stream(INT32, false);   // no backpressure
+    const target = stream(INT32, true);    // wants backpressure
+    const r = checkCompatibility(source, target);
+    expect(r.compat).toBe('coerce');
+    expect(r.reason).toContain('backpressure');
+  });
+
+  test('typeToString renders Stream', () => {
+    expect(typeToString(stream(STRING))).toBe('Stream<string>');
+  });
+});
+
+describe('Advanced: Zero-Copy BufferView', () => {
+  test('Go []byte → Rust &[u8] via share_memory (zero-copy)', () => {
+    const checker = new BoundaryChecker();
+    // Go has an owned byte slice
+    checker.declare('imageData', bufferView(UINT8, 'owned'), 'go');
+    // Rust wants a borrowed immutable view
+    const r = checker.checkCrossing('imageData', 'rust', bufferView(UINT8, 'borrowed'));
+    expect(r.compat).not.toBe('incompatible');
+    expect(r.bridgeOp?.op).toBe('share_memory');
+  });
+
+  test('immutable → mutable buffer requires copy', () => {
+    const r = checkCompatibility(
+      bufferView(UINT8, 'borrowed', false),
+      bufferView(UINT8, 'borrowed', true)
+    );
+    expect(r.compat).toBe('coerce');
+    expect(r.bridgeOp?.op).toBe('copy_buffer');
+  });
+
+  test('Array<u8> → BufferView<u8> coerces (array to view)', () => {
+    const r = checkCompatibility(array(UINT8), bufferView(UINT8, 'borrowed'));
+    expect(r.compat).toBe('coerce');
+    expect(r.bridgeOp?.op).toBe('share_memory');
+  });
+
+  test('BufferView → Array copies out', () => {
+    const r = checkCompatibility(bufferView(UINT8, 'owned'), array(UINT8));
+    expect(r.compat).toBe('coerce');
+    expect(r.bridgeOp?.op).toBe('copy_buffer');
+  });
+
+  test('bytes → BufferView<u8> coerces', () => {
+    const r = checkCompatibility({ kind: 'bytes' }, bufferView(UINT8, 'shared'));
+    expect(r.compat).toBe('coerce');
+    expect(r.bridgeOp?.op).toBe('share_memory');
+  });
+
+  test('typeToString renders BufferView', () => {
+    expect(typeToString(bufferView(UINT8))).toBe('BufferView<u8>');
+  });
+
+  test('lowering: Uint8Array → BufferView', () => {
+    const node: AST.TypeNode = { kind: 'SimpleType', id: { kind: 'Identifier', name: 'Uint8Array', span: { start: 0, end: 0, line: 0, column: 0 } }, span: { start: 0, end: 0, line: 0, column: 0 } };
+    const lowered = lowerType(node, 'javascript');
+    expect(lowered.kind).toBe('buffer_view');
+    expect((lowered as BufferViewType).element).toEqual(UINT8);
+  });
+});
+
+describe('Advanced: Typed Exceptions (Error Fidelity)', () => {
+  test('Result<T, NamedError> → T uses throw_typed with error kind', () => {
+    const IoError: StructType = {
+      kind: 'struct', name: 'IoError', nominal: true, origin: 'rust',
+      fields: [{ name: 'code', type: INT32 }, { name: 'message', type: STRING }],
+    };
+    const r = checkCompatibility(result(STRING, IoError), STRING);
+    expect(r.compat).toBe('check');
+    expect(r.bridgeOp?.op).toBe('throw_typed');
+    expect((r.bridgeOp as any).errorKind).toBe('IoError');
+  });
+
+  test('Result<T, ANY> → T uses generic unwrap_result', () => {
+    // When error type is not a named struct, fall back to unwrap_result
+    const r = checkCompatibility(result(STRING, ANY), STRING);
+    expect(r.compat).toBe('check');
+    expect(r.bridgeOp?.op).toBe('unwrap_result');
+  });
+
+  test('Result<T, anonymous struct> → T uses generic unwrap_result', () => {
+    const anonError: StructType = {
+      kind: 'struct', nominal: false,
+      fields: [{ name: 'msg', type: STRING }],
+    };
+    const r = checkCompatibility(result(INT32, anonError), INT32);
+    expect(r.compat).toBe('check');
+    expect(r.bridgeOp?.op).toBe('unwrap_result');
+  });
+
+  test('full flow: Rust IoError → JS catch with type info', () => {
+    const checker = new BoundaryChecker();
+    const RustError: StructType = {
+      kind: 'struct', name: 'ConnectionError', nominal: true, origin: 'rust',
+      fields: [
+        { name: 'host', type: STRING },
+        { name: 'port', type: INT32 },
+        { name: 'reason', type: STRING },
+      ],
+    };
+    checker.declare('dbResult', result(array(STRING), RustError), 'rust');
+    const r = checker.checkCrossing('dbResult', 'javascript', array(STRING));
+    expect(r.compat).toBe('check');
+    expect(r.bridgeOp?.op).toBe('throw_typed');
+    expect((r.bridgeOp as any).errorKind).toBe('ConnectionError');
+
+    // JS can catch: if (e.kind === 'ConnectionError') { e.host, e.port, e.reason }
+    const ops = checker.getBridgeOps();
+    expect(ops).toHaveLength(1);
+    expect(ops[0].op.op).toBe('throw_typed');
+  });
+});
+
+describe('Advanced: Cross-Boundary Resource Management (Disposable)', () => {
+  test('T → Disposable<T> wraps with finalizer', () => {
+    // TS passes a file handle to Go — Go needs to know when to close it
+    const r = checkCompatibility(
+      { kind: 'struct', name: 'FileHandle', fields: [], nominal: false },
+      disposable({ kind: 'struct', name: 'FileHandle', fields: [], nominal: false }, 'close')
+    );
+    expect(r.compat).toBe('coerce');
+    expect(r.bridgeOp?.op).toBe('attach_disposer');
+    expect((r.bridgeOp as any).disposer).toBe('close');
+  });
+
+  test('Disposable<T> → T is a check (receiver must manage lifecycle)', () => {
+    const r = checkCompatibility(
+      disposable(STRING, 'dispose'),
+      STRING
+    );
+    expect(r.compat).toBe('check');
+    expect(r.reason).toContain('lifecycle');
+  });
+
+  test('callback proxy across boundary gets proxy_with_finalizer', () => {
+    const checker = new BoundaryChecker();
+    // TS passes a callback to Go as io.Reader interface
+    const readerInterface: InterfaceType = {
+      kind: 'interface', name: 'Reader',
+      methods: [{ name: 'Read', type: func([bufferView(UINT8, 'owned', true)], INT32) }],
+    };
+    // Wrapping in Disposable signals Go must release the proxy when done
+    checker.declare('jsReader', disposable(readerInterface, 'close'), 'javascript');
+    const r = checker.checkCrossing('jsReader', 'go', disposable(readerInterface, 'close'));
+    expect(r.compat).toBe('safe'); // same disposable type
+  });
+
+  test('typeToString renders Disposable', () => {
+    expect(typeToString(disposable(STRING))).toBe('Disposable<string>');
+  });
+
+  test('lowering: Closer → Disposable', () => {
+    const node: AST.TypeNode = { kind: 'SimpleType', id: { kind: 'Identifier', name: 'Closer', span: { start: 0, end: 0, line: 0, column: 0 } }, span: { start: 0, end: 0, line: 0, column: 0 } };
+    const lowered = lowerType(node, 'go');
+    expect(lowered.kind).toBe('disposable');
+    expect((lowered as DisposableType).disposer).toBe('close');
+  });
+
+  test('lowering: AsyncIterable → Stream', () => {
+    const node: AST.TypeNode = {
+      kind: 'GenericType',
+      base: { kind: 'Identifier', name: 'AsyncIterable', span: { start: 0, end: 0, line: 0, column: 0 } },
+      args: [{ kind: 'SimpleType', id: { kind: 'Identifier', name: 'string', span: { start: 0, end: 0, line: 0, column: 0 } }, span: { start: 0, end: 0, line: 0, column: 0 } }],
+      span: { start: 0, end: 0, line: 0, column: 0 },
+    };
+    const lowered = lowerType(node, 'javascript');
+    expect(lowered.kind).toBe('stream');
+    expect((lowered as StreamType).element).toEqual(STRING);
   });
 });
