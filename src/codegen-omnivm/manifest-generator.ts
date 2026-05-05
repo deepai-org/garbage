@@ -313,6 +313,15 @@ export class ManifestCodeGenerator {
         argType = C.FLOAT64; // JS numbers are f64
       } else if (arg.kind === "BooleanLiteral") {
         argType = C.BOOL;
+      } else if (arg.kind === "Lambda") {
+        // Infer function type from lambda's typed params
+        const lambda = arg as AST.Lambda;
+        const params = (lambda.params || []).map((p: AST.Param) => ({
+          name: p.name?.kind === "Identifier" ? p.name.name : undefined,
+          type: p.type ? lowerType(p.type, callerRuntime as any) : C.ANY,
+        }));
+        const returns = lambda.returnType ? lowerType(lambda.returnType, callerRuntime as any) : C.ANY;
+        argType = { kind: "func", params, returns };
       }
 
       if (argType.kind !== "any") {

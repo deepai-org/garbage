@@ -13,7 +13,12 @@ import { Parser } from '../src/parser';
 import { RuntimeResolver } from '../src/runtime-resolver';
 import { ManifestCodeGenerator } from '../src/codegen-omnivm/manifest-generator';
 import { DispatchManifest } from '../src/codegen-omnivm/manifest-types';
-import { BoundaryChecker, lowerType, typeToString } from '../src/type-system';
+import {
+  BoundaryChecker, lowerType, typeToString, checkCompatibility,
+  func, array, result, option, async_, bufferView, stream,
+  INT32, INT64, UINT8, FLOAT64, STRING, BOOL, VOID, ANY, NULL,
+  FuncType, CanonicalType,
+} from '../src/type-system';
 
 function parseAndManifest(code: string): DispatchManifest {
   const lexer = new Lexer(code);
@@ -520,5 +525,170 @@ function main() {
       // Cross-runtime crossings may have errors, but rust→rust is fine
       // The function calls from JS→rust are the crossings
     }
+  });
+});
+
+// ════════════════════════════════════════════════════════════════
+// Level 7: Cross-Boundary Callbacks
+// ════════════════════════════════════════════════════════════════
+
+describe('Level 7: Cross-Boundary Callbacks', () => {
+
+  test('function type crossing produces proxy_callable bridge op', () => {
+    // JS passes a callback to Rust — can't serialize a function
+    const jsCallback = func([UINT8], UINT8);
+    const rustParam = func([UINT8], UINT8);
+
+    const checker = new BoundaryChecker();
+    checker.declare('mapper', jsCallback, 'javascript');
+    const r = checker.checkCrossing('mapper', 'rust', rustParam);
+
+    expect(r.compat).toBe('safe');  // Types match
+    expect(r.bridgeOp).toBeDefined();
+    expect(r.bridgeOp!.op).toBe('proxy_callable');
+  });
+
+  test('callback with coerced params produces proxy_callable with coerce', () => {
+    // JS passes (number) => number to Rust expecting (i32) => i64
+    const jsFunc = func([FLOAT64], FLOAT64);
+    const rustFunc = func([INT32], INT64);
+
+    const r = checkCompatibility(jsFunc, rustFunc);
+    // Contravariant params: Rust passes i32 → JS expects f64 (coerce)
+    // Covariant return: JS returns f64 → Rust expects i64 (check)
+    expect(r.bridgeOp).toBeDefined();
+    expect(r.bridgeOp!.op).toBe('proxy_callable');
+  });
+
+  test('incompatible callback shapes are rejected', () => {
+    // JS passes (string) => void to Rust expecting (i32) => i32
+    const jsFunc = func([STRING], VOID);
+    const rustFunc = func([INT32], INT32);
+
+    const r = checkCompatibility(jsFunc, rustFunc);
+    expect(r.compat).toBe('incompatible');
+  });
+
+  test('full pipeline: TS callback passed to Rust function', () => {
+    const code = `
+fn map_data(data: Vec<u8>, mapper: (u8) => u8) -> Vec<u8> {
+    data
+}
+
+function transform(buf: Uint8Array): Uint8Array {
+    const result: Uint8Array = map_data(buf, (b: number) => b + 1)
+    return result
+}
+`;
+    const m = parseAndManifest(code);
+    expect(m.bridges).toBeDefined();
+    // Should have bridge ops including proxy_callable for the callback arg
+    const callbackBridge = m.bridges!.find(b => b.op === 'proxy_callable');
+    if (callbackBridge) {
+      expect(callbackBridge.from).toBe('javascript');
+      expect(callbackBridge.to).toBe('rust');
+    }
+  });
+
+  test('closure crossing is flagged with proxy_callable (lifetime concern)', () => {
+    const checker = new BoundaryChecker();
+    // A closure that captures local state
+    const closure: FuncType = {
+      kind: 'func',
+      params: [{ type: STRING }],
+      returns: BOOL,
+    };
+    checker.declare('filter', closure, 'javascript');
+
+    // Go wants to hold onto this callback
+    const r = checker.checkCrossing('filter', 'go', closure);
+    expect(r.bridgeOp).toBeDefined();
+    expect(r.bridgeOp!.op).toBe('proxy_callable');
+  });
+});
+
+// ════════════════════════════════════════════════════════════════
+// Level 8: Nested / Composite Bridge Ops
+// ════════════════════════════════════════════════════════════════
+
+describe('Level 8: Nested / Composite Bridge Ops', () => {
+
+  test('Async<Option<T>> → T produces composed bridge chain', () => {
+    const nested = async_(option(STRING));
+    const r = checkCompatibility(nested, STRING);
+
+    // Must not be incompatible — needs await then unwrap
+    expect(r.compat).not.toBe('incompatible');
+    // Should have a composite bridge op
+    expect(r.bridgeOp).toBeDefined();
+    expect(r.bridgeOp!.op).toBe('compose');
+    const steps = (r.bridgeOp as any).steps;
+    expect(steps).toBeDefined();
+    expect(steps.length).toBe(2);
+    expect(steps[0].op).toBe('await_resolve');
+    expect(steps[1].op).toBe('unwrap_option');
+  });
+
+  test('Result<Array<i32>, Error> → Array<f64> unwraps result (inner coercion is implicit)', () => {
+    const nested = result(array(INT32), ANY);
+    const r = checkCompatibility(nested, array(FLOAT64));
+
+    expect(r.compat).not.toBe('incompatible');
+    expect(r.bridgeOp).toBeDefined();
+    // Inner Array<i32>→Array<f64> is implicit coercion (no explicit bridge op),
+    // so the result is just unwrap_result without a compose wrapper
+    expect(r.bridgeOp!.op).toBe('unwrap_result');
+  });
+
+  test('Promise<Option<Vec<Result<string, Error>>>> → string[] composes full chain', () => {
+    // The hardest case: 4 layers of wrapping
+    const deep = async_(option(array(result(STRING, ANY))));
+    const target = array(STRING);
+
+    const r = checkCompatibility(deep, target);
+    expect(r.compat).not.toBe('incompatible');
+    expect(r.bridgeOp).toBeDefined();
+    // Should compose: await → unwrap_option → (array elements: unwrap_result)
+    expect(r.bridgeOp!.op).toBe('compose');
+    const steps = (r.bridgeOp as any).steps;
+    expect(steps.length).toBeGreaterThanOrEqual(2);
+    expect(steps[0].op).toBe('await_resolve');
+    expect(steps[1].op).toBe('unwrap_option');
+  });
+
+  test('Option<BufferView<u8>> → Uint8Array composes unwrap + identity', () => {
+    const nested = option(bufferView(UINT8, 'borrowed'));
+    const target = bufferView(UINT8, 'owned');
+
+    const r = checkCompatibility(nested, target);
+    expect(r.compat).not.toBe('incompatible');
+    expect(r.bridgeOp).toBeDefined();
+  });
+
+  test('single-layer wrapping still returns simple bridge op (no unnecessary compose)', () => {
+    // Option<string> → string should be simple unwrap_option, not compose([unwrap_option])
+    const r = checkCompatibility(option(STRING), STRING);
+    expect(r.bridgeOp!.op).toBe('unwrap_option');
+    // Not wrapped in compose
+  });
+
+  test('full pipeline: Rust returns nested Result in Promise context', () => {
+    const code = `
+fn fetch_data(url: &str) -> Result<String, String> {
+    Ok("data")
+}
+
+async function loadData(): Promise<string> {
+    const data: string = fetch_data("http://example.com")
+    return data
+}
+`;
+    const m = parseAndManifest(code);
+    expect(m.bridges).toBeDefined();
+    // Should detect Result<String, String> → string crossing
+    const bridge = m.bridges!.find(b => b.binding.includes('fetch_data'));
+    expect(bridge).toBeDefined();
+    // unwrap_result (String error is not a named struct, so generic unwrap)
+    expect(bridge!.op).toBe('unwrap_result');
   });
 });

@@ -48,7 +48,9 @@ export type BridgeOp =
   | { op: "throw_typed"; errorKind?: string }              // Result.Err → typed exception with metadata
   | { op: "catch_to_result" }                              // try/catch → Result (inverse of throw_typed)
   | { op: "proxy_with_finalizer"; disposer?: string }      // Cross-boundary proxy with GC release hook
-  | { op: "attach_disposer"; disposer: string };           // Wrap in Disposable for resource management
+  | { op: "attach_disposer"; disposer: string }            // Wrap in Disposable for resource management
+  | { op: "proxy_callable" }                               // Cross-boundary function proxy (can't serialize closures)
+  | { op: "compose"; steps: BridgeOp[] };                  // Composed chain of bridge ops for nested generics
 
 /**
  * Check if a value of type `from` can flow into a slot of type `to`.
@@ -158,7 +160,9 @@ function checkSameKind(from: C.CanonicalType, to: C.CanonicalType): CoercionResu
         const paramCompat = checkCompatibility(t.params[i].type, f.params[i].type);
         result = worst(result, paramCompat);
       }
-      return result;
+      // Functions cannot be serialized — they always need a proxy at boundaries.
+      // Even if types match perfectly, crossing a runtime boundary requires a callable proxy.
+      return { compat: result.compat, reason: result.reason, bridgeOp: { op: "proxy_callable" } };
     }
 
     case "struct": {
@@ -258,24 +262,33 @@ function checkCrossKind(from: C.CanonicalType, to: C.CanonicalType): CoercionRes
     }
   }
 
-  // Option<T> → T: check (may be null)
+  // Option<T> → U: check (may be null) + compose with inner bridge
   if (from.kind === "option" && to.kind !== "option") {
     const inner = checkCompatibility((from as C.OptionType).inner, to);
     if (inner.compat !== "incompatible") {
-      return { compat: "check", reason: "optional may be null", bridgeOp: { op: "unwrap_option" } };
+      const unwrapOp: BridgeOp = { op: "unwrap_option" };
+      return {
+        compat: "check",
+        reason: "optional may be null",
+        bridgeOp: composeOps(unwrapOp, inner),
+      };
     }
   }
 
-  // Result<T, E> → T: check (may be error)
+  // Result<T, E> → U: check (may be error) + compose with inner bridge
   // Use throw_typed when error is a named struct for fidelity
   if (from.kind === "result" && to.kind !== "result") {
     const f = from as C.ResultType;
     const inner = checkCompatibility(f.ok, to);
     if (inner.compat !== "incompatible") {
-      if (f.err.kind === "struct" && (f.err as C.StructType).name) {
-        return { compat: "check", reason: "result may be typed error", bridgeOp: { op: "throw_typed", errorKind: (f.err as C.StructType).name } };
-      }
-      return { compat: "check", reason: "result may be error", bridgeOp: { op: "unwrap_result" } };
+      const errOp: BridgeOp = (f.err.kind === "struct" && (f.err as C.StructType).name)
+        ? { op: "throw_typed", errorKind: (f.err as C.StructType).name }
+        : { op: "unwrap_result" };
+      return {
+        compat: "check",
+        reason: f.err.kind === "struct" && (f.err as C.StructType).name ? "result may be typed error" : "result may be error",
+        bridgeOp: composeOps(errOp, inner),
+      };
     }
   }
 
@@ -287,11 +300,17 @@ function checkCrossKind(from: C.CanonicalType, to: C.CanonicalType): CoercionRes
     }
   }
 
-  // Async<T> → T: needs await
+  // Async<T> → U: needs await + compose with inner bridge
   if (from.kind === "async") {
     const inner = checkCompatibility((from as C.AsyncType).inner, to);
     if (inner.compat !== "incompatible") {
-      return { compat: "coerce", reason: "must await", bridgeOp: { op: "await_resolve" } };
+      const awaitOp: BridgeOp = { op: "await_resolve" };
+      const worstCompat = worst({ compat: "coerce" }, inner).compat;
+      return {
+        compat: worstCompat,
+        reason: "must await",
+        bridgeOp: composeOps(awaitOp, inner),
+      };
     }
   }
 
@@ -448,4 +467,18 @@ function incompatible(reason: string): CoercionResult { return { compat: "incomp
 function worst(a: CoercionResult, b: CoercionResult): CoercionResult {
   const order: Compatibility[] = ["safe", "coerce", "check", "incompatible"];
   return order.indexOf(a.compat) >= order.indexOf(b.compat) ? a : b;
+}
+
+/**
+ * Compose an outer bridge op with an inner result's bridge op.
+ * If inner has no bridge op, return just the outer op.
+ * If both exist, create a compose chain.
+ */
+function composeOps(outerOp: BridgeOp, inner: CoercionResult): BridgeOp {
+  if (!inner.bridgeOp) return outerOp;
+  // Flatten: if inner is already a compose, append
+  const innerSteps = inner.bridgeOp.op === "compose"
+    ? (inner.bridgeOp as { op: "compose"; steps: BridgeOp[] }).steps
+    : [inner.bridgeOp];
+  return { op: "compose", steps: [outerOp, ...innerSteps] };
 }
