@@ -30,7 +30,7 @@ print(f"Found {len(filtered)} log files")
 
 ```bash
 npm install
-npm test          # Run all 850 tests
+npm test          # Run all ~1000 tests
 npm run build     # Compile TypeScript
 ```
 
@@ -64,14 +64,92 @@ const manifest = generator.generate(annotated);
 ```
 Source (.poly) → Lexer → Parser → AST
   → Runtime Resolver (which runtime owns each node?)
-  → Manifest Generator (emit dispatch ops with captures)
+  → Type System (validate types at boundaries, emit bridge ops)
+  → Manifest Generator (emit dispatch ops with captures + bridges)
   → Dispatch Manifest (JSON IR for OmniVM)
 ```
 
 1. **Lexer** — Tokenizes polyglot source with virtual semicolon insertion (MASI), 5 context modes, and operator ambiguity handling (`<` as comparison vs generic vs JSX)
 2. **Parser** — Pratt parser with parselet registry producing a unified AST from mixed syntax
 3. **Runtime Resolver** — Two-pass analysis determines which language each expression belongs to using import provenance, syntactic dominance (arrows → JS, list comprehensions → Python), and cost modeling
-4. **Manifest Generator** — Emits a dispatch manifest that tells OmniVM how to orchestrate calls across runtimes with automatic bridging
+4. **Type System** — Unified canonical type IR validates data flowing across runtime boundaries and emits bridge operations for the manifest
+5. **Manifest Generator** — Emits a dispatch manifest that tells OmniVM how to orchestrate calls across runtimes with automatic bridging
+
+## Type System
+
+PolyScript includes a unified type system that validates data at runtime boundaries. Every type annotation — TypeScript generics, Python type hints, Go types, Rust signatures — lowers to a canonical IR, then the boundary checker validates crossings and emits bridge operations.
+
+### Canonical Types
+
+All language-specific types lower to a shared representation:
+
+| Category | Types | Examples |
+|----------|-------|---------|
+| Primitives | `int`, `float`, `bool`, `string`, `bytes`, `void`, `never`, `any` | `i32`, `f64`, `bool`, `String` |
+| Collections | `array`, `map`, `set`, `tuple` | `Vec<u8>`, `Dict[str, int]`, `[]string` |
+| Wrappers | `option`, `result`, `async` | `Option<T>`, `Result<T,E>`, `Promise<T>` |
+| Functions | `func` | `(i32) => bool`, `fn(u8) -> u8` |
+| Structs | `struct` (nominal or structural) | `interface User {}`, `struct Point` |
+| Enums | `enum` with variant payloads | `enum Shape { Circle(f64) }` |
+| Concurrency | `channel`, `stream` | `chan int`, `AsyncIterable<T>` |
+| Memory | `buffer_view` | `Uint8Array`, `&[u8]`, `[]byte` |
+| Resources | `disposable` | `Disposable<T>`, `io.Closer` |
+
+### Boundary Checking
+
+When data flows between runtimes, the type system determines one of four outcomes:
+
+| Result | Meaning | Example |
+|--------|---------|---------|
+| **safe** | No conversion needed | `string` → `string` |
+| **coerce** | Lossless conversion | `i32` → `f64`, struct subtyping |
+| **check** | May fail at runtime | `f64` → `i32` (truncation), `Option<T>` → `T` |
+| **incompatible** | Cannot cross | `Vec<u8>` where `Point` expected |
+
+Cross-runtime structs use **structural** compatibility (duck typing at boundaries), while same-runtime structs use **nominal** matching. This means a Go `User{name, age}` can flow into a TypeScript `{name: string, age: number}` if the fields match.
+
+### Bridge Operations
+
+The type system emits concrete bridge ops that tell OmniVM how to marshal data:
+
+| Bridge Op | Purpose |
+|-----------|---------|
+| `widen` / `narrow` | Numeric conversions with size tracking |
+| `wrap_option` / `unwrap_option` | `T` ↔ `Option<T>` |
+| `wrap_result` / `unwrap_result` | `T` ↔ `Result<T, E>` |
+| `throw_typed` | `Result.Err` → typed exception with error kind metadata |
+| `proxy_callable` | Cross-boundary function/closure proxy |
+| `tag_dispatch` | Enum → discriminated union mapping |
+| `share_memory` / `copy_buffer` | Zero-copy buffer passing vs copying |
+| `stream_proxy` | Channel/Stream → AsyncIterable proxy |
+| `serialize` / `deserialize` | Complex type marshaling (JSON/msgpack) |
+| `compose` | Chained ops for nested generics (`Async<Option<T>>` → `T`) |
+
+### Runtime Guards
+
+When a crossing is `check` (may fail), the type system generates guard code hints for validation:
+
+```
+f64 → i32:
+  JS:     Number.isInteger(value) && value >= -2147483648 && value <= 2147483647
+  Python: isinstance(value, (int, float)) and float(value).is_integer()
+  Go:     _, ok := value.(int64)
+
+string → int:
+  JS:     !isNaN(parseInt(value, 10))
+  Python: value.lstrip("-").isdigit()
+  Go:     _, err := strconv.ParseInt(value, 10, 64); err == nil
+```
+
+### Type Inference
+
+The manifest generator infers types when annotations are absent:
+
+- **Function returns**: `const x = getUser()` → infers from `getUser`'s return type
+- **Member access**: `user.name` → resolves field type from known struct
+- **Index access**: `arr[0]` → resolves element type from known array/map
+- **Literals**: strings, numbers, booleans, array literals
+- **Lambda params**: `(b: number) => b + 1` → infers `func` type
 
 ## Supported Syntax
 
@@ -104,7 +182,13 @@ The manifest is a sequence of ops that OmniVM executes. No language is "on top" 
 | `return` | Return from function |
 | `declare` | Declare a manifest-scope literal |
 | `if` / `loop` | Control flow |
+| `try` / `throw` | Error handling with cross-runtime catch |
+| `parallel` | Cooperative concurrency across runtimes |
+| `chan` / `select` / `spawn` | Go-style concurrency primitives |
+| `await` | Async pump signal |
 | `concat` | Polyglot string interpolation |
+
+The manifest also includes a `bridges` array (bridge ops needed at boundary points) and a `typeSummary` (crossing statistics) when cross-runtime type checking detects boundary crossings.
 
 Go functions emit a `source` field (complete compilation unit) with `exports` (PascalCase symbol names for `plugin.Lookup`) and `requires` (external dependencies injected via `Init()`).
 
@@ -130,9 +214,14 @@ src/
     expr-postfix.ts       #   Calls, member access, Ruby blocks
     literals.ts           #   Strings, arrays, objects, regex
   ast.ts                  # Unified AST node types
+  type-system/            # Unified canonical type system
+    canonical.ts          #   Type IR (all language types lower to this)
+    lowering.ts           #   AST TypeNode → CanonicalType
+    coercion.ts           #   Cross-runtime compatibility rules + bridge ops
+    boundary-checker.ts   #   Type environment + crossing validation
   runtime-resolver/       # Two-pass runtime affinity analysis
   codegen-omnivm/         # Dispatch manifest + source reconstruction
-test/                     # 850 tests across 36 suites
+test/                     # ~1000 tests across 39 suites
 examples/                 # Polyglot example files
 ```
 
