@@ -70,6 +70,8 @@ export class ManifestCodeGenerator {
   private funcDepth: number = 0;
   /** Type system boundary checker — validates types at cross-runtime crossings. */
   private typeChecker: BoundaryChecker = new BoundaryChecker();
+  /** Registry of named types (class/interface/enum) for resolving type annotations. */
+  private typeRegistry: Map<string, C.CanonicalType> = new Map();
 
   /**
    * Generate a dispatch manifest from an annotated program.
@@ -81,6 +83,7 @@ export class ManifestCodeGenerator {
     this.source = annotated.source;
     this.bindingTable = new Map();
     this.typeChecker = new BoundaryChecker();
+    this.typeRegistry = new Map();
 
     // Pass 1: Declare all typed bindings in the type checker
     this.declareTypedBindings(annotated.program.body);
@@ -178,14 +181,14 @@ export class ManifestCodeGenerator {
           break;
         }
         case "VarDecl": {
-          const varType = node.type ? lowerType(node.type, runtime) : C.ANY;
+          const varType = this.resolveFromRegistry(node.type ? lowerType(node.type, runtime) : C.ANY);
           for (const name of node.names) {
             this.typeChecker.declare(name.name, varType, runtime);
           }
           break;
         }
         case "ConstDecl": {
-          const constType = node.type ? lowerType(node.type, runtime) : C.ANY;
+          const constType = this.resolveFromRegistry(node.type ? lowerType(node.type, runtime) : C.ANY);
           for (const name of node.names) {
             this.typeChecker.declare(name.name, constType, runtime);
           }
@@ -198,6 +201,25 @@ export class ManifestCodeGenerator {
             }
           }
           break;
+        case "ClassDecl": {
+          const structType = this.classDeclToCanonical(node, runtime);
+          this.typeChecker.declare(node.name.name, structType, runtime);
+          // Also register type so variables typed as this class resolve to the struct
+          this.typeRegistry.set(node.name.name, structType);
+          break;
+        }
+        case "InterfaceDecl": {
+          const ifaceType = this.interfaceDeclToCanonical(node, runtime);
+          this.typeChecker.declare(node.name.name, ifaceType, runtime);
+          this.typeRegistry.set(node.name.name, ifaceType);
+          break;
+        }
+        case "EnumDecl": {
+          const enumType = this.enumDeclToCanonical(node);
+          this.typeChecker.declare(node.name.name, enumType, runtime);
+          this.typeRegistry.set(node.name.name, enumType);
+          break;
+        }
       }
     }
 
@@ -245,7 +267,78 @@ export class ManifestCodeGenerator {
       if (node.kind === "ExprStmt") {
         this.checkCallArgTypes(node.expr, effectiveCallerRuntime);
       }
+
+      // Control-flow narrowing: if (x !== null) { ... }
+      if (node.kind === "If") {
+        const ifNode = node as AST.If;
+        for (const arm of ifNode.arms) {
+          const narrowings = this.extractNarrowings(arm.test);
+          if (narrowings.size > 0) {
+            this.typeChecker.pushNarrow(narrowings);
+            if (arm.body?.statements) {
+              this.checkCrossRuntimeCalls(arm.body.statements, effectiveCallerRuntime);
+            }
+            this.typeChecker.popNarrow();
+          } else if (arm.body?.statements) {
+            this.checkCrossRuntimeCalls(arm.body.statements, effectiveCallerRuntime);
+          }
+        }
+        // Check else branch without narrowing
+        if (ifNode.elseBody?.statements) {
+          this.checkCrossRuntimeCalls(ifNode.elseBody.statements, effectiveCallerRuntime);
+        }
+      }
     }
+  }
+
+  /**
+   * Extract narrowing information from an if-condition.
+   * Detects patterns like `x !== null`, `x != null`, `x !== undefined`, `x != nil`.
+   */
+  private extractNarrowings(test: AST.Expr): Map<string, C.CanonicalType> {
+    const narrowings = new Map<string, C.CanonicalType>();
+    if (test.kind !== "Binary") return narrowings;
+    const bin = test as AST.Binary;
+    const op = bin.op;
+
+    // x !== null / x != null / x !== undefined / x != nil
+    if (op === "!==" || op === "!=") {
+      const [ident, nullish] = this.extractNullCheck(bin);
+      if (ident && nullish) {
+        const binding = this.typeChecker.getBinding(ident);
+        if (binding) {
+          const narrowed = BoundaryChecker.narrowType(binding.type, "not-null");
+          if (narrowed) narrowings.set(ident, narrowed);
+        }
+      }
+    }
+
+    // && chains: x !== null && y !== undefined
+    if (op === "&&") {
+      const left = this.extractNarrowings(bin.left);
+      const right = this.extractNarrowings(bin.right);
+      for (const [k, v] of left) narrowings.set(k, v);
+      for (const [k, v] of right) narrowings.set(k, v);
+    }
+
+    return narrowings;
+  }
+
+  /**
+   * From a binary != or !== expression, extract (identName, true) if it's a null check.
+   */
+  private extractNullCheck(bin: AST.Binary): [string | null, boolean] {
+    const isNullLiteral = (e: AST.Expr) =>
+      e.kind === "NullLiteral" ||
+      (e.kind === "Identifier" && ((e as AST.Identifier).name === "null" || (e as AST.Identifier).name === "nil" || (e as AST.Identifier).name === "undefined" || (e as AST.Identifier).name === "None"));
+
+    if (bin.left.kind === "Identifier" && isNullLiteral(bin.right)) {
+      return [(bin.left as AST.Identifier).name, true];
+    }
+    if (bin.right.kind === "Identifier" && isNullLiteral(bin.left)) {
+      return [(bin.right as AST.Identifier).name, true];
+    }
+    return [null, false];
   }
 
   /**
@@ -348,6 +441,8 @@ export class ManifestCodeGenerator {
         let t: C.CanonicalType | undefined;
         if (node.type) {
           t = lowerType(node.type, runtime as RT as any);
+          // Enrich opaque named structs with field info from the type registry
+          t = this.resolveFromRegistry(t);
         } else {
           // Infer type from initializer: if it's a call to a known function, use its return type
           const values = node.kind === "ConstDecl" ? node.values : node.values;
@@ -380,10 +475,16 @@ export class ManifestCodeGenerator {
   private inferExprType(expr: AST.Expr): C.CanonicalType | undefined {
     switch (expr.kind) {
       case "Call": {
-        if (expr.callee.kind === "Identifier") {
-          const binding = this.typeChecker.getBinding(expr.callee.name);
+        const call = expr as AST.Call;
+        if (call.callee.kind === "Identifier") {
+          const binding = this.typeChecker.getBinding(call.callee.name);
           if (binding && binding.type.kind === "func") {
-            return (binding.type as C.FuncType).returns;
+            const funcType = binding.type as C.FuncType;
+            // Generic instantiation: substitute typeArgs into return type
+            if (call.typeArgs && call.typeArgs.length > 0) {
+              return this.instantiateReturn(funcType, call.typeArgs, binding.runtime);
+            }
+            return funcType.returns;
           }
         }
         // Method call: x.method() — infer from x's type if known
@@ -468,7 +569,145 @@ export class ManifestCodeGenerator {
       optional: !!p.defaultValue,
     }));
     const returns = node.returnType ? lowerType(node.returnType, runtime) : C.ANY;
-    return { kind: "func", params, returns };
+    return { kind: "func", params, returns, async: node.async };
+  }
+
+  /**
+   * Convert a ClassDecl to a canonical StructType with fields.
+   */
+  private classDeclToCanonical(node: AST.ClassDecl, runtime: string): C.StructType {
+    type RT = "javascript" | "typescript" | "python" | "go" | "rust" | "java" | "csharp" | "ruby" | "bash";
+    const fields: C.Field[] = [];
+    for (const member of node.members) {
+      if (!member.name) continue;
+      if (member.kind === "Field" || member.kind === "Property") {
+        fields.push({
+          name: member.name.name,
+          type: member.type ? lowerType(member.type, runtime as RT) : C.ANY,
+          optional: false,
+          mutable: !member.readonly,
+          visibility: member.visibility,
+        });
+      } else if (member.kind === "Method") {
+        const params = (member.params || []).map(p => ({
+          name: p.name?.kind === "Identifier" ? p.name.name : undefined,
+          type: p.type ? lowerType(p.type, runtime as RT) : C.ANY,
+          optional: !!p.defaultValue,
+        }));
+        const returns = member.type ? lowerType(member.type, runtime as RT) : C.ANY;
+        fields.push({
+          name: member.name.name,
+          type: { kind: "func", params, returns },
+        });
+      }
+    }
+    return { kind: "struct", name: node.name.name, fields, nominal: true, origin: runtime };
+  }
+
+  /**
+   * Convert an InterfaceDecl to a canonical StructType (or InterfaceType) with fields.
+   */
+  private interfaceDeclToCanonical(node: AST.InterfaceDecl, runtime: string): C.StructType {
+    type RT = "javascript" | "typescript" | "python" | "go" | "rust" | "java" | "csharp" | "ruby" | "bash";
+    const fields: C.Field[] = [];
+    for (const member of node.members) {
+      if (member.kind === "Method" || member.params) {
+        const params = (member.params || []).map(p => ({
+          name: p.name?.kind === "Identifier" ? p.name.name : undefined,
+          type: p.type ? lowerType(p.type, runtime as RT) : C.ANY,
+          optional: !!p.defaultValue,
+        }));
+        const returns = member.returnType ? lowerType(member.returnType, runtime as RT) : C.ANY;
+        fields.push({
+          name: member.name.name,
+          type: { kind: "func", params, returns },
+          optional: member.optional,
+        });
+      } else {
+        fields.push({
+          name: member.name.name,
+          type: member.type ? lowerType(member.type, runtime as RT) : C.ANY,
+          optional: member.optional,
+        });
+      }
+    }
+    // Interfaces are structural (duck typing at boundaries)
+    return { kind: "struct", name: node.name.name, fields, nominal: false, origin: runtime };
+  }
+
+  /**
+   * Convert an EnumDecl to a canonical EnumType.
+   */
+  private enumDeclToCanonical(node: AST.EnumDecl): C.EnumType {
+    return {
+      kind: "enum",
+      name: node.name.name,
+      variants: node.members.map(m => ({
+        name: m.name.name,
+        payload: m.value ? this.inferExprType(m.value) : undefined,
+      })),
+    };
+  }
+
+  /**
+   * If a type is an opaque named struct with no fields, check the type registry
+   * for a full definition with field info.
+   */
+  private resolveFromRegistry(type: C.CanonicalType): C.CanonicalType {
+    if (type.kind === "struct" && type.name && type.fields.length === 0) {
+      const registered = this.typeRegistry.get(type.name);
+      if (registered && registered.kind === "struct" && (registered as C.StructType).fields.length > 0) {
+        return registered;
+      }
+    }
+    return type;
+  }
+
+  /**
+   * Instantiate a generic function's return type with concrete type arguments.
+   * Maps typevar positions to concrete types from the call-site type args.
+   */
+  private instantiateReturn(
+    funcType: C.FuncType,
+    typeArgs: AST.TypeNode[],
+    runtime: string,
+  ): C.CanonicalType {
+    type RT = "javascript" | "typescript" | "python" | "go" | "rust" | "java" | "csharp" | "ruby" | "bash";
+    const concreteArgs = typeArgs.map(t => lowerType(t, runtime as RT));
+    return this.substituteTypevars(funcType.returns, concreteArgs);
+  }
+
+  /**
+   * Substitute typevars in a type with concrete types.
+   * Uses positional mapping: first typevar → first concrete arg, etc.
+   */
+  private substituteTypevars(type: C.CanonicalType, args: C.CanonicalType[], depth = 0): C.CanonicalType {
+    if (depth > 10) return type; // guard against infinite recursion
+    switch (type.kind) {
+      case "typevar":
+        // Simple positional: first typevar gets first arg
+        return args[0] || type;
+      case "generic": {
+        const gen = type as C.GenericType;
+        return {
+          ...gen,
+          base: this.substituteTypevars(gen.base, args, depth + 1),
+          args: gen.args.map(a => this.substituteTypevars(a, args, depth + 1)),
+        };
+      }
+      case "async":
+        return { ...type, inner: this.substituteTypevars((type as C.AsyncType).inner, args, depth + 1) };
+      case "option":
+        return { ...type, inner: this.substituteTypevars((type as C.OptionType).inner, args, depth + 1) };
+      case "result": {
+        const r = type as C.ResultType;
+        return { ...r, ok: this.substituteTypevars(r.ok, args, depth + 1), err: this.substituteTypevars(r.err, args, depth + 1) };
+      }
+      case "array":
+        return { ...type, element: this.substituteTypevars((type as C.ArrayType).element, args, depth + 1) };
+      default:
+        return type;
+    }
   }
 
   /**

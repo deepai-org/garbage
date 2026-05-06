@@ -86,7 +86,7 @@ let z = map<string, int>(["1","2","3"], parseInt);
       expect(call.kind).toBe('Call');
       const callee = (call as any).func || call.callee;
       expect((callee as any).name).toBe('map');
-      expect((call as any).genericArgs).toHaveLength(2);
+      expect(call.typeArgs).toHaveLength(2);
       
       // Verify JSX with generic call in prop
       const jsx = (ast.body[1] as AST.ExprStmt).expr as AST.JSXElement;
@@ -94,7 +94,7 @@ let z = map<string, int>(["1","2","3"], parseInt);
       const prop = (jsx as any).openingElement.attributes[0];
       const propCall = prop.value.expression as AST.Call;
       expect(propCall.kind).toBe('Call');
-      expect((propCall as any).genericArgs).toHaveLength(1);
+      expect(propCall.typeArgs).toHaveLength(1);
     });
     
     test('parses generic channel type correctly', () => {
@@ -120,7 +120,7 @@ const z = foo < Bar > (baz)
       const decl1 = ast.body[0] as AST.ConstDecl;
       const call1 = (decl1 as any).values[0] as AST.Call;
       expect(call1.kind).toBe('Call');
-      expect((call1 as any).genericArgs).toHaveLength(1);
+      expect(call1.typeArgs).toHaveLength(1);
       
       // Second: comparison operators (currently fails due to parser bug)
       const decl2 = ast.body[1] as AST.ConstDecl;
@@ -149,7 +149,7 @@ let r = foo<Bar>(x) << 2
       expect(shift2.op).toBe('<<');
       const call = shift2.left as AST.Call;
       expect(call.kind).toBe('Call');
-      expect((call as any).genericArgs).toHaveLength(1);
+      expect(call.typeArgs).toHaveLength(1);
     });
     
     test('parses JSX fragment with conditionals', () => {
@@ -280,10 +280,10 @@ let y = (<number>x) * 2
       const varDecl = ast.body[0] as AST.VarDecl;
       const call = (varDecl as any).values[0] as AST.Call;
       expect(call.kind).toBe('Call');
-      expect((call as any).genericArgs).toHaveLength(1);
+      expect(call.typeArgs).toHaveLength(1);
       
       // Verify deep nesting
-      let current = (call as any).genericArgs[0] as AST.GenericType;
+      let current = call.typeArgs![0] as AST.GenericType;
       const expectedTypes = ['Bar', 'Baz', 'Qux', 'chan', 'List', 'Result'];
       
       for (const expectedType of expectedTypes.slice(0, -1)) {

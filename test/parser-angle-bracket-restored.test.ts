@@ -73,7 +73,7 @@ describe('Parser - Restored Angle Bracket Tests', () => {
       expect(call.kind).toBe('Call');
       const callee = (call as any).func || call.callee;
       expect((callee as any).name).toBe('foo');
-      expect((call as any).genericArgs).toHaveLength(1);
+      expect(call.typeArgs).toHaveLength(1);
       
       // Verify child component
       const child = (jsx as any).children.find((c: any) => c.kind === 'JSXElement');
@@ -123,8 +123,8 @@ describe('Parser - Restored Angle Bracket Tests', () => {
       
       // Left of shift: generic call
       const call = shift.left as AST.Call;
-      expect((call as any).genericArgs).toHaveLength(1);
-      verifyGenericType((call as any).genericArgs[0], 'chan', 1);
+      expect(call.typeArgs).toHaveLength(1);
+      verifyGenericType(call.typeArgs![0], 'chan', 1);
       
       // Right of shift: conditional with comparison and type assertions
       const conditional = shift.right as AST.Ternary;
@@ -172,7 +172,7 @@ function crazy<T>(xs: List<T>, ch: chan<T>): any {
       const stmt1 = body.statements[0] as AST.VarDecl;
       const call = (stmt1 as any).values[0] as AST.Call;
       expect(call.kind).toBe('Call');
-      expect((call as any).genericArgs).toHaveLength(1);
+      expect(call.typeArgs).toHaveLength(1);
       
       // Arg is ternary with comparison and booleans
       const ternary = call.args[0] as AST.Ternary;

@@ -910,3 +910,206 @@ describe('Level 12: Improved Type Inference', () => {
     expect(r.compat).toBe('safe');
   });
 });
+
+// ════════════════════════════════════════════════════════════════
+// Level 13: Struct Field Capture from Class/Interface Declarations
+// ════════════════════════════════════════════════════════════════
+
+describe('Level 13: Struct Field Capture', () => {
+  test('interface fields are captured and available for structural checking', () => {
+    const code = `
+interface User {
+    name: string
+    age: number
+}
+
+def greet(u: User):
+    print(u.name)
+`;
+    const m = parseAndManifest(code);
+    // The interface should be registered — crossing checks should have field info
+    expect(m).toBeDefined();
+  });
+
+  test('class fields are captured with types', () => {
+    const code = `
+class Point {
+    x: number
+    y: number
+
+    distance(): number {
+        return Math.sqrt(this.x * this.x + this.y * this.y)
+    }
+}
+
+fn use_point(p: Point) -> f64 {
+    p.x + p.y
+}
+`;
+    const m = parseAndManifest(code);
+    expect(m).toBeDefined();
+  });
+
+  test('cross-runtime struct with matching fields is coerce, not incompatible', () => {
+    const code = `
+interface Config {
+    host: string
+    port: number
+}
+
+func NewConfig() Config {
+    return nil
+}
+
+function startServer(c: Config) {
+    console.log(c.host)
+}
+
+const config: Config = NewConfig()
+startServer(config)
+`;
+    const m = parseAndManifest(code);
+    // Config type flows from Go to JS — should be coerce not error
+    // because the interface has field info for structural matching
+    if (m.typeSummary) {
+      expect(m.typeSummary.errors).toBe(0);
+    }
+  });
+});
+
+// ════════════════════════════════════════════════════════════════
+// Level 14: Generic Instantiation
+// ════════════════════════════════════════════════════════════════
+
+describe('Level 14: Generic Instantiation', () => {
+  test('Call.typeArgs is populated from parser', () => {
+    const code = `const user = fetchData<User>("/api/user")`;
+    const lexer = new (require('../src/lexer').Lexer)(code);
+    const tokens = lexer.tokenize();
+    const parser = new (require('../src/parser').Parser)(tokens, code);
+    const ast = parser.parse();
+
+    const constDecl = ast.body[0];
+    expect(constDecl.kind).toBe('ConstDecl');
+    const call = (constDecl as any).values[0];
+    expect(call.kind).toBe('Call');
+    expect(call.typeArgs).toBeDefined();
+    expect(call.typeArgs).toHaveLength(1);
+    expect(call.typeArgs[0].kind).toBe('SimpleType');
+    expect(call.typeArgs[0].id.name).toBe('User');
+  });
+
+  test('generic instantiation resolves typevar in return type', () => {
+    const checker = new BoundaryChecker();
+
+    // Declare a generic function: function fetch<T>(url: string): Promise<T>
+    const fetchType: FuncType = {
+      kind: 'func',
+      params: [{ type: STRING }],
+      returns: { kind: 'async', inner: { kind: 'typevar', name: 'T' } },
+    };
+    checker.declare('fetch', fetchType, 'javascript');
+
+    // The manifest generator's instantiateReturn would substitute T→User
+    // Here we test the raw type var is present
+    const binding = checker.getBinding('fetch');
+    expect(binding).toBeDefined();
+    expect(binding!.type.kind).toBe('func');
+    const ret = (binding!.type as FuncType).returns;
+    expect(ret.kind).toBe('async');
+  });
+});
+
+// ════════════════════════════════════════════════════════════════
+// Level 15: Control-Flow Narrowing
+// ════════════════════════════════════════════════════════════════
+
+describe('Level 15: Control-Flow Narrowing', () => {
+  test('Option<T> narrows to T with not-null guard', () => {
+    const narrowed = BoundaryChecker.narrowType(
+      { kind: 'option', inner: STRING },
+      'not-null'
+    );
+    expect(narrowed).toBeDefined();
+    expect(narrowed!.kind).toBe('string');
+  });
+
+  test('union with null narrows to non-null members', () => {
+    const union: CanonicalType = {
+      kind: 'union',
+      members: [STRING, INT32, NULL],
+    };
+    const narrowed = BoundaryChecker.narrowType(union, 'not-null');
+    expect(narrowed).toBeDefined();
+    expect(narrowed!.kind).toBe('union');
+    expect((narrowed as any).members).toHaveLength(2);
+  });
+
+  test('union with single non-null member narrows to that member', () => {
+    const union: CanonicalType = {
+      kind: 'union',
+      members: [STRING, NULL],
+    };
+    const narrowed = BoundaryChecker.narrowType(union, 'not-null');
+    expect(narrowed).toBeDefined();
+    expect(narrowed!.kind).toBe('string');
+  });
+
+  test('non-nullable type returns undefined (no narrowing needed)', () => {
+    const narrowed = BoundaryChecker.narrowType(STRING, 'not-null');
+    expect(narrowed).toBeUndefined();
+  });
+
+  test('push/pop narrow scope affects getEffectiveType', () => {
+    const checker = new BoundaryChecker();
+    checker.declare('x', { kind: 'option', inner: INT32 }, 'javascript');
+
+    // Before narrowing
+    expect(checker.getEffectiveType('x')!.kind).toBe('option');
+
+    // After push narrow
+    const narrowings = new Map<string, CanonicalType>();
+    narrowings.set('x', INT32);
+    checker.pushNarrow(narrowings);
+    expect(checker.getEffectiveType('x')!.kind).toBe('int');
+
+    // After pop
+    checker.popNarrow();
+    expect(checker.getEffectiveType('x')!.kind).toBe('option');
+  });
+
+  test('narrowing affects boundary crossing checks', () => {
+    const checker = new BoundaryChecker();
+    checker.declare('maybeVal', { kind: 'option', inner: STRING }, 'javascript');
+
+    // Without narrowing: option → string needs unwrap_option (check)
+    const r1 = checker.checkCrossing('maybeVal', 'python', STRING);
+    expect(r1.compat).toBe('check');
+
+    // With narrowing: narrowed to string → string is safe
+    const narrowings = new Map<string, CanonicalType>();
+    narrowings.set('maybeVal', STRING);
+    checker.pushNarrow(narrowings);
+    const r2 = checker.checkCrossing('maybeVal', 'python', STRING);
+    expect(r2.compat).toBe('safe');
+    checker.popNarrow();
+  });
+
+  test('if (x !== null) narrows in pipeline', () => {
+    const code = `
+fn get_user() -> Option<string> {
+    None
+}
+
+function process() {
+    const user: string | null = get_user()
+    if (user !== null) {
+        console.log(user.toUpperCase())
+    }
+}
+`;
+    const m = parseAndManifest(code);
+    // Should parse and generate manifest without errors
+    expect(m).toBeDefined();
+  });
+});

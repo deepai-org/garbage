@@ -55,6 +55,8 @@ export class BoundaryChecker {
   private bindings: Map<string, TypedBinding> = new Map();
   private crossings: BoundaryCrossing[] = [];
   private diagnostics: TypeDiagnostic[] = [];
+  /** Stack of narrowing scopes — each scope maps binding names to narrowed types. */
+  private narrowScopes: Map<string, C.CanonicalType>[] = [];
 
   /**
    * Register a binding in the type environment.
@@ -76,6 +78,49 @@ export class BoundaryChecker {
    */
   getBinding(name: string): TypedBinding | undefined {
     return this.bindings.get(name);
+  }
+
+  /**
+   * Get the effective type of a binding, considering narrowing scopes.
+   */
+  getEffectiveType(name: string): C.CanonicalType | undefined {
+    // Check narrowing scopes (innermost first)
+    for (let i = this.narrowScopes.length - 1; i >= 0; i--) {
+      const narrowed = this.narrowScopes[i].get(name);
+      if (narrowed) return narrowed;
+    }
+    return this.bindings.get(name)?.type;
+  }
+
+  /**
+   * Push a narrowing scope — narrows Option<T> to T, union types, etc.
+   * Used when entering an if-branch that null-checks a binding.
+   */
+  pushNarrow(narrowings: Map<string, C.CanonicalType>): void {
+    this.narrowScopes.push(narrowings);
+  }
+
+  /**
+   * Pop the current narrowing scope (when leaving the if-branch).
+   */
+  popNarrow(): void {
+    this.narrowScopes.pop();
+  }
+
+  /**
+   * Narrow a binding's type for the current scope.
+   * Returns the narrowed type, or undefined if narrowing doesn't apply.
+   */
+  static narrowType(type: C.CanonicalType, guard: "not-null" | "not-undefined"): C.CanonicalType | undefined {
+    if (type.kind === "option") return (type as C.OptionType).inner;
+    if (type.kind === "union") {
+      const members = (type as C.UnionType).members.filter(m => m.kind !== "null");
+      if (members.length === 1) return members[0];
+      if (members.length > 1 && members.length < (type as C.UnionType).members.length) {
+        return { kind: "union", members };
+      }
+    }
+    return undefined;
   }
 
   /**
@@ -105,7 +150,7 @@ export class BoundaryChecker {
       return { compat: "safe" };
     }
 
-    const from = fromTypeOverride || binding!.type;
+    const from = fromTypeOverride || this.getEffectiveType(name) || binding!.type;
     const to = expectedType || C.ANY;
     const result = checkCompatibility(from, to);
 

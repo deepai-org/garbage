@@ -179,6 +179,7 @@ export interface Call {
   kind: "Call";
   callee: Expr;
   args: Expr[];
+  typeArgs?: TypeNode[];
   span: Span;
 }
 

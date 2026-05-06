@@ -144,7 +144,7 @@ export function parsePostfix(host: PostfixHost, expr: AST.Expr): AST.Expr {
       
       // Add generic arguments if they exist
       if (genericArgs) {
-        (callExpr as any).genericArgs = genericArgs;
+        callExpr.typeArgs = genericArgs;
         // Clean up the temporary storage
         delete (expr as any)._genericArgs;
       }

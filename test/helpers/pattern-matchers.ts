@@ -100,10 +100,10 @@ export function findGenericTypes(ast: AST.Program): AST.GenericType[] {
       generics.push((node as any)._typeNode);
     }
     // Check for genericArgs on Call nodes (e.g., React.forwardRef<T1, T2>())
-    if (node && node.kind === 'Call' && (node as any).genericArgs) {
+    if (node && node.kind === 'Call' && node.typeArgs) {
       // Convert genericArgs to GenericType-like structure for compatibility
       const callNode = node as any;
-      if (callNode.genericArgs && callNode.genericArgs.length > 0) {
+      if (callNode.typeArgs && callNode.typeArgs.length > 0) {
         // Create a synthetic GenericType to represent the call's generic arguments
         const syntheticGeneric: AST.GenericType = {
           kind: 'GenericType',
@@ -112,7 +112,7 @@ export function findGenericTypes(ast: AST.Program): AST.GenericType[] {
             name: callNode.callee?.property?.name || callNode.callee?.name || 'unknown',
             span: callNode.callee?.span || { start: 0, end: 0, line: 0, column: 0 }
           },
-          args: callNode.genericArgs,
+          args: callNode.typeArgs,
           span: callNode.span
         };
         generics.push(syntheticGeneric);

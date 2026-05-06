@@ -161,9 +161,9 @@ describe('Parser - Deep Generic Nesting', () => {
       const varDecl = ast.body[0] as AST.VarDecl;
       const call = varDecl.values![0] as AST.Call;
       expect(call.kind).toBe('Call');
-      expect((call as any).genericArgs).toHaveLength(1);
+      expect(call.typeArgs).toHaveLength(1);
       
-      const vec = (call as any).genericArgs[0] as AST.GenericType;
+      const vec = call.typeArgs![0] as AST.GenericType;
       expect(vec.base.name).toBe('Vec');
       
       const option = vec.args[0] as AST.GenericType;
@@ -303,10 +303,10 @@ describe('Parser - Deep Generic Nesting', () => {
       
       const call = shift.left as AST.Call;
       expect(call.kind).toBe('Call');
-      expect((call as any).genericArgs).toHaveLength(1);
+      expect(call.typeArgs).toHaveLength(1);
       
       // Verify the nested generic was parsed correctly
-      const a = (call as any).genericArgs[0] as AST.GenericType;
+      const a = call.typeArgs![0] as AST.GenericType;
       expect(a.base.name).toBe('A');
       const b = a.args[0] as AST.GenericType;
       expect(b.base.name).toBe('B');
