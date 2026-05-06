@@ -77,7 +77,31 @@ Source (.poly) → Lexer → Parser → AST
 
 ## Type System
 
-PolyScript includes a unified type system that validates data at runtime boundaries. Every type annotation — TypeScript generics, Python type hints, Go types, Rust signatures — lowers to a canonical IR, then the boundary checker validates crossings and emits bridge operations.
+PolyScript's type system is **permissive by default** — like TypeScript, but with `any` as the starting point rather than an opt-out. Untyped code runs without interference. Types only come into play when you write them, and only known-incompatible crossings are blocked.
+
+```polyscript
+// No types → everything is `any` → runs without restriction
+const x = getData()
+process(x)
+
+// One side typed → `any` narrows to the target type (always succeeds)
+function process(x: number) { ... }
+process(getData())  // any → number: fine
+
+// Both sides typed → real checking kicks in
+fn get_count() -> i32 { 42 }
+function display(s: string) { console.log(s) }
+display(get_count())  // i32 → string: auto-coerced via to_string bridge op
+
+// Only blocked when types are known AND incompatible
+fn get_point() -> Point { ... }
+function process(v: Vec<u8>) { ... }
+process(get_point())  // Point → Vec<u8>: REJECTED at compile time
+```
+
+The philosophy: **never reject code you don't understand**. The type system is purely additive — it helps when annotations are present, emits bridge ops for safe marshaling, and stays silent when types are unknown. You can add types incrementally as your polyglot program grows, and each annotation you add gives you more safety without breaking existing untyped code.
+
+Every type annotation — TypeScript generics, Python type hints, Go types, Rust signatures — lowers to a canonical IR, then the boundary checker validates crossings and emits bridge operations.
 
 ### Canonical Types
 
