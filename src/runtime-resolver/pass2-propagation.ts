@@ -23,6 +23,7 @@ export class Pass2Propagation {
   private symbolTable: SymbolTable;
   private bridges: BridgeDescriptor[] = [];
   private defaultRuntime: OmniRuntime;
+  private scopeRuntimeStack: OmniRuntime[] = [];
 
   constructor(
     affinityMap: Map<AST.Decl | AST.Stmt | AST.Expr, RuntimeAffinity>,
@@ -103,15 +104,33 @@ export class Pass2Propagation {
       case "Block":
         return this.propagateBlock(node);
 
-      case "VarDecl":
+      case "VarDecl": {
+        let valAff: RuntimeAffinity | undefined;
         if (node.values) {
-          for (const v of node.values) this.propagateExpr(v);
+          for (const v of node.values) valAff = this.propagateExpr(v);
+        }
+        // Inherit value's runtime if declaration only has scope fallback
+        const varExisting = this.affinityMap.get(node);
+        if (valAff && valAff.confidence !== "fallback" &&
+            (!varExisting || varExisting.confidence === "fallback" ||
+            (varExisting.confidence === "inferred" && varExisting.evidence[0]?.type === "scope"))) {
+          this.affinityMap.set(node, { ...valAff });
         }
         return this.getOrDefault(node);
+      }
 
-      case "ConstDecl":
-        for (const v of node.values) this.propagateExpr(v);
+      case "ConstDecl": {
+        let constValAff: RuntimeAffinity | undefined;
+        for (const v of node.values) constValAff = this.propagateExpr(v);
+        // Inherit value's runtime if declaration only has scope fallback
+        const constExisting = this.affinityMap.get(node);
+        if (constValAff && constValAff.confidence !== "fallback" &&
+            (!constExisting || constExisting.confidence === "fallback" ||
+            (constExisting.confidence === "inferred" && constExisting.evidence[0]?.type === "scope"))) {
+          this.affinityMap.set(node, { ...constValAff });
+        }
         return this.getOrDefault(node);
+      }
 
       case "ExportDecl":
         if (node.declaration) return this.propagateNode(node.declaration);
@@ -433,9 +452,17 @@ export class Pass2Propagation {
   }
 
   private propagateFuncDecl(node: AST.FuncDecl): RuntimeAffinity {
+    // Push the function's declared runtime so body statements inherit it
+    const funcAff = this.affinityMap.get(node);
+    if (funcAff && funcAff.confidence !== "fallback") {
+      this.scopeRuntimeStack.push(funcAff.runtime);
+    }
     this.symbolTable.pushScope();
     this.propagateBlock(node.body);
     this.symbolTable.popScope();
+    if (funcAff && funcAff.confidence !== "fallback") {
+      this.scopeRuntimeStack.pop();
+    }
 
     // Async infection for async functions
     const aff = this.getOrDefault(node);
@@ -472,7 +499,13 @@ export class Pass2Propagation {
     const existing = this.affinityMap.get(node);
     if (existing) return existing;
 
-    const scopeAff = this.symbolTable.getScopeAffinity();
+    // Prefer the enclosing function's runtime over symbol-table scope majority
+    const scopeRuntime = this.scopeRuntimeStack.length > 0
+      ? this.scopeRuntimeStack[this.scopeRuntimeStack.length - 1]
+      : undefined;
+    const scopeAff = scopeRuntime
+      ? { runtime: scopeRuntime, confidence: "inferred" as const, evidence: [{ type: "scope" as const, detail: `enclosing function: ${scopeRuntime}` }] }
+      : this.symbolTable.getScopeAffinity();
     const defaultAff: RuntimeAffinity = scopeAff || {
       runtime: this.defaultRuntime,
       confidence: "fallback",
