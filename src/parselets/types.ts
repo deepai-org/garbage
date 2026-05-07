@@ -173,6 +173,34 @@ export function parseType(host: TypeHost): AST.TypeNode {
 export function parseSimpleType(host: TypeHost): AST.TypeNode {
   const start = host.current;
 
+  // Reference type prefix: &Type, &mut Type, &[T] (Rust)
+  if (host.check("&") && host.peekNext()?.value !== "&") {
+    host.advance(); // consume &
+    const isMut = host.check("mut");
+    if (isMut) host.advance();
+    // &[T] — reference to slice
+    if (host.check("[")) {
+      host.advance(); // [
+      const elem = parseSimpleType(host);
+      host.consume("]", "Expected ']' after slice type");
+      const prefix = isMut ? "&mut " : "&";
+      return {
+        kind: "GenericType",
+        base: { kind: "Identifier", name: prefix + "[]", span: host.createSpan(start, host.current - 1) },
+        args: [elem],
+        span: host.createSpan(start, host.current - 1),
+      } as AST.TypeNode;
+    }
+    const inner = parseSimpleType(host);
+    const prefix = isMut ? "&mut " : "&";
+    const innerName = inner.kind === "SimpleType" ? (inner as any).id.name : "";
+    return {
+      kind: "SimpleType",
+      id: { kind: "Identifier", name: prefix + innerName, span: host.createSpan(start, host.current - 1) },
+      span: host.createSpan(start, host.current - 1),
+    } as any;
+  }
+
   // Array type prefix: []Type
   if (host.check("[") && host.peekNext()?.value === "]") {
     host.advance(); // consume [
@@ -606,6 +634,16 @@ export function parseGoTypeAnnotation(host: TypeHost): AST.TypeNode {
   if (host.match("*")) {
     const inner = parseGoTypeAnnotation(host);
     return { kind: "SimpleType", id: mkId("*" + (inner.kind === "SimpleType" ? (inner as any).id.name : ""), inner.span), span: inner.span } as any;
+  }
+
+  // Reference type: &Type, &[T], &mut Type (Rust)
+  if (host.match("&")) {
+    const isMut = host.check("mut");
+    if (isMut) host.advance();
+    const inner = parseGoTypeAnnotation(host);
+    const prefix = isMut ? "&mut " : "&";
+    const innerName = inner.kind === "SimpleType" ? (inner as any).id.name : "";
+    return { kind: "SimpleType", id: mkId(prefix + innerName, inner.span), span: mkSpan() } as any;
   }
 
   // Slice type: []Type

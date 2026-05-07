@@ -134,7 +134,7 @@ export function parseFuncDecl(
       }
     }
   } else if (declKeywordValue === "func" && !host.check("{") && !host.peek().virtualSemi &&
-             (host.peek().type === TokenType.Identifier || host.check("[") || host.check("*") || host.check("map"))) {
+             (host.peek().type === TokenType.Identifier || host.check("[") || host.check("*") || host.check("&") || host.check("map"))) {
     returnType = Types.parseGoTypeAnnotation(host);
   } else if (host.check(":")) {
     const checkpoint = host.current;
@@ -463,7 +463,7 @@ export function parseParameter(host: FunctionHost): AST.Param {
              !host.check(",") && !host.check(")") && !host.check("=") && !host.check("?") && !host.check("|") &&
              (host.peek().type === TokenType.Identifier ||
               host.check("interface") || host.check("struct") || host.check("chan") ||
-              host.check("map") || host.check("*") ||
+              host.check("map") || host.check("*") || host.check("&") ||
               (host.check("[") && host.peekAt(1)?.value === "]"))) {
     type = Types.parseGoTypeAnnotation(host);
   }

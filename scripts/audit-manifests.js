@@ -2,6 +2,12 @@
 /**
  * Audit all test files: extract code blocks, run through full pipeline,
  * report parse errors, manifest placeholders, and crashes.
+ *
+ * NOTE: This script extracts code from template literals in test files.
+ * Some escape sequences may not be processed identically to how JS
+ * evaluates them at runtime. The authoritative error count comes from
+ * the diagnostics file written during `npm test` (/tmp/polyscript-diag.jsonl).
+ * This script provides an approximate audit for manifest quality.
  */
 const fs = require('fs');
 const path = require('path');
@@ -24,9 +30,15 @@ for (const file of files) {
   let match;
   let blockNum = 0;
 
-  while ((match = regex.exec(src)) !== null) {
+  while ((match = regex.exec(src)) != null) {
     blockNum++;
-    const code = match[1];
+    // Process common escape sequences from template literals
+    const code = match[1]
+      .replace(/\\n/g, '\n')
+      .replace(/\\t/g, '\t')
+      .replace(/\\"/g, '"')
+      .replace(/\\'/g, "'")
+      .replace(/\\\\/g, '\\');
     if (!code.trim()) continue;
 
     try {
@@ -37,19 +49,18 @@ for (const file of files) {
 
       if (errors.length > 0) {
         results.parseErrors++;
-        continue; // Skip codegen for parse errors — intentional
+        continue;
       }
 
       const resolver = new RuntimeResolver();
       const annotated = resolver.resolve(ast, code);
       const gen = new ManifestCodeGenerator();
       const manifest = gen.generate(annotated);
-      JSON.stringify(manifest); // verify serializable
+      JSON.stringify(manifest);
 
-      // Check for placeholder comments (real issues, not glob patterns in strings)
+      // Check for placeholder comments (real issues, not glob patterns)
       const badOps = manifest.ops.filter(o => {
         if (!o.code) return false;
-        // Match /* ERROR or /* NodeKind — not glob patterns like *.js
         return /\/\*\s*(ERROR|[A-Z][a-z]+[A-Z])/.test(o.code);
       });
 
@@ -79,20 +90,22 @@ for (const file of files) {
 }
 
 console.log('\n=== MANIFEST AUDIT RESULTS ===\n');
-console.log(`OK:           ${results.ok}`);
-console.log(`Parse errors: ${results.parseErrors} (skipped — intentional)`);
-console.log(`Placeholders: ${results.placeholders}`);
-console.log(`Crashes:      ${results.crashes}`);
-console.log(`Total blocks: ${results.ok + results.parseErrors + results.placeholders + results.crashes}`);
+console.log('OK:           ' + results.ok);
+console.log('Parse errors: ' + results.parseErrors + ' (skipped)');
+console.log('Placeholders: ' + results.placeholders);
+console.log('Crashes:      ' + results.crashes);
+console.log('Total blocks: ' + (results.ok + results.parseErrors + results.placeholders + results.crashes));
 
 if (issues.length > 0) {
   console.log('\n=== ISSUES ===\n');
   for (const issue of issues) {
-    console.log(`[${issue.type.toUpperCase()}] ${issue.file} block ${issue.block}`);
-    console.log(`  source: ${issue.source}`);
+    console.log('[' + issue.type.toUpperCase() + '] ' + issue.file + ' block ' + issue.block);
+    console.log('  source: ' + issue.source);
     for (const d of issue.details) {
-      console.log(`  detail: ${d}`);
+      console.log('  detail: ' + d);
     }
     console.log();
   }
 }
+
+console.log('\nNote: For authoritative parse error count, check /tmp/polyscript-diag.jsonl after npm test');
