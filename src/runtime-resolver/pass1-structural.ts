@@ -172,6 +172,14 @@ export class Pass1Structural {
         this.visitExpr(node.expr);
         break;
 
+      case "Echo":
+        for (const v of node.values) this.visitExpr(v);
+        // f-strings are Python syntax
+        if (node.values.some((v: any) => v.kind === "StringLiteral" && v.flags?.format)) {
+          this.assign(node, OmniRuntime.Python, "definite", { type: "syntax", detail: "f-string in print()" });
+        }
+        break;
+
       // --- Variable declarations ---
       case "VarDecl":
         this.visitVarDecl(node);

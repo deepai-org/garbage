@@ -63,6 +63,19 @@ export class Pass2Propagation {
         return this.getOrDefault(node);
       }
 
+      case "Echo": {
+        let echoArgAff: RuntimeAffinity | undefined;
+        for (const v of node.values) echoArgAff = this.propagateExpr(v);
+        // Inherit arg affinity if Echo wasn't already tagged (e.g. by f-string)
+        const echoExisting = this.affinityMap.get(node);
+        if (echoArgAff && echoArgAff.confidence !== "fallback" &&
+            (!echoExisting || echoExisting.confidence === "fallback" ||
+            (echoExisting.confidence === "inferred" && echoExisting.evidence[0]?.type === "scope"))) {
+          this.affinityMap.set(node, { ...echoArgAff });
+        }
+        return this.getOrDefault(node);
+      }
+
       case "FuncDecl":
         return this.propagateFuncDecl(node);
 

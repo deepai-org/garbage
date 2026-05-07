@@ -58,6 +58,10 @@ describe("Example files: end-to-end pipeline", () => {
       expect(runtimes[11]).toBe("javascript"); // status (arrow + template)
     });
 
+    it("detects f-string print as python", () => {
+      expect(runtimes[12]).toBe("python"); // print(f"Pipeline complete...")
+    });
+
     it("manifest ops have valid code strings", () => {
       const evalOps = manifest.ops.filter(
         (o: any) => o.op === "eval" && o.code
@@ -141,6 +145,10 @@ describe("Example files: end-to-end pipeline", () => {
       expect((crawl as any)?.bodyRuntime).toBe("python");
       expect((process as any)?.bodyRuntime).toBe("javascript");
       expect((worker as any)?.bodyRuntime).toBe("go");
+    });
+
+    it("detects f-string print as python", () => {
+      expect(runtimes[22]).toBe("python"); // print(f"Processed {total}...")
     });
 
     it("has type crossing summary", () => {
