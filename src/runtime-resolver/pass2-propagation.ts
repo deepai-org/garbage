@@ -54,8 +54,14 @@ export class Pass2Propagation {
 
   private propagateNode(node: AST.Decl | AST.Stmt | AST.Expr): RuntimeAffinity {
     switch (node.kind) {
-      case "ExprStmt":
-        return this.propagateExpr(node.expr);
+      case "ExprStmt": {
+        const exprAff = this.propagateExpr(node.expr);
+        // Inherit the expression's affinity for the statement wrapper
+        if (exprAff && exprAff.confidence !== "fallback") {
+          this.affinityMap.set(node, { ...exprAff });
+        }
+        return this.getOrDefault(node);
+      }
 
       case "FuncDecl":
         return this.propagateFuncDecl(node);
@@ -68,11 +74,21 @@ export class Pass2Propagation {
         if (node.elseBody) this.propagateBlock(node.elseBody);
         return this.getOrDefault(node);
 
-      case "Loop":
+      case "Loop": {
         if (node.test) this.propagateExpr(node.test);
-        if (node.iterable) this.propagateExpr(node.iterable);
-        this.propagateBlock(node.body);
+        let loopIterAff: RuntimeAffinity | undefined;
+        if (node.iterable) loopIterAff = this.propagateExpr(node.iterable);
+        const loopBodyAff = this.propagateBlock(node.body);
+        // Inherit from iterable or body if loop only has scope fallback
+        const loopExisting = this.affinityMap.get(node);
+        const bestLoopAff = (loopIterAff && loopIterAff.confidence !== "fallback") ? loopIterAff :
+                            (loopBodyAff && loopBodyAff.confidence !== "fallback") ? loopBodyAff : undefined;
+        if (bestLoopAff && (!loopExisting || loopExisting.confidence === "fallback" ||
+            (loopExisting.confidence === "inferred" && loopExisting.evidence[0]?.type === "scope"))) {
+          this.affinityMap.set(node, { ...bestLoopAff });
+        }
         return this.getOrDefault(node);
+      }
 
       case "Switch":
         this.propagateExpr(node.discriminant);

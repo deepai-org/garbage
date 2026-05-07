@@ -388,23 +388,35 @@ export class Pass1Structural {
   }
 
   private visitVarDecl(node: AST.VarDecl): void {
+    let valueAff: RuntimeAffinity | undefined;
     if (node.values) {
-      for (const v of node.values) this.visitExpr(v);
+      for (const v of node.values) {
+        this.visitExpr(v);
+        valueAff = this.getAffinity(v);
+      }
     }
+    const symAff = (valueAff && valueAff.confidence !== "fallback")
+      ? valueAff : this.currentScopeAffinity();
     for (const name of node.names) {
       this.symbolTable.define(name.name, {
         name: name.name,
-        affinity: this.currentScopeAffinity(),
+        affinity: symAff,
       });
     }
   }
 
   private visitConstDecl(node: AST.ConstDecl): void {
-    for (const v of node.values) this.visitExpr(v);
+    let valueAff: RuntimeAffinity | undefined;
+    for (const v of node.values) {
+      this.visitExpr(v);
+      valueAff = this.getAffinity(v);
+    }
+    const symAff = (valueAff && valueAff.confidence !== "fallback")
+      ? valueAff : this.currentScopeAffinity();
     for (const name of node.names) {
       this.symbolTable.define(name.name, {
         name: name.name,
-        affinity: this.currentScopeAffinity(),
+        affinity: symAff,
       });
     }
   }
@@ -436,6 +448,10 @@ export class Pass1Structural {
       case "Binary":
         if (expr.op === "===" || expr.op === "!==") {
           this.assign(expr, OmniRuntime.JavaScript, "definite", { type: "syntax", detail: `strict equality ${expr.op}` });
+        }
+        // Channel send: `ch <- value` is Go
+        if (expr.op === "<-") {
+          this.assign(expr, OmniRuntime.Go, "definite", { type: "syntax", detail: "channel send <-" });
         }
         this.visitExpr(expr.left);
         this.visitExpr(expr.right);
