@@ -62,6 +62,17 @@ export function parseIf(host: ControlFlowHost, ): AST.If {
   if (host.check("[")) {
     // Bash test expression
     test = host.parseBashTestExpression();
+  } else if (host.check("echo") || host.check("test") || host.check("command")) {
+    // Bash-style: if command ...; then — consume tokens until ; or then
+    const cmdStart = host.current;
+    while (!host.isAtEnd() && !host.check(";") && !host.check("then") && !host.peek().virtualSemi) {
+      host.advance();
+    }
+    test = {
+      kind: "Identifier",
+      name: host.tokens.slice(cmdStart, host.current).map((t: any) => t.value).join(" "),
+      span: host.createSpan(cmdStart, host.current - 1),
+    } as AST.Identifier;
   } else {
     test = host.parseExpression();
   }

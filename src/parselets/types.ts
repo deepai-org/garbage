@@ -492,6 +492,33 @@ export function parseSimpleType(host: TypeHost): AST.TypeNode {
     }
   }
 
+  // Go map[K]V type
+  if (host.check("map") && host.peekNext()?.value === "[") {
+    host.advance(); // map
+    host.advance(); // [
+    const keyType = parseSimpleType(host);
+    host.consume("]", "Expected ']' after map key type");
+    const valType = parseSimpleType(host);
+    return {
+      kind: "GenericType",
+      base: { kind: "Identifier", name: "map", span: host.createSpan(start, start) },
+      args: [keyType, valType],
+      span: host.createSpan(start, host.current - 1)
+    } as AST.TypeNode;
+  }
+
+  // Go interface{} / struct{} as type
+  if ((host.check("interface") || host.check("struct")) && host.peekNext()?.value === "{") {
+    const kw = host.advance().value; // interface or struct
+    host.advance(); // {
+    host.consume("}", `Expected '}' after ${kw}{}`);
+    return {
+      kind: "SimpleType",
+      id: { kind: "Identifier", name: `${kw}{}`, span: host.createSpan(start, host.current - 1) },
+      span: host.createSpan(start, host.current - 1)
+    } as any;
+  }
+
   // Simple or generic type
   let id: AST.Identifier;
   const token = host.peek();

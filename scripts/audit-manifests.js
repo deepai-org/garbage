@@ -25,20 +25,42 @@ const issues = [];
 for (const file of files) {
   const src = fs.readFileSync(path.join(testDir, file), 'utf8');
 
-  // Extract code blocks from const code = `...`
-  const regex = /const code = `([\s\S]*?)`;/g;
-  let match;
+  // Extract code blocks from const code = `...` with proper backtick tracking
+  const marker = 'const code = `';
+  let searchPos = 0;
   let blockNum = 0;
 
-  while ((match = regex.exec(src)) != null) {
+  while (true) {
+    const idx = src.indexOf(marker, searchPos);
+    if (idx === -1) break;
+    const contentStart = idx + marker.length;
+    // Find the unescaped closing backtick
+    let i = contentStart;
+    while (i < src.length) {
+      if (src[i] === '\\') { i += 2; continue; }
+      if (src[i] === '`') break;
+      i++;
+    }
+    if (i >= src.length) break;
+    searchPos = i + 1;
     blockNum++;
-    // Process common escape sequences from template literals
-    const code = match[1]
-      .replace(/\\n/g, '\n')
-      .replace(/\\t/g, '\t')
-      .replace(/\\"/g, '"')
-      .replace(/\\'/g, "'")
-      .replace(/\\\\/g, '\\');
+    // Unescape template literal content character by character
+    const raw = src.slice(contentStart, i);
+    let code = '';
+    for (let j = 0; j < raw.length; j++) {
+      if (raw[j] === '\\' && j + 1 < raw.length) {
+        const next = raw[j + 1];
+        if (next === '`') { code += '`'; j++; }
+        else if (next === '$') { code += '$'; j++; }
+        else if (next === '\\') { code += '\\'; j++; }
+        else if (next === 'n') { code += '\n'; j++; }
+        else if (next === 't') { code += '\t'; j++; }
+        else if (next === 'r') { code += '\r'; j++; }
+        else { code += raw[j]; }
+      } else {
+        code += raw[j];
+      }
+    }
     if (!code.trim()) continue;
 
     try {
@@ -49,6 +71,13 @@ for (const file of files) {
 
       if (errors.length > 0) {
         results.parseErrors++;
+        issues.push({
+          file,
+          block: blockNum,
+          type: 'parse',
+          details: errors.map(e => e.message + (e.token ? ' @L' + e.token.line : '')),
+          source: code.trim().split('\n')[0].substring(0, 80)
+        });
         continue;
       }
 
