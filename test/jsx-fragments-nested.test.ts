@@ -1,14 +1,30 @@
 // JSX Fragments and Nested Elements Tests
 import { Lexer } from '../src/lexer';
 import { Parser } from '../src/parser';
+import { RuntimeResolver } from '../src/runtime-resolver';
+import { ManifestCodeGenerator } from '../src/codegen-omnivm/manifest-generator';
+
+/** Parse code and smoke-test the manifest pipeline */
+function parse(code: string) {
+  const lexer = new Lexer(code);
+  const tokens = lexer.tokenize();
+  const parser = new Parser(tokens, code);
+  const ast = parser.parse();
+  // Smoke-test manifest pipeline
+  if (parser.getErrors().length === 0) {
+    const resolver = new RuntimeResolver();
+    const annotated = resolver.resolve(ast, code);
+    const gen = new ManifestCodeGenerator();
+    const manifest = gen.generate(annotated);
+    JSON.stringify(manifest);
+  }
+  return ast;
+}
 
 describe('JSX Fragments and Nested Elements', () => {
     it('should parse simple fragment', () => {
         const code = `<>Hello World</>`;
-        const lexer = new Lexer(code);
-        const tokens = lexer.tokenize();
-        const parser = new Parser(tokens);
-        expect(() => parser.parse()).not.toThrow();
+        const ast = parse(code);
     });
 
     it('should parse fragment with multiple children', () => {
@@ -18,10 +34,7 @@ describe('JSX Fragments and Nested Elements', () => {
     <Main />
     <Footer />
 </>`;
-        const lexer = new Lexer(code);
-        const tokens = lexer.tokenize();
-        const parser = new Parser(tokens);
-        expect(() => parser.parse()).not.toThrow();
+        const ast = parse(code);
     });
 
     it('should parse deeply nested elements', () => {
@@ -38,18 +51,12 @@ describe('JSX Fragments and Nested Elements', () => {
         </article>
     </section>
 </div>`;
-        const lexer = new Lexer(code);
-        const tokens = lexer.tokenize();
-        const parser = new Parser(tokens);
-        expect(() => parser.parse()).not.toThrow();
+        const ast = parse(code);
     });
 
     it('should parse fragment in expression', () => {
         const code = `const element = <>First<br />Second</>;`;
-        const lexer = new Lexer(code);
-        const tokens = lexer.tokenize();
-        const parser = new Parser(tokens);
-        expect(() => parser.parse()).not.toThrow();
+        const ast = parse(code);
     });
 
     it('should parse conditional rendering', () => {
@@ -58,10 +65,7 @@ describe('JSX Fragments and Nested Elements', () => {
     {isLoading ? <Spinner /> : <Content />}
     {error && <ErrorMessage />}
 </div>`;
-        const lexer = new Lexer(code);
-        const tokens = lexer.tokenize();
-        const parser = new Parser(tokens);
-        expect(() => parser.parse()).not.toThrow();
+        const ast = parse(code);
     });
 
     it('should parse map with keys', () => {
@@ -71,10 +75,7 @@ describe('JSX Fragments and Nested Elements', () => {
         <li key={item.id}>{item.name}</li>
     ))}
 </ul>`;
-        const lexer = new Lexer(code);
-        const tokens = lexer.tokenize();
-        const parser = new Parser(tokens);
-        expect(() => parser.parse()).not.toThrow();
+        const ast = parse(code);
     });
 
     it('should parse nested fragments', () => {
@@ -87,10 +88,7 @@ describe('JSX Fragments and Nested Elements', () => {
         </>
     </div>
 </>`;
-        const lexer = new Lexer(code);
-        const tokens = lexer.tokenize();
-        const parser = new Parser(tokens);
-        expect(() => parser.parse()).not.toThrow();
+        const ast = parse(code);
     });
 
     it('should parse JSX comments', () => {
@@ -103,10 +101,7 @@ describe('JSX Fragments and Nested Elements', () => {
         comment 
     */}
 </div>`;
-        const lexer = new Lexer(code);
-        const tokens = lexer.tokenize();
-        const parser = new Parser(tokens);
-        expect(() => parser.parse()).not.toThrow();
+        const ast = parse(code);
     });
 
     it('should parse spread children', () => {
@@ -114,10 +109,7 @@ describe('JSX Fragments and Nested Elements', () => {
 <Container>
     {...childElements}
 </Container>`;
-        const lexer = new Lexer(code);
-        const tokens = lexer.tokenize();
-        const parser = new Parser(tokens);
-        expect(() => parser.parse()).not.toThrow();
+        const ast = parse(code);
     });
 
     it('should parse namespaced components', () => {
@@ -126,9 +118,6 @@ describe('JSX Fragments and Nested Elements', () => {
     <Form.Label>Name</Form.Label>
     <Form.Control type="text" />
 </Form.Group>`;
-        const lexer = new Lexer(code);
-        const tokens = lexer.tokenize();
-        const parser = new Parser(tokens);
-        expect(() => parser.parse()).not.toThrow();
+        const ast = parse(code);
     });
 });

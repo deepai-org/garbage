@@ -2,14 +2,30 @@
 import { Lexer } from '../src/lexer';
 import { Parser } from '../src/parser';
 import * as AST from '../src/ast';
+import { RuntimeResolver } from '../src/runtime-resolver';
+import { ManifestCodeGenerator } from '../src/codegen-omnivm/manifest-generator';
+
+/** Parse code and smoke-test the manifest pipeline */
+function parse(code: string) {
+  const lexer = new Lexer(code);
+  const tokens = lexer.tokenize();
+  const parser = new Parser(tokens, code);
+  const ast = parser.parse();
+  // Smoke-test manifest pipeline
+  if (parser.getErrors().length === 0) {
+    const resolver = new RuntimeResolver();
+    const annotated = resolver.resolve(ast, code);
+    const gen = new ManifestCodeGenerator();
+    const manifest = gen.generate(annotated);
+    JSON.stringify(manifest);
+  }
+  return ast;
+}
 
 describe('JSX Attributes and Props', () => {
     it('should parse string attributes', () => {
         const code = `<input type="text" placeholder="Enter name" />`;
-        const lexer = new Lexer(code);
-        const tokens = lexer.tokenize();
-        const parser = new Parser(tokens);
-        const ast = parser.parse();
+        const ast = parse(code);
         
         const stmt = ast.body[0] as AST.ExprStmt;
         const jsx = stmt.expr as AST.JSXElement;
@@ -35,10 +51,7 @@ describe('JSX Attributes and Props', () => {
 
     it('should parse expression attributes', () => {
         const code = `<Button onClick={handleClick} disabled={isDisabled} />`;
-        const lexer = new Lexer(code);
-        const tokens = lexer.tokenize();
-        const parser = new Parser(tokens);
-        const ast = parser.parse();
+        const ast = parse(code);
         
         const stmt = ast.body[0] as AST.ExprStmt;
         const jsx = stmt.expr as AST.JSXElement;
@@ -66,10 +79,7 @@ describe('JSX Attributes and Props', () => {
 
     it('should parse spread props', () => {
         const code = `<Component {...props} />`;
-        const lexer = new Lexer(code);
-        const tokens = lexer.tokenize();
-        const parser = new Parser(tokens);
-        const ast = parser.parse();
+        const ast = parse(code);
         
         const stmt = ast.body[0] as AST.ExprStmt;
         const jsx = stmt.expr as AST.JSXElement;
@@ -86,10 +96,7 @@ describe('JSX Attributes and Props', () => {
 
     it('should parse mixed spread and regular props', () => {
         const code = `<Component {...defaultProps} size="large" {...overrides} />`;
-        const lexer = new Lexer(code);
-        const tokens = lexer.tokenize();
-        const parser = new Parser(tokens);
-        const ast = parser.parse();
+        const ast = parse(code);
         
         const stmt = ast.body[0] as AST.ExprStmt;
         const jsx = stmt.expr as AST.JSXElement;
@@ -113,10 +120,7 @@ describe('JSX Attributes and Props', () => {
 
     it('should parse boolean attributes', () => {
         const code = `<button disabled hidden autoFocus />`;
-        const lexer = new Lexer(code);
-        const tokens = lexer.tokenize();
-        const parser = new Parser(tokens);
-        const ast = parser.parse();
+        const ast = parse(code);
         
         const stmt = ast.body[0] as AST.ExprStmt;
         const jsx = stmt.expr as AST.JSXElement;
@@ -138,10 +142,7 @@ describe('JSX Attributes and Props', () => {
 
     it('should parse style object', () => {
         const code = `<div style={{color: 'red', fontSize: 16}} />`;
-        const lexer = new Lexer(code);
-        const tokens = lexer.tokenize();
-        const parser = new Parser(tokens);
-        const ast = parser.parse();
+        const ast = parse(code);
         
         const stmt = ast.body[0] as AST.ExprStmt;
         const jsx = stmt.expr as AST.JSXElement;
@@ -162,10 +163,7 @@ describe('JSX Attributes and Props', () => {
 
     it('should parse event handlers', () => {
         const code = `<button onClick={() => setCount(count + 1)} onMouseEnter={handleHover} />`;
-        const lexer = new Lexer(code);
-        const tokens = lexer.tokenize();
-        const parser = new Parser(tokens);
-        const ast = parser.parse();
+        const ast = parse(code);
         
         const stmt = ast.body[0] as AST.ExprStmt;
         const jsx = stmt.expr as AST.JSXElement;
@@ -192,10 +190,7 @@ describe('JSX Attributes and Props', () => {
 <div className="container">
     <span class="text-bold">Both work</span>
 </div>`;
-        const lexer = new Lexer(code);
-        const tokens = lexer.tokenize();
-        const parser = new Parser(tokens);
-        const ast = parser.parse();
+        const ast = parse(code);
         
         const stmt = ast.body[0] as AST.ExprStmt;
         const jsx = stmt.expr as AST.JSXElement;
@@ -216,10 +211,7 @@ describe('JSX Attributes and Props', () => {
 
     it('should parse namespaced attributes', () => {
         const code = `<svg xmlns:xlink="http://www.w3.org/1999/xlink" />`;
-        const lexer = new Lexer(code);
-        const tokens = lexer.tokenize();
-        const parser = new Parser(tokens);
-        const ast = parser.parse();
+        const ast = parse(code);
         
         const stmt = ast.body[0] as AST.ExprStmt;
         const jsx = stmt.expr as AST.JSXElement;
@@ -237,10 +229,7 @@ describe('JSX Attributes and Props', () => {
 
     it('should parse data and aria attributes', () => {
         const code = `<div data-testid="component" aria-label="Close button" />`;
-        const lexer = new Lexer(code);
-        const tokens = lexer.tokenize();
-        const parser = new Parser(tokens);
-        const ast = parser.parse();
+        const ast = parse(code);
         
         const stmt = ast.body[0] as AST.ExprStmt;
         const jsx = stmt.expr as AST.JSXElement;

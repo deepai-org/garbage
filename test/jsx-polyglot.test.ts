@@ -1,6 +1,25 @@
 // JSX with PolyScript Multi-Paradigm Features Tests
 import { Lexer } from '../src/lexer';
 import { Parser } from '../src/parser';
+import { RuntimeResolver } from '../src/runtime-resolver';
+import { ManifestCodeGenerator } from '../src/codegen-omnivm/manifest-generator';
+
+/** Parse code and smoke-test the manifest pipeline */
+function parse(code: string) {
+  const lexer = new Lexer(code);
+  const tokens = lexer.tokenize();
+  const parser = new Parser(tokens, code);
+  const ast = parser.parse();
+  // Smoke-test manifest pipeline
+  if (parser.getErrors().length === 0) {
+    const resolver = new RuntimeResolver();
+    const annotated = resolver.resolve(ast, code);
+    const gen = new ManifestCodeGenerator();
+    const manifest = gen.generate(annotated);
+    JSON.stringify(manifest);
+  }
+  return ast;
+}
 
 describe('JSX with PolyScript Multi-Paradigm Features', () => {
     it('should parse JSX with Python list comprehension', () => {
@@ -10,10 +29,7 @@ const TodoList = ({ items }) => (
         {[<li key={i}>{item}</li> for item, i in items if item.active]}
     </ul>
 )`;
-        const lexer = new Lexer(code);
-        const tokens = lexer.tokenize();
-        const parser = new Parser(tokens);
-        expect(() => parser.parse()).not.toThrow();
+        const ast = parse(code);
     });
 
     it('should parse JSX with Go channels', () => {
@@ -28,10 +44,7 @@ function AsyncComponent() {
     
     return <div>{<- ch}</div>
 }`;
-        const lexer = new Lexer(code);
-        const tokens = lexer.tokenize();
-        const parser = new Parser(tokens);
-        expect(() => parser.parse()).not.toThrow();
+        const ast = parse(code);
     });
 
     it('should parse JSX with Ruby blocks', () => {
@@ -43,10 +56,7 @@ def render_list(items)
         end}
     </ul>
 end`;
-        const lexer = new Lexer(code);
-        const tokens = lexer.tokenize();
-        const parser = new Parser(tokens);
-        expect(() => parser.parse()).not.toThrow();
+        const ast = parse(code);
     });
 
     it('should parse JSX with pattern matching', () => {
@@ -59,10 +69,7 @@ function StatusIcon({ status }) {
         default => <QuestionIcon />
     }
 }`;
-        const lexer = new Lexer(code);
-        const tokens = lexer.tokenize();
-        const parser = new Parser(tokens);
-        expect(() => parser.parse()).not.toThrow();
+        const ast = parse(code);
     });
 
     it('should parse JSX with Python decorators', () => {
@@ -79,10 +86,7 @@ class TodoView:
                 )}
             </div>
         )`;
-        const lexer = new Lexer(code);
-        const tokens = lexer.tokenize();
-        const parser = new Parser(tokens);
-        expect(() => parser.parse()).not.toThrow();
+        const ast = parse(code);
     });
 
     it('should parse JSX with C# properties', () => {
@@ -96,10 +100,7 @@ class Component {
         </div>
     )
 }`;
-        const lexer = new Lexer(code);
-        const tokens = lexer.tokenize();
-        const parser = new Parser(tokens);
-        expect(() => parser.parse()).not.toThrow();
+        const ast = parse(code);
     });
 
     it('should parse JSX with Rust Option', () => {
@@ -110,10 +111,7 @@ fn render_user(user: Option<User>) -> JSX.Element {
         None => <GuestCard />
     }
 }`;
-        const lexer = new Lexer(code);
-        const tokens = lexer.tokenize();
-        const parser = new Parser(tokens);
-        expect(() => parser.parse()).not.toThrow();
+        const ast = parse(code);
     });
 
     it('should parse JSX with PHP variables', () => {
@@ -128,10 +126,7 @@ function renderTemplate($title, $items) {
         </div>
     )
 }`;
-        const lexer = new Lexer(code);
-        const tokens = lexer.tokenize();
-        const parser = new Parser(tokens);
-        expect(() => parser.parse()).not.toThrow();
+        const ast = parse(code);
     });
 
     it('should parse JSX with multiple paradigms', () => {
@@ -158,10 +153,7 @@ async def render_async_data():
             ))}
         </>
     )`;
-        const lexer = new Lexer(code);
-        const tokens = lexer.tokenize();
-        const parser = new Parser(tokens);
-        expect(() => parser.parse()).not.toThrow();
+        const ast = parse(code);
     });
 
     it('should parse JSX with defer and using', () => {
@@ -180,9 +172,6 @@ function ResourceComponent() {
         </DataTable>
     )
 }`;
-        const lexer = new Lexer(code);
-        const tokens = lexer.tokenize();
-        const parser = new Parser(tokens);
-        expect(() => parser.parse()).not.toThrow();
+        const ast = parse(code);
     });
 });

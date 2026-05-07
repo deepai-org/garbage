@@ -1,6 +1,25 @@
 // JSX with TypeScript Types Tests
 import { Lexer } from '../src/lexer';
 import { Parser } from '../src/parser';
+import { RuntimeResolver } from '../src/runtime-resolver';
+import { ManifestCodeGenerator } from '../src/codegen-omnivm/manifest-generator';
+
+/** Parse code and smoke-test the manifest pipeline */
+function parse(code: string) {
+  const lexer = new Lexer(code);
+  const tokens = lexer.tokenize();
+  const parser = new Parser(tokens, code);
+  const ast = parser.parse();
+  // Smoke-test manifest pipeline
+  if (parser.getErrors().length === 0) {
+    const resolver = new RuntimeResolver();
+    const annotated = resolver.resolve(ast, code);
+    const gen = new ManifestCodeGenerator();
+    const manifest = gen.generate(annotated);
+    JSON.stringify(manifest);
+  }
+  return ast;
+}
 
 describe('JSX with TypeScript Types', () => {
     it('should parse component with typed props', () => {
@@ -14,10 +33,7 @@ interface ButtonProps {
 function Button({ size, variant, onClick }: ButtonProps) {
     return <button className={size} onClick={onClick}>{variant}</button>
 }`;
-        const lexer = new Lexer(code);
-        const tokens = lexer.tokenize();
-        const parser = new Parser(tokens);
-        expect(() => parser.parse()).not.toThrow();
+        const ast = parse(code);
     });
 
     it('should parse generic component', () => {
@@ -29,10 +45,7 @@ function List<T>({ items }: { items: T[] }) {
         </ul>
     )
 }`;
-        const lexer = new Lexer(code);
-        const tokens = lexer.tokenize();
-        const parser = new Parser(tokens);
-        expect(() => parser.parse()).not.toThrow();
+        const ast = parse(code);
     });
 
     it('should parse type assertion in JSX', () => {
@@ -43,10 +56,7 @@ const element = (
         value={value as string}
     />
 )`;
-        const lexer = new Lexer(code);
-        const tokens = lexer.tokenize();
-        const parser = new Parser(tokens);
-        expect(() => parser.parse()).not.toThrow();
+        const ast = parse(code);
     });
 
     it('should parse JSX.Element return type', () => {
@@ -54,10 +64,7 @@ const element = (
 const Component = (): JSX.Element => {
     return <div>Hello</div>
 }`;
-        const lexer = new Lexer(code);
-        const tokens = lexer.tokenize();
-        const parser = new Parser(tokens);
-        expect(() => parser.parse()).not.toThrow();
+        const ast = parse(code);
     });
 
     it('should parse React.FC type', () => {
@@ -65,10 +72,7 @@ const Component = (): JSX.Element => {
 const MyComponent: React.FC<{ title: string }> = ({ title }) => {
     return <h1>{title}</h1>
 }`;
-        const lexer = new Lexer(code);
-        const tokens = lexer.tokenize();
-        const parser = new Parser(tokens);
-        expect(() => parser.parse()).not.toThrow();
+        const ast = parse(code);
     });
 
     it('should parse children prop type', () => {
@@ -80,10 +84,7 @@ interface Props {
 function Container({ children }: Props) {
     return <div className="container">{children}</div>
 }`;
-        const lexer = new Lexer(code);
-        const tokens = lexer.tokenize();
-        const parser = new Parser(tokens);
-        expect(() => parser.parse()).not.toThrow();
+        const ast = parse(code);
     });
 
     it('should parse event handler types', () => {
@@ -95,10 +96,7 @@ function Form() {
     
     return <form onSubmit={handleSubmit}>Submit</form>
 }`;
-        const lexer = new Lexer(code);
-        const tokens = lexer.tokenize();
-        const parser = new Parser(tokens);
-        expect(() => parser.parse()).not.toThrow();
+        const ast = parse(code);
     });
 
     it('should parse ref types', () => {
@@ -106,10 +104,7 @@ function Form() {
 const Input = React.forwardRef<HTMLInputElement, InputProps>((props, ref) => {
     return <input ref={ref} {...props} />
 })`;
-        const lexer = new Lexer(code);
-        const tokens = lexer.tokenize();
-        const parser = new Parser(tokens);
-        expect(() => parser.parse()).not.toThrow();
+        const ast = parse(code);
     });
 
     it('should parse union type props', () => {
@@ -119,17 +114,11 @@ type Status = 'loading' | 'success' | 'error'
 function StatusIcon({ status }: { status: Status }) {
     return <Icon type={status} />
 }`;
-        const lexer = new Lexer(code);
-        const tokens = lexer.tokenize();
-        const parser = new Parser(tokens);
-        expect(() => parser.parse()).not.toThrow();
+        const ast = parse(code);
     });
 
     it('should parse generic JSX element', () => {
         const code = `const list = <List<string> items={['a', 'b', 'c']} />`;
-        const lexer = new Lexer(code);
-        const tokens = lexer.tokenize();
-        const parser = new Parser(tokens);
-        expect(() => parser.parse()).not.toThrow();
+        const ast = parse(code);
     });
 });

@@ -2,14 +2,30 @@
 import { Lexer } from '../src/lexer';
 import { Parser } from '../src/parser';
 import * as AST from '../src/ast';
+import { RuntimeResolver } from '../src/runtime-resolver';
+import { ManifestCodeGenerator } from '../src/codegen-omnivm/manifest-generator';
+
+/** Parse code and smoke-test the manifest pipeline */
+function parse(code: string) {
+  const lexer = new Lexer(code);
+  const tokens = lexer.tokenize();
+  const parser = new Parser(tokens, code);
+  const ast = parser.parse();
+  // Smoke-test manifest pipeline
+  if (parser.getErrors().length === 0) {
+    const resolver = new RuntimeResolver();
+    const annotated = resolver.resolve(ast, code);
+    const gen = new ManifestCodeGenerator();
+    const manifest = gen.generate(annotated);
+    JSON.stringify(manifest);
+  }
+  return ast;
+}
 
 describe('JSX Basic Elements', () => {
     it('should parse self-closing JSX element', () => {
         const code = `<Button />`;
-        const lexer = new Lexer(code);
-        const tokens = lexer.tokenize();
-        const parser = new Parser(tokens);
-        const ast = parser.parse();
+        const ast = parse(code);
         
         expect(ast.body).toHaveLength(1);
         const stmt = ast.body[0] as AST.ExprStmt;
@@ -28,10 +44,7 @@ describe('JSX Basic Elements', () => {
 
     it('should parse self-closing element with props', () => {
         const code = `<Button size="large" variant="primary" disabled />`;
-        const lexer = new Lexer(code);
-        const tokens = lexer.tokenize();
-        const parser = new Parser(tokens);
-        const ast = parser.parse();
+        const ast = parse(code);
         
         const stmt = ast.body[0] as AST.ExprStmt;
         const jsx = stmt.expr as AST.JSXElement;
@@ -56,10 +69,7 @@ describe('JSX Basic Elements', () => {
 
     it('should parse simple container element', () => {
         const code = `<div>Hello World</div>`;
-        const lexer = new Lexer(code);
-        const tokens = lexer.tokenize();
-        const parser = new Parser(tokens);
-        const ast = parser.parse();
+        const ast = parse(code);
         
         const stmt = ast.body[0] as AST.ExprStmt;
         const jsx = stmt.expr as AST.JSXElement;
@@ -82,10 +92,7 @@ describe('JSX Basic Elements', () => {
 
     it('should parse container with expression', () => {
         const code = `<span>{message}</span>`;
-        const lexer = new Lexer(code);
-        const tokens = lexer.tokenize();
-        const parser = new Parser(tokens);
-        const ast = parser.parse();
+        const ast = parse(code);
         
         const stmt = ast.body[0] as AST.ExprStmt;
         const jsx = stmt.expr as AST.JSXElement;
@@ -107,15 +114,12 @@ describe('JSX Basic Elements', () => {
     <p>Paragraph text</p>
     <Button>Click me</Button>
 </div>`;
-        const lexer = new Lexer(code);
-        const tokens = lexer.tokenize();
-        const parser = new Parser(tokens);
-        const ast = parser.parse();
-        
+        const ast = parse(code);
+
         const stmt = ast.body[0] as AST.ExprStmt;
         const jsx = stmt.expr as AST.JSXElement;
         expect(jsx.kind).toBe('JSXElement');
-        
+
         // Check it has multiple child elements (plus text nodes for whitespace)
         const childElements = jsx.children.filter(c => c.kind === 'JSXElement');
         expect(childElements).toHaveLength(3);
@@ -138,10 +142,7 @@ describe('JSX Basic Elements', () => {
 
     it('should parse mixed text and expressions', () => {
         const code = `<div>Count: {count} items</div>`;
-        const lexer = new Lexer(code);
-        const tokens = lexer.tokenize();
-        const parser = new Parser(tokens);
-        const ast = parser.parse();
+        const ast = parse(code);
         
         const stmt = ast.body[0] as AST.ExprStmt;
         const jsx = stmt.expr as AST.JSXElement;
@@ -180,11 +181,8 @@ describe('JSX Basic Elements', () => {
 function App() {
     return <div>Hello</div>
 }`;
-        const lexer = new Lexer(code);
-        const tokens = lexer.tokenize();
-        const parser = new Parser(tokens);
-        const ast = parser.parse();
-        
+        const ast = parse(code);
+
         // Check function declaration
         expect(ast.body).toHaveLength(1);
         const func = ast.body[0] as AST.FuncDecl;
@@ -206,10 +204,7 @@ function App() {
 
     it('should parse HTML entities', () => {
         const code = `<div>&lt;script&gt; &amp; &quot;text&quot;</div>`;
-        const lexer = new Lexer(code);
-        const tokens = lexer.tokenize();
-        const parser = new Parser(tokens);
-        const ast = parser.parse();
+        const ast = parse(code);
         
         const stmt = ast.body[0] as AST.ExprStmt;
         const jsx = stmt.expr as AST.JSXElement;

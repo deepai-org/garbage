@@ -1,6 +1,25 @@
 // JSX Edge Cases and Disambiguation Tests
 import { Lexer } from '../src/lexer';
 import { Parser } from '../src/parser';
+import { RuntimeResolver } from '../src/runtime-resolver';
+import { ManifestCodeGenerator } from '../src/codegen-omnivm/manifest-generator';
+
+/** Parse code and smoke-test the manifest pipeline */
+function parse(code: string) {
+  const lexer = new Lexer(code);
+  const tokens = lexer.tokenize();
+  const parser = new Parser(tokens, code);
+  const ast = parser.parse();
+  // Smoke-test manifest pipeline
+  if (parser.getErrors().length === 0) {
+    const resolver = new RuntimeResolver();
+    const annotated = resolver.resolve(ast, code);
+    const gen = new ManifestCodeGenerator();
+    const manifest = gen.generate(annotated);
+    JSON.stringify(manifest);
+  }
+  return ast;
+}
 
 describe('JSX Edge Cases and Disambiguation', () => {
     it('should disambiguate JSX vs less-than operator', () => {
@@ -9,10 +28,7 @@ const a = x < 5
 const b = <Component />
 const c = x<5 && y>3
 const d = <div>content</div>`;
-        const lexer = new Lexer(code);
-        const tokens = lexer.tokenize();
-        const parser = new Parser(tokens);
-        expect(() => parser.parse()).not.toThrow();
+        const ast = parse(code);
     });
 
     it('should disambiguate generic vs JSX', () => {
@@ -21,10 +37,7 @@ const arr = Array<number>()  // Generic
 const elem = <Array />       // JSX
 const func = fn<T>(arg)      // Generic call
 const comp = <Button>Click</Button>  // JSX`;
-        const lexer = new Lexer(code);
-        const tokens = lexer.tokenize();
-        const parser = new Parser(tokens);
-        expect(() => parser.parse()).not.toThrow();
+        const ast = parse(code);
     });
 
     it('should handle empty expressions', () => {
@@ -36,10 +49,7 @@ const comp = <Button>Click</Button>  // JSX`;
     {false}
     {true && <span>Show</span>}
 </div>`;
-        const lexer = new Lexer(code);
-        const tokens = lexer.tokenize();
-        const parser = new Parser(tokens);
-        expect(() => parser.parse()).not.toThrow();
+        const ast = parse(code);
     });
 
     it('should handle whitespace correctly', () => {
@@ -52,10 +62,7 @@ const comp = <Button>Click</Button>  // JSX`;
     More text
     
 </div>`;
-        const lexer = new Lexer(code);
-        const tokens = lexer.tokenize();
-        const parser = new Parser(tokens);
-        expect(() => parser.parse()).not.toThrow();
+        const ast = parse(code);
     });
 
     it('should parse JSX in ternary', () => {
@@ -63,10 +70,7 @@ const comp = <Button>Click</Button>  // JSX`;
 const element = condition 
     ? <Success message="Done" />
     : <Error message="Failed" />`;
-        const lexer = new Lexer(code);
-        const tokens = lexer.tokenize();
-        const parser = new Parser(tokens);
-        expect(() => parser.parse()).not.toThrow();
+        const ast = parse(code);
     });
 
     it('should parse JSX in array', () => {
@@ -76,10 +80,7 @@ const elements = [
     <Second key="2" />,
     <Third key="3" />
 ]`;
-        const lexer = new Lexer(code);
-        const tokens = lexer.tokenize();
-        const parser = new Parser(tokens);
-        expect(() => parser.parse()).not.toThrow();
+        const ast = parse(code);
     });
 
     it('should parse JSX as object value', () => {
@@ -89,10 +90,7 @@ const config = {
     footer: <Footer />,
     sidebar: isOpen ? <Sidebar /> : null
 }`;
-        const lexer = new Lexer(code);
-        const tokens = lexer.tokenize();
-        const parser = new Parser(tokens);
-        expect(() => parser.parse()).not.toThrow();
+        const ast = parse(code);
     });
 
     it('should parse adjacent JSX elements with fragment', () => {
@@ -105,10 +103,7 @@ function Component() {
         </>
     )
 }`;
-        const lexer = new Lexer(code);
-        const tokens = lexer.tokenize();
-        const parser = new Parser(tokens);
-        expect(() => parser.parse()).not.toThrow();
+        const ast = parse(code);
     });
 
     it('should parse JSX with template literals', () => {
@@ -116,10 +111,7 @@ function Component() {
 <div className={\`container \${size} \${variant}\`}>
     {\`Count: \${count}\`}
 </div>`;
-        const lexer = new Lexer(code);
-        const tokens = lexer.tokenize();
-        const parser = new Parser(tokens);
-        expect(() => parser.parse()).not.toThrow();
+        const ast = parse(code);
     });
 
     it('should parse complex nested expression', () => {
@@ -139,10 +131,7 @@ function Component() {
         ))
     }
 </Container>`;
-        const lexer = new Lexer(code);
-        const tokens = lexer.tokenize();
-        const parser = new Parser(tokens);
-        expect(() => parser.parse()).not.toThrow();
+        const ast = parse(code);
     });
 
     it('should parse JSX with logical operators', () => {
@@ -152,10 +141,7 @@ function Component() {
     {message || <DefaultMessage />}
     {loading ?? <Spinner />}
 </div>`;
-        const lexer = new Lexer(code);
-        const tokens = lexer.tokenize();
-        const parser = new Parser(tokens);
-        expect(() => parser.parse()).not.toThrow();
+        const ast = parse(code);
     });
 
     it('should parse self-closing HTML tags', () => {
@@ -167,9 +153,6 @@ function Component() {
     <input type="text" />
     <meta charset="UTF-8" />
 </div>`;
-        const lexer = new Lexer(code);
-        const tokens = lexer.tokenize();
-        const parser = new Parser(tokens);
-        expect(() => parser.parse()).not.toThrow();
+        const ast = parse(code);
     });
 });
