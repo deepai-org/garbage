@@ -30,7 +30,7 @@ print(f"Found {len(filtered)} log files")
 
 ```bash
 npm install
-npm test          # Run all ~1000 tests
+npm test          # Run all 1050+ tests
 npm run build     # Compile TypeScript
 ```
 
@@ -71,9 +71,41 @@ Source (.poly) → Lexer → Parser → AST
 
 1. **Lexer** — Tokenizes polyglot source with virtual semicolon insertion (MASI), 5 context modes, and operator ambiguity handling (`<` as comparison vs generic vs JSX)
 2. **Parser** — Pratt parser with parselet registry producing a unified AST from mixed syntax
-3. **Runtime Resolver** — Two-pass analysis determines which language each expression belongs to using import provenance, syntactic dominance (arrows → JS, list comprehensions → Python), and cost modeling
+3. **Runtime Resolver** — Two-pass analysis determines which language each expression belongs to using import provenance, syntactic dominance (arrows → JS, list comprehensions → Python), cross-runtime variable tracking, and cost modeling
 4. **Type System** — Unified canonical type IR validates data flowing across runtime boundaries and emits bridge operations for the manifest
 5. **Manifest Generator** — Emits a dispatch manifest that tells OmniVM how to orchestrate calls across runtimes with automatic bridging
+
+## Runtime Resolver
+
+The runtime resolver determines which language owns each statement — fully automatically, with no annotations or pragmas required. It uses a two-pass analysis:
+
+**Pass 1 (Structural)** tags nodes with evidence from syntax and imports:
+
+| Signal | Language | Example |
+|--------|----------|---------|
+| `import os` | Python | Import provenance |
+| `=>` arrow functions | JavaScript | Syntactic dominance (impossible in Python) |
+| `===`, `!==` | JavaScript | Strict equality operators |
+| `[x for x in ...]` | Python | List comprehension |
+| `<-` channel send | Go | Channel operator |
+| `/.../` regex literal | JavaScript | Regex syntax |
+| `sorted()`, `len()` | Python | Builtin recognition |
+
+**Pass 2 (Propagation)** flows affinities through expression chains:
+
+- **Variable tracking**: `const files = os.listdir()` registers `files` as Python, so later uses of `files` carry Python provenance
+- **Syntactic override**: `files.map(f => f.toUpperCase())` — even though `files` is Python, the arrow function forces JS
+- **Function scoping**: statements inside `def crawl():` inherit Python; inside `func worker()` inherit Go
+- **Expression inheritance**: `ExprStmt`, `Loop`, `ConstDecl`, and `VarDecl` inherit their child expression's runtime
+
+When a variable crosses runtimes, the manifest generator automatically inserts captures and bridge ops:
+
+```polyscript
+import os
+const files = os.listdir("/data")          // Python (import provenance)
+const loud = files.map(f => f.toUpperCase()) // JS (arrow override) — captures `files` from Python
+const ordered = sorted(loud)               // Python (builtin) — captures `loud` from JS
+```
 
 ## Type System
 
@@ -244,16 +276,22 @@ src/
     coercion.ts           #   Cross-runtime compatibility rules + bridge ops
     boundary-checker.ts   #   Type environment + crossing validation
   runtime-resolver/       # Two-pass runtime affinity analysis
+    pass1-structural.ts   #   Syntax/import evidence tagging
+    pass2-propagation.ts  #   Bottom-up affinity propagation
+    symbol-table.ts       #   Scoped variable tracking
+    method-tables.ts      #   Builtin method → runtime mapping
+    import-analyzer.ts    #   Import path → runtime mapping
+    cost-model.ts         #   Bridge cost computation
   codegen-omnivm/         # Dispatch manifest + source reconstruction
-test/                     # ~1000 tests across 39 suites
+test/                     # 1050+ tests across 41 suites
 examples/                 # Polyglot example files
 ```
 
 ## Examples
 
-See [`examples/`](examples/) for complete polyglot programs:
+See [`examples/`](examples/) for complete polyglot programs. All runtimes are **autodetected** — the comments in the files are just for human readers.
 
-- **cursed-polyglot.poly** — Python/JS pipeline that ping-pongs between runtimes every line
+- **cursed-polyglot.poly** — Python/JS pipeline that ping-pongs between runtimes every single line
 - **cursed-concurrency.poly** — Python generators + Go channels + JS async all talking to each other
 - **syntactic-dominance.poly** — Demonstrates how arrow functions override import provenance
 
