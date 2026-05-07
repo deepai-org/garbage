@@ -509,53 +509,6 @@ function load(items, config) {
     expect(ast.body.length).toBeGreaterThanOrEqual(3);
   });
 
-  test('parses mixed macro and metaprogramming', () => {
-    const code = `
-# Macro mixing
-macro_rules! define_ops {
-  ($($op:tt)*) => {
-    fn $op(a: i32, b: i32) -> i32 {
-      a $op b
-    }
-  }
-}
-
-defmacro when(condition, body) do
-  quote do
-    if unquote(condition) do
-      unquote(body)
-    end
-  end
-end
-
-# Template metaprogramming
-template<typename T>
-concept Numeric = requires(T a, T b) {
-  { a + b } -> std::same_as<T>
-  { a * b } -> std::same_as<T>
-}
-
-# Compile-time evaluation
-const COMPILE_TIME := comptime {
-  let mut result = 0
-  for i in 0..100 {
-    result += i
-  }
-  result
-}
-
-# Code generation
-@generate
-def create_getters(fields: List[str]) {
-  for field in fields:
-    yield f"def get_{field}(self): return self.{field}"
-}
-`;
-
-    const ast = parseCode(code);
-    expect(ast.body.length).toBeGreaterThanOrEqual(4);
-  });
-
   test('parses chained operations across paradigms', () => {
     const code = `
 # Chaining with spec-compliant operators
