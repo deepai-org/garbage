@@ -95,6 +95,40 @@ export function parsePrimary(host: PrefixHost, ): AST.Expr {
     return host.parsePostfix(lambda);
   }
   
+  // Handle Python lambda: lambda x, y: expr
+  if (host.peek().value === "lambda") {
+    const start = host.current;
+    host.advance(); // consume 'lambda'
+
+    // Parse parameters (comma-separated identifiers until ':')
+    const params: AST.Param[] = [];
+    while (!host.check(":") && !host.isAtEnd()) {
+      const paramName = host.parseIdentifier();
+      let defaultValue: AST.Expr | undefined;
+      if (host.match("=")) {
+        defaultValue = host.parseAssignmentExpression();
+      }
+      params.push({ name: paramName, defaultValue, span: paramName.span });
+      if (!host.match(",")) break;
+    }
+    host.consume(":", "Expected ':' after lambda parameters");
+
+    // Parse body expression (not a block — single expression)
+    const bodyExpr = host.parseAssignmentExpression();
+    const body: AST.Block = {
+      kind: "Block",
+      statements: [{ kind: "ExprStmt", expr: bodyExpr, span: bodyExpr.span } as any],
+      span: bodyExpr.span,
+    };
+
+    return {
+      kind: "Lambda",
+      params,
+      body,
+      span: host.createSpan(start, host.current - 1),
+    } as AST.Lambda;
+  }
+
   // Handle async lambda/function expressions
   if (host.peek().value === "async") {
     // Look ahead to see if this is really an async function/lambda
