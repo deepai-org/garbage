@@ -650,12 +650,13 @@ describe('Go Runtime Restrictions', () => {
     expect(spawnOp.code).toContain('fetch_data');
   });
 
-  test('defer produces error marker', () => {
+  test('defer produces exec op with defer code', () => {
     const code = 'defer cleanup()';
     const m = parseAndManifest(code);
-    const json = JSON.stringify(m);
-    expect(json).toContain('ERROR');
-    expect(json).toContain('defer not supported');
+    const execOp = m.ops.find(op => op.op === 'exec') as any;
+    expect(execOp).toBeDefined();
+    expect(execOp.code).toContain('defer');
+    expect(execOp.code).toContain('cleanup');
   });
 
   test('select produces SelectOp', () => {
@@ -1206,12 +1207,12 @@ describe('Native Op', () => {
     expect(spawnOp.code).toContain('fetch');
   });
 
-  test('defer produces native op', () => {
+  test('defer produces exec op', () => {
     const code = 'defer cleanup()';
     const m = parseAndManifest(code);
-    const nativeOp = m.ops.find(op => op.op === 'native') as any;
-    expect(nativeOp).toBeDefined();
-    expect(nativeOp.code).toContain('defer');
+    const execOp = m.ops.find(op => op.op === 'exec') as any;
+    expect(execOp).toBeDefined();
+    expect(execOp.code).toContain('defer');
   });
 });
 

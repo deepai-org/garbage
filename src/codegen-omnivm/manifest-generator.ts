@@ -983,8 +983,20 @@ export class ManifestCodeGenerator {
       case "Go":
         return [this.emitSpawn(node)];
 
-      case "Defer":
-        return [{ op: "native", runtime: OmniRuntime.Go, code: "/* ERROR: defer not supported in OmniVM Go runtime. */" }];
+      case "Defer": {
+        const deferAff = this.affinityMap.get(node);
+        const deferRuntime = deferAff?.runtime || OmniRuntime.Go;
+        // Reconstruct from source span or expression
+        let deferCode: string;
+        if (this.source && node.span) {
+          deferCode = this.source.slice(node.span.start, node.span.end);
+        } else if (node.body.kind !== "Block") {
+          deferCode = `defer ${exprToCode(node.body as AST.Expr, this.source)}`;
+        } else {
+          deferCode = "defer { ... }";
+        }
+        return [{ op: "exec", runtime: deferRuntime, code: deferCode }];
+      }
 
       case "Select":
         return [this.emitSelect(node)];
@@ -1164,10 +1176,11 @@ export class ManifestCodeGenerator {
         args,
       };
     }
+    // Fallback: emit as exec with reconstructed code
     return {
-      op: "native",
+      op: "exec",
       runtime: OmniRuntime.Go,
-      code: `/* ERROR: Go runtime only supports pre-registered function calls. Unsupported: ${expr.kind} */`,
+      code: exprToCode(expr, this.source),
     };
   }
 
