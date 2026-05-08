@@ -82,6 +82,13 @@ export function parseVarDecl(host: DeclHost): AST.VarDecl {
       if (host.check(")")) break;
       const name = host.parseIdentifier();
       allNames.push(name);
+      // Skip Go type annotation (e.g., `limiters sync.Map`)
+      if (!host.check("=") && !host.check(")") && !host.isAtEnd() && !host.peek().virtualSemi) {
+        const next = host.peek();
+        if (next.type === "Identifier" || next.type === "Keyword" || next.value === "[" || next.value === "*") {
+          host.parseType();
+        }
+      }
       if (host.match("=")) {
         allValues.push(host.parseAssignmentExpression());
       }
