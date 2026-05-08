@@ -19,10 +19,21 @@ export function applyMASI(tokens: Token[]): Token[] {
   const result: Token[] = [];
   let jsxDepth = 0;
   let braceDepth = 0;
+  let parenDepth = 0;
+  let bracketDepth = 0;
+  let curlyDepth = 0;
 
   for (let i = 0; i < tokens.length; i++) {
     const token = tokens[i];
     result.push(token);
+
+    // Track grouping depth for vsemi suppression
+    if (token.value === '(') parenDepth++;
+    else if (token.value === ')') parenDepth = Math.max(0, parenDepth - 1);
+    else if (token.value === '[') bracketDepth++;
+    else if (token.value === ']') bracketDepth = Math.max(0, bracketDepth - 1);
+    else if (token.value === '{') curlyDepth++;
+    else if (token.value === '}') curlyDepth = Math.max(0, curlyDepth - 1);
 
     // Track JSX context
     if (token.value === '<' && i + 1 < tokens.length) {
@@ -62,7 +73,9 @@ export function applyMASI(tokens: Token[]): Token[] {
         const isJSXExpressionClose = token.value === '}' && braceDepth >= 0 && jsxDepth > 0;
         const prevToken = i > 0 ? tokens[i - 1] : null;
 
-        if (!shouldSuppressVirtualSemi(token, nextToken, inJSXContext || isJSXExpressionClose, prevToken)) {
+        if (parenDepth > 0 || bracketDepth > 0) {
+          // Suppress vsemis inside () and [] (Python/multi-line expressions)
+        } else if (!shouldSuppressVirtualSemi(token, nextToken, inJSXContext || isJSXExpressionClose, prevToken)) {
           const virtualSemi: Token = {
             type: TokenType.VirtualSemi,
             value: ';',

@@ -10,6 +10,7 @@ import { Token, TokenType } from '../lexer';
 import * as AST from '../ast';
 import { ParseError } from '../parser-cursor';
 import * as Types from './types';
+import * as Literals from './literals';
 
 export interface PostfixHost {
   tokens: Token[];
@@ -47,6 +48,19 @@ export function parsePostfix(host: PostfixHost, expr: AST.Expr): AST.Expr {
   // They will be in expr._genericArgs if present
   
   while (true) {
+    // Python implicit string concatenation: "a" "b" → "a" + "b"
+    if ((expr.kind === "StringLiteral") && host.peek().type === TokenType.StringLiteral) {
+      const right = Literals.parseStringLiteral(host as any);
+      expr = {
+        kind: "Binary",
+        op: "+",
+        left: expr,
+        right,
+        span: host.createSpanFrom(expr)
+      } as any;
+      continue;
+    }
+
     // Check for generic arguments after member access (e.g., React.forwardRef<T1, T2>)
     // This handles cases where generics appear after a member access operation
     if (host.check("<") && !host.check("<-") && !host.check("<<") && !host.check("<=") && expr.kind === "Member") {
@@ -348,9 +362,46 @@ export function parsePostfix(host: PostfixHost, expr: AST.Expr): AST.Expr {
       // If ?. is not followed by [, (, or identifier, don't consume it
     }
     
-    // Regular index access
+    // Regular index access (including Python slices)
     if (host.match("[")) {
-      const index = host.parseExpression();
+      // Python slice: [start:end] [:end] [start:] [start:end:step]
+      let index: AST.Expr;
+      if (host.check(":") || host.check("::")) {
+        // [:end] or [:end:step] or [::step]
+        const isDoubleColon = host.check("::");
+        host.advance(); // consume ':' or '::'
+        let end: AST.Expr | undefined;
+        let step: AST.Expr | undefined;
+        if (isDoubleColon) {
+          // [::step]
+          step = host.check("]") ? undefined : host.parseAssignmentExpression();
+        } else {
+          end = host.check("]") || host.check(":") ? undefined : host.parseAssignmentExpression();
+          if (host.match(":")) {
+            step = host.check("]") ? undefined : host.parseAssignmentExpression();
+          }
+        }
+        index = { kind: "Call", callee: { kind: "Identifier", name: "__slice__", span: host.createSpan(host.current - 1, host.current - 1) } as any,
+          args: [end, step].filter(Boolean) as AST.Expr[], span: host.createSpan(host.current - 1, host.current - 1) } as any;
+      } else {
+        index = host.parseExpression();
+        // Check for slice notation after first expression: [start:end] [start:end:step] [start::step]
+        if (host.check(":") || host.check("::")) {
+          if (host.check("::")) {
+            host.advance(); // consume '::'
+            const step = host.check("]") ? undefined : host.parseAssignmentExpression();
+            index = { kind: "Binary", op: ":", left: index, right: step ?? { kind: "Identifier", name: "", span: index.span } as any, span: host.createSpanFrom(index) } as any;
+          } else {
+            host.advance(); // consume ':'
+            const end = host.check("]") || host.check(":") ? undefined : host.parseAssignmentExpression();
+            let step: AST.Expr | undefined;
+            if (host.match(":")) {
+              step = host.check("]") ? undefined : host.parseAssignmentExpression();
+            }
+            index = { kind: "Binary", op: ":", left: index, right: end ?? { kind: "Identifier", name: "", span: index.span } as any, span: host.createSpanFrom(index) } as any;
+          }
+        }
+      }
       host.consume("]", "Expected ']' after index");
       expr = {
         kind: "Index",
@@ -613,7 +664,32 @@ export function parseArguments(host: PostfixHost, ): AST.Expr[] {
         });
       } else {
         // Parse expression but stop at comma at this level
-        args.push(host.parseAssignmentExpression());
+        const expr = host.parseAssignmentExpression();
+        // Python generator expression inside function call: func(expr for x in items)
+        while (host.peek().virtualSemi) host.advance();
+        if (host.check("for") && args.length === 0) {
+          // Parse inline generator: expr for var in iterable [if cond]
+          const comprehensions: any[] = [];
+          while (host.match("for")) {
+            const variables: AST.Identifier[] = [];
+            variables.push(host.parseIdentifier());
+            while (host.match(",")) variables.push(host.parseIdentifier());
+            host.consume("in", "Expected 'in' in generator comprehension");
+            const iterable = host.parseAssignmentExpression();
+            let condition: AST.Expr | undefined;
+            if (host.match("if")) condition = host.parseAssignmentExpression();
+            comprehensions.push({ variables, iterable, condition });
+            if (!host.check("for")) break;
+          }
+          args.push({
+            kind: "ListComprehension",
+            expr,
+            comprehensions,
+            span: host.createSpan(host.current - 1, host.current - 1)
+          } as any);
+          return args;
+        }
+        args.push(expr);
       }
       
       // Skip virtual semicolons after argument

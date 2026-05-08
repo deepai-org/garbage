@@ -187,6 +187,12 @@ export function parseType(host: TypeHost): AST.TypeNode {
 export function parseSimpleType(host: TypeHost): AST.TypeNode {
   const start = host.current;
 
+  // Python ellipsis as type (e.g., tuple[int, ...])
+  if (host.check("...")) {
+    host.advance();
+    return { kind: "SimpleType", id: { kind: "Identifier", name: "...", span: host.createSpan(start, host.current - 1) }, span: host.createSpan(start, host.current - 1) } as AST.TypeNode;
+  }
+
   // Reference type prefix: &Type, &mut Type, &[T] (Rust)
   if (host.check("&") && host.peekNext()?.value !== "&") {
     host.advance(); // consume &

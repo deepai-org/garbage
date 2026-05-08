@@ -320,11 +320,11 @@ export function parsePrimary(host: PrefixHost, ): AST.Expr {
   
   // Literals
   if (host.peek().type === TokenType.NumericLiteral) {
-    return Literals.parseNumericLiteral(host as any);
+    return host.parsePostfix(Literals.parseNumericLiteral(host as any));
   }
   
   if (host.peek().type === TokenType.StringLiteral) {
-    return Literals.parseStringLiteral(host as any);
+    return host.parsePostfix(Literals.parseStringLiteral(host as any));
   }
   
   if (host.peek().type === TokenType.TemplateLiteral) {
@@ -522,13 +522,23 @@ export function parsePrimary(host: PrefixHost, ): AST.Expr {
     }
     
     const start = host.current - 1;
-    
+
     // Skip virtual semicolons and JSX whitespace after opening parenthesis
     while (host.peek().virtualSemi) {
       host.advance();
     }
     JSX.skipJSXWhitespace(host as any);
-    
+
+    // Empty tuple/parens: ()
+    if (host.check(")")) {
+      host.advance();
+      return host.parsePostfix({
+        kind: "ArrayLiteral",
+        elements: [],
+        span: host.createSpan(start, host.current - 1)
+      } as any);
+    }
+
     const expr = host.parseExpression();
     
     // Skip virtual semicolons and JSX whitespace before closing parenthesis

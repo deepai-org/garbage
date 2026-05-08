@@ -75,9 +75,16 @@ export function parseClassDecl(host: ClassHost, decorators?: AST.Expr[]): AST.Cl
     host.advance(); // consume '('
     if (!host.check(")")) {
       extendsType = host.parseType();
-      // Additional parent classes (mixins) - skip for now
+      // Additional parent classes (mixins) and keyword args (total=False)
       while (host.match(",")) {
-        host.parseType();
+        if (host.peek().type === TokenType.Identifier && host.peekNext()?.value === "=") {
+          // Python keyword argument in class parents (e.g. total=False)
+          host.advance(); // name
+          host.advance(); // =
+          host.parseExpression(); // value
+        } else {
+          host.parseType();
+        }
       }
     }
     host.consume(")", "Expected ')' after parent classes");

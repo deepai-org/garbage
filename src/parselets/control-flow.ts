@@ -75,11 +75,10 @@ export function parseIf(host: ControlFlowHost, ): AST.If {
       span: host.createSpan(cmdStart, host.current - 1),
     } as AST.Identifier;
   } else if (host.check("(")) {
-    // Parenthesized condition — consume ( expr ) explicitly to avoid
-    // the postfix parser treating the body's ( as a call
-    host.advance(); // consume (
+    // Parenthesized condition — use parseExpression which will parse (expr)
+    // as a grouped expression. Then check if postfix produced a call
+    // when body starts with ( — if so, the call is actually if-body, not a call.
     test = host.parseExpression();
-    host.consume(")", "Expected ')' after if condition");
   } else {
     test = host.parseExpression();
   }
@@ -762,8 +761,52 @@ export function parseTry(host: ControlFlowHost, ): AST.Try {
     let param: AST.Identifier | undefined;
     let type: AST.TypeNode | undefined;
     
-    // Python-style except: except Type: except Type as var:
+    // Python-style except: except Type: except Type as var: except (T1, T2) as var:
     // But NOT except (e) { ... } which uses parenthesized catch below
+    if (clauseType === "except" && !host.check("{")) {
+      // Handle parenthesized exception tuple: except (ValueError, TypeError) as e:
+      // Distinguish from JS-style except (e) { ... } by looking for comma or uppercase type after (
+      if (host.check("(")) {
+        // Lookahead: if token after ( contains a comma before ), it's a Python tuple
+        let pos = host.current + 1; // skip past (
+        let depth = 1;
+        let hasComma = false;
+        while (pos < host.tokens.length && depth > 0) {
+          const v = host.tokens[pos].value;
+          if (v === "(") depth++;
+          else if (v === ")") depth--;
+          else if (v === "," && depth === 1) hasComma = true;
+          pos++;
+        }
+        // Check what follows the closing paren
+        const afterParen = pos < host.tokens.length ? host.tokens[pos - 1] : undefined;
+        const tokenAfterParen = pos < host.tokens.length ? host.tokens[pos] : undefined;
+        const isPythonTuple = hasComma || (tokenAfterParen && (tokenAfterParen.value === "as" || tokenAfterParen.value === ":"));
+
+        if (isPythonTuple && !(!hasComma && tokenAfterParen?.value === "{")) {
+          host.advance(); // consume '('
+          type = host.parseType();
+          while (host.match(",")) {
+            host.parseType();
+          }
+          host.consume(")", "Expected ')' after exception types");
+          if (host.match("as")) {
+            param = host.parseIdentifier();
+          }
+          if (host.match(":")) {
+            let catchBody: AST.Block;
+            if (host.checkIndentBlock()) {
+              catchBody = host.parseIndentBlock();
+            } else {
+              const stmt = host.parseStatement();
+              catchBody = { kind: "Block", statements: [stmt], span: stmt.span };
+            }
+            catches.push({ param, type, body: catchBody, span: host.createSpan(host.current - 1, host.current) });
+          }
+          continue;
+        }
+      }
+    }
     if (clauseType === "except" && !host.check("(") && !host.check("{")) {
       // Parse optional exception type(s) and binding
       if (host.peek().type === TokenType.Identifier && !host.check(":")) {

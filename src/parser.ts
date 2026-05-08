@@ -668,10 +668,77 @@ export class Parser extends ParserCursor {
         continue;
       }
       
+      // Python "not in" compound operator
+      if (op.value === "not" && this.peekNext()?.value === "in") {
+        this.advance(); // consume 'not'
+        this.advance(); // consume 'in'
+        while (this.peek().virtualSemi) this.advance();
+        const right = this.parseExpression(12); // same precedence as 'in'
+        left = {
+          kind: "Binary",
+          op: "not in",
+          left,
+          right,
+          span: this.createSpanFrom(left)
+        };
+        continue;
+      }
+
+      // Python "is not" compound operator
+      if (op.value === "is" && this.peekNext()?.value === "not") {
+        this.advance(); // consume 'is'
+        this.advance(); // consume 'not'
+        while (this.peek().virtualSemi) this.advance();
+        const right = this.parseExpression(12);
+        left = {
+          kind: "Binary",
+          op: "is not",
+          left,
+          right,
+          span: this.createSpanFrom(left)
+        };
+        continue;
+      }
+
+      // Python ternary: value if condition else alternative
+      // Only if we can find 'else' before statement-ending tokens
+      if (op.value === "if" && op.type === TokenType.Keyword) {
+        let pos = this.current + 1; // past 'if'
+        let depth = 0;
+        let foundElse = false;
+        while (pos < this.tokens.length) {
+          const v = this.tokens[pos].value;
+          if (v === "(" || v === "[" || v === "{") depth++;
+          else if (v === ")" || v === "]" || v === "}") {
+            if (depth === 0) break;
+            depth--;
+          }
+          else if (depth === 0 && v === "else") { foundElse = true; break; }
+          else if (depth === 0 && (v === "for" || v === "," || this.tokens[pos].virtualSemi)) break;
+          pos++;
+        }
+        if (foundElse) {
+          this.advance(); // consume 'if'
+          while (this.peek().virtualSemi) this.advance();
+          const condition = this.parseExpression(2);
+          this.consume("else", "Expected 'else' in Python ternary");
+          while (this.peek().virtualSemi) this.advance();
+          const alternate = this.parseExpression(2);
+          left = {
+            kind: "Ternary",
+            test: condition,
+            consequent: left,
+            alternate,
+            span: this.createSpanFrom(left)
+          };
+          continue;
+        }
+      }
+
       if (!this.isBinaryOp(op) && !this.isAssignmentOp(op)) {
         break;
       }
-      
+
       const precedence = this.getPrecedence(op);
       if (precedence < minPrecedence) {
         break;
@@ -686,7 +753,12 @@ export class Parser extends ParserCursor {
       while (this.peek().virtualSemi) {
         this.advance();
       }
-      
+
+      // Trailing comma: if comma was consumed but next token closes a group, un-consume
+      if (op.value === "," && (this.check(")") || this.check("]") || this.check("}"))) {
+        break;
+      }
+
       // Handle ternary operator
       if (op.value === "?") {
         JSX.skipJSXWhitespace(this);
@@ -935,7 +1007,7 @@ export class Parser extends ParserCursor {
       case "<<": case ">>": case ">>>": return 12;
       case "..": return 11.5; // Range operator
       case "<-": return 11.3; // Channel send operator
-      case "<": case "<=": case ">": case ">=": case "in": case "instanceof": return 11;
+      case "<": case "<=": case ">": case ">=": case "in": case "instanceof": case "is": return 11;
       case "<=>": return 11; // Spaceship operator (comparison)
       case "==": case "!=": case "===": case "!==": return 10;
       case "=~": return 10;
@@ -943,8 +1015,8 @@ export class Parser extends ParserCursor {
       case "&": return 9;
       case "^": return 8;
       case "|": return 7;
-      case "&&": return 6;
-      case "||": return 5;
+      case "&&": case "and": return 6;
+      case "||": case "or": return 5;
       case "??": return 4;
       case "?": return 3; // Ternary
       case "=": case "+=": case "-=": case "*=": case "/=": case "%=":
@@ -983,7 +1055,7 @@ export class Parser extends ParserCursor {
   public isUnaryOp(token: Token): boolean {
     const op = token.value;
     return op === "!" || op === "~" || op === "+" || op === "-" ||
-           op === "typeof" || op === "void" || op === "delete" ||
+           op === "typeof" || op === "void" || op === "delete" || op === "not" ||
            op === "await" || op === "++" || op === "--" || op === "&" || op === "*" || op === "**" ||
            op === "->";
   }

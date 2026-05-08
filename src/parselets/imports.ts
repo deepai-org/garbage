@@ -264,24 +264,59 @@ export function parseFromImport(host: ImportHost): AST.ImportDecl {
     const token = host.advance();
     path = token.value.slice(1, -1);
   } else {
-    let pathParts = [host.advance().value];
-    while (host.match(".")) {
-      pathParts.push(host.advance().value);
+    // Handle relative imports: from .module or from ..package.module
+    let pathStr = "";
+    while (host.check(".") && !host.check("..") || host.check("...")) {
+      pathStr += host.advance().value;
     }
-    path = pathParts.join(".");
+    if (!host.check("import")) {
+      // Module path follows the dots
+      pathStr += host.advance().value; // first identifier
+      while (host.match(".")) {
+        pathStr += "." + host.advance().value;
+      }
+    }
+    path = pathStr;
   }
 
   host.consume("import", "Expected 'import' after module path");
 
+  // Handle parenthesized import list: from X import (\n  A,\n  B,\n)
+  const hasParen = host.match("(");
+
   const specifiers: AST.ImportSpecifier[] = [];
-  do {
-    const imported = host.parseIdentifier().name;
-    let local = imported;
-    if (host.match("as")) {
-      local = host.parseIdentifier().name;
-    }
-    specifiers.push({ imported, local });
-  } while (host.match(","));
+  // Handle wildcard: from X import *
+  if (host.check("*")) {
+    host.advance();
+    specifiers.push({ imported: "*", local: "*" });
+  } else {
+    do {
+      // Skip virtual semicolons inside parenthesized imports
+      while (host.peek().virtualSemi) host.advance();
+      if (hasParen && host.check(")")) break;
+      // Accept keywords as import names (e.g., from X import type)
+      const token = host.peek();
+      let imported: string;
+      if (token.type === TokenType.Keyword || token.type === TokenType.Identifier) {
+        imported = host.advance().value;
+      } else {
+        imported = host.parseIdentifier().name;
+      }
+      let local = imported;
+      if (host.match("as")) {
+        local = host.advance().value; // also accept keywords as aliases
+      }
+      specifiers.push({ imported, local });
+      // Skip virtual semicolons after each specifier
+      while (host.peek().virtualSemi) host.advance();
+    } while (host.match(","));
+  }
+
+  if (hasParen) {
+    // Skip trailing vsemis before closing paren
+    while (host.peek().virtualSemi) host.advance();
+    host.consume(")", "Expected ')' after import list");
+  }
 
   host.consumeSemicolon();
 

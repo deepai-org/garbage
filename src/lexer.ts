@@ -86,7 +86,15 @@ export class Lexer extends LexerCursor {
     const startColumn = this.column;
     
     const char = this.advance();
-    
+
+    // Line continuation: backslash followed by newline — skip both
+    if (char === '\\' && this.peek() === '\n') {
+      this.advance(); // consume newline
+      this.line++;
+      this.column = 0;
+      return;
+    }
+
     // Comments
     if (char === '/' && this.peek() === '/') {
       skipLineComment(this);
