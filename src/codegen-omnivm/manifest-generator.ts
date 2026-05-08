@@ -2078,7 +2078,7 @@ export class ManifestCodeGenerator {
             .map(e => e.name)
             .join(", ");
         } else {
-          loopOp.variable = node.variable.name;
+          loopOp.variable = node.variable.kind === "Identifier" ? node.variable.name : "/* pattern */";
         }
       }
       if (node.iterable) {

@@ -8,6 +8,7 @@
 import { Token, TokenType } from '../lexer';
 import * as AST from '../ast';
 import { ParseError } from '../parser-cursor';
+import * as Decls from './declarations';
 import * as Functions from './functions';
 
 export interface ControlFlowHost {
@@ -296,9 +297,13 @@ export function parseLoop(host: ControlFlowHost, ): AST.Loop {
         host.consume("(", "Expected '(' after 'for await'");
         
         // Parse variable declaration (const/let/var item)
-        let variable: AST.Identifier;
+        let variable: AST.Identifier | AST.ArrayPattern | AST.ObjectPattern;
         if (host.match("const", "let", "var")) {
-          variable = host.parseIdentifier();
+          if (host.check("[") || host.check("{")) {
+            variable = Decls.parseDestructuringPattern(host as any);
+          } else {
+            variable = host.parseIdentifier();
+          }
         } else {
           variable = host.parseIdentifier();
         }
@@ -471,16 +476,21 @@ export function parseLoop(host: ControlFlowHost, ): AST.Loop {
       const checkpoint = host.current;
       const declKeyword = host.advance(); // consume const/let/var
       
-      if (host.peek().type === TokenType.Identifier) {
-        const variable = host.parseIdentifier();
-        
+      if (host.peek().type === TokenType.Identifier || host.check("[") || host.check("{")) {
+        let variable: AST.Identifier | AST.ArrayPattern | AST.ObjectPattern;
+        if (host.check("[") || host.check("{")) {
+          variable = Decls.parseDestructuringPattern(host as any);
+        } else {
+          variable = host.parseIdentifier();
+        }
+
         // Check for 'of' or 'in'
         if (host.match("of", "in")) {
           const iterType = host.previous()?.value; // "of" or "in"
           const iterable = host.parseExpression();
           host.consume(")", "Expected ')' after for-of/for-in");
           const body = host.parseBlockOrStatement();
-          
+
           return {
             kind: "Loop",
             mode: "foreach",

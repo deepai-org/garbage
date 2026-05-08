@@ -58,6 +58,20 @@ export function parseType(host: TypeHost): AST.TypeNode {
     }
   }
 
+  // Leading | for union types: type X = | A | B
+  if (host.check("|")) {
+    host.advance(); // consume leading |
+    const types: AST.TypeNode[] = [];
+    do {
+      types.push(parseSimpleType(host));
+    } while (host.match("|"));
+    return {
+      kind: "UnionType",
+      types,
+      span: host.createSpan(host.current - 1, host.current - 1)
+    } as AST.TypeNode;
+  }
+
   let type = parseSimpleType(host);
 
   // Handle array type suffix: Type[] or indexed access Type["property"]

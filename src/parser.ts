@@ -283,7 +283,7 @@ export class Parser extends ParserCursor {
       type === TokenType.Keyword && (
         value === "import" || value === "require" ||
         value === "let" || value === "var" || value === "auto" ||
-        value === "fn" || value === "fun" || value === "function" || value === "def" || value === "func" ||
+        ((value === "fn" || value === "fun" || value === "function" || value === "def" || value === "func") && this.peekNext()?.value !== ".") ||
         value === "const" || value === "final" || value === "immutable" ||
         value === "class" || value === "struct" || value === "interface" ||
         value === "trait" || value === "enum" ||
@@ -345,7 +345,10 @@ export class Parser extends ParserCursor {
     }
 
     // Function declarations (with generator support)
-    if (this.match("def", "fun", "fn", "func", "function")) {
+    // Don't match if followed by '.' — that's member access (e.g., def.value = ...)
+    if ((this.check("def") || this.check("fun") || this.check("fn") || this.check("func") || this.check("function"))
+        && this.peekNext()?.value !== ".") {
+      this.advance();
       const isGenerator = this.previous()?.value === "function" && this.match("*");
       return Functions.parseFuncDecl(this, false, false, isGenerator);
     }

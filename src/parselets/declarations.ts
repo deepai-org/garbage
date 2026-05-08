@@ -56,6 +56,22 @@ export function parseVarDecl(host: DeclHost): AST.VarDecl {
     host.advance();
   }
 
+  // Destructuring: var/let { a, b } = ... or var/let [a, b] = ...
+  if (host.check("{") || host.check("[")) {
+    const pattern = parseDestructuringPattern(host);
+    let type: AST.TypeNode | undefined;
+    if (host.match(":")) {
+      type = host.parseType();
+    }
+    let values: AST.Expr[] | undefined;
+    if (host.match("=")) {
+      values = host.parseExpressionList();
+    }
+    host.consumeSemicolon();
+    const names = extractPatternNames(pattern);
+    return { kind: "VarDecl", names, type, values, destructurePattern: pattern, span: host.createSpan(start, host.current - 1) } as any;
+  }
+
   // Go grouped var: var ( name = value \n name2 = value2 )
   if (host.check("(")) {
     host.advance();
@@ -119,6 +135,24 @@ export function parseVarDecl(host: DeclHost): AST.VarDecl {
 
 export function parseConstDecl(host: DeclHost): AST.ConstDecl {
   const start = host.current - 1;
+
+  // Destructuring: const { a, b } = ... or const [a, b] = ...
+  if (host.check("{") || host.check("[")) {
+    const pattern = parseDestructuringPattern(host);
+    let type: AST.TypeNode | undefined;
+    if (host.match(":")) {
+      type = host.parseType();
+    }
+    if (!host.match("=") && !host.match(":=")) {
+      host.consume("=", "Const declaration requires initialization");
+    }
+    const values = host.parseExpressionList();
+    host.consumeSemicolon();
+    // Extract names from pattern for ConstDecl compatibility
+    const names = extractPatternNames(pattern);
+    return { kind: "ConstDecl", names, type, values, destructurePattern: pattern, span: host.createSpan(start, host.current - 1) } as any;
+  }
+
   const names = parseIdentifierList(host);
 
   let type: AST.TypeNode | undefined;
@@ -261,12 +295,19 @@ export function parseDestructuringPattern(host: DeclHost): AST.ArrayPattern | AS
         }
       }
 
+      // Default value: { trailing = true }
+      let defaultValue: AST.Expr | undefined;
+      if (host.match("=")) {
+        defaultValue = host.parseAssignmentExpression();
+      }
+
       properties.push({
         key,
         value,
         shorthand,
+        defaultValue,
         span: host.createSpan(propStart, host.current - 1)
-      });
+      } as any);
 
       while (host.peek().virtualSemi) host.advance();
 
@@ -500,6 +541,25 @@ export function peekAhead(host: DeclHost, value: string): boolean {
 
   host.current = checkpoint;
   return false;
+}
+
+function extractPatternNames(pattern: AST.ArrayPattern | AST.ObjectPattern): AST.Identifier[] {
+  const names: AST.Identifier[] = [];
+  if (pattern.kind === "ArrayPattern") {
+    for (const el of pattern.elements) {
+      if (!el) continue;
+      if (el.kind === "Identifier") names.push(el);
+      else names.push(...extractPatternNames(el));
+    }
+  } else {
+    for (const prop of pattern.properties) {
+      if (prop.value.kind === "Identifier") names.push(prop.value);
+      else if (prop.value.kind === "ArrayPattern" || prop.value.kind === "ObjectPattern") {
+        names.push(...extractPatternNames(prop.value));
+      }
+    }
+  }
+  return names;
 }
 
 function parseIdentifierList(host: DeclHost): AST.Identifier[] {

@@ -331,7 +331,7 @@ export interface Loop {
   test?: Expr;
   step?: Expr;
   iterable?: Expr;
-  variable?: Identifier | ArrayPattern;
+  variable?: Identifier | ArrayPattern | ObjectPattern;
   body: Block;
   label?: Identifier;
   await?: boolean;

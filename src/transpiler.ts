@@ -506,7 +506,11 @@ export class Transpiler {
             .map(e => this.visitIdentifier(e));
           this.emit('[' + names.join(', ') + ']');
         } else {
-          this.emit(this.visitIdentifier(node.variable));
+          if (node.variable.kind === "Identifier") {
+            this.emit(this.visitIdentifier(node.variable));
+          } else {
+            this.emit('/* pattern */');
+          }
         }
       }
       this.emit(' of ');

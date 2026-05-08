@@ -924,11 +924,15 @@ export function parseInterfaceDecl(host: ClassHost): AST.InterfaceDecl {
     const memberStart = host.current;
 
     // Skip modifier keywords (async, static, readonly, etc.) before member name
+    // But stop if the keyword IS the member name (e.g., async?: boolean)
     while (host.peek().type === TokenType.Keyword &&
            (host.peek().value === "async" || host.peek().value === "static" ||
             host.peek().value === "readonly" || host.peek().value === "abstract" ||
             host.peek().value === "fn" || host.peek().value === "def" ||
             host.peek().value === "fun" || host.peek().value === "func")) {
+      // If followed by ? or : or (, this keyword is the member name, not a modifier
+      const next = host.peekNext();
+      if (next && (next.value === "?" || next.value === ":" || next.value === "(")) break;
       host.advance();
     }
 
