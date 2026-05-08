@@ -72,8 +72,51 @@ export function parseVarDecl(host: DeclHost): AST.VarDecl {
     return { kind: "VarDecl", names, type, values, destructurePattern: pattern, span: host.createSpan(start, host.current - 1) } as any;
   }
 
-  // Go grouped var: var ( name = value \n name2 = value2 )
+  // Tuple destructuring: let/var (a, b) = ... vs Go grouped var: var ( name = value \n name2 = value2 )
   if (host.check("(")) {
+    // Lookahead: if there's a comma before ) at depth 1, treat as tuple destructuring
+    let isTupleDestructure = false;
+    {
+      let pos = host.current + 1; // after '('
+      let depth = 1;
+      while (pos < host.tokens.length && depth > 0) {
+        const v = host.tokens[pos].value;
+        if (v === "(") depth++;
+        else if (v === ")") { depth--; if (depth === 0) break; }
+        else if (v === "," && depth === 1) { isTupleDestructure = true; break; }
+        pos++;
+      }
+      // Also check: if ')' is immediately followed by '=', it's destructuring even without comma
+      if (!isTupleDestructure && depth === 0 && pos + 1 < host.tokens.length && host.tokens[pos + 1].value === "=") {
+        isTupleDestructure = true;
+      }
+    }
+    if (isTupleDestructure) {
+      // Parse as tuple destructuring: (a, b) = expr
+      host.advance(); // consume '('
+      const names: AST.Identifier[] = [];
+      names.push(host.parseIdentifier());
+      while (host.match(",")) {
+        names.push(host.parseIdentifier());
+      }
+      host.consume(")", "Expected ')' after tuple destructuring");
+      let type: AST.TypeNode | undefined;
+      if (host.match(":")) {
+        type = host.parseType();
+      }
+      let values: AST.Expr[] | undefined;
+      if (host.match("=")) {
+        values = host.parseExpressionList();
+      }
+      host.consumeSemicolon();
+      return {
+        kind: "VarDecl",
+        names,
+        type,
+        values,
+        span: host.createSpan(start, host.current - 1)
+      };
+    }
     host.advance();
     const allNames: AST.Identifier[] = [];
     const allValues: AST.Expr[] = [];

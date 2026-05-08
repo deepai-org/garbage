@@ -146,6 +146,11 @@ export function scanOperator(h: ScanHost, htmlTags: Set<string>): void {
   h.position = start + value.length;
   h.column = startColumn + value.length;
 
+  // Rust :: path separator — next identifier should not be treated as keyword
+  if (value === '::') {
+    h.state.memberAccess = true;
+  }
+
   h.addTokenEx(TokenType.Operator, value, start, h.position, startLine, startColumn);
 }
 
