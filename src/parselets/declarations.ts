@@ -281,6 +281,22 @@ export function parseDestructuringPattern(host: DeclHost): AST.ArrayPattern | AS
       while (host.peek().virtualSemi) host.advance();
 
       const propStart = host.current;
+
+      // Rest element: ...identifier
+      if (host.check("...")) {
+        host.advance(); // consume ...
+        const restId = host.parseIdentifier();
+        properties.push({
+          key: restId,
+          value: restId,
+          shorthand: true,
+          rest: true,
+          span: host.createSpan(propStart, host.current - 1)
+        } as any);
+        // Rest must be last
+        break;
+      }
+
       const key = host.parseIdentifier();
 
       let value: AST.Identifier | AST.ArrayPattern | AST.ObjectPattern = key;
@@ -458,9 +474,13 @@ export function parseExportDecl(host: DeclHost): AST.ExportDecl {
     };
   }
 
-  // export * from
+  // export * from / export * as X from
   if (host.check("*")) {
     host.advance();
+    let namespaceAlias: string | undefined;
+    if (host.match("as")) {
+      namespaceAlias = host.advance().value;
+    }
     if (host.match("from")) {
       let source: string | undefined;
       if (host.peek().type === TokenType.StringLiteral) {
@@ -468,8 +488,18 @@ export function parseExportDecl(host: DeclHost): AST.ExportDecl {
       }
       host.consumeSemicolon();
 
+      const span = host.createSpan(start, host.current - 1);
+      const specifiers: AST.ExportSpecifier[] | undefined = namespaceAlias
+        ? [{
+            local: { kind: "Identifier", name: "*", span } as AST.Identifier,
+            exported: { kind: "Identifier", name: namespaceAlias, span } as AST.Identifier,
+            span
+          }]
+        : undefined;
+
       return {
         kind: "ExportDecl",
+        specifiers,
         source,
         span: host.createSpan(start, host.current - 1)
       };
@@ -496,6 +526,8 @@ export function parseExportSpecifiers(host: DeclHost): AST.ExportSpecifier[] {
 
   if (!host.check("}")) {
     do {
+      // Skip 'type' keyword in type-only exports (e.g., export { type Foo })
+      host.match("type");
       const local = host.parseIdentifier();
       let exported: AST.Identifier | undefined;
 

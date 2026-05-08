@@ -120,6 +120,8 @@ export function scanOperator(h: ScanHost, htmlTags: Set<string>): void {
     h.state.memberAccess = true;
   } else if (value === '?' && h.peek() === '.') {
     h.state.memberAccess = true;
+  } else if (value === '!' && h.peek() === '.') {
+    h.state.memberAccess = true;
   } else if (value === '[' && !h.state.memberAccess && !h.state.decorator && !h.state.bashCondition) {
     const nextNonWs = h.peekNextNonWhitespace();
     if (nextNonWs === '$' || nextNonWs === '"' || nextNonWs === '`' ||

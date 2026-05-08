@@ -57,7 +57,10 @@ export function parsePrimary(host: PrefixHost, ): AST.Expr {
   // Handle function expressions (including async)
   // But not when func() looks like a function call (no body follows the parens)
   if ((host.peek().value === "function" || host.peek().value === "func") &&
-      !looksLikeFuncCall(host)) {
+      !looksLikeFuncCall(host) &&
+      // func must be followed by (, *, or identifier (function name) to be a function expression
+      (host.peekAt(1)?.value === "(" || host.peekAt(1)?.value === "*" ||
+       host.peekAt(1)?.type === TokenType.Identifier)) {
     const start = host.current;
     host.advance(); // consume 'function' or 'func'
 
@@ -96,7 +99,13 @@ export function parsePrimary(host: PrefixHost, ): AST.Expr {
   }
   
   // Handle Python lambda: lambda x, y: expr
-  if (host.peek().value === "lambda") {
+  if (host.peek().value === "lambda" &&
+      host.peekAt(1)?.value !== "." && host.peekAt(1)?.value !== "[" &&
+      host.peekAt(1)?.value !== ")" && host.peekAt(1)?.value !== "," &&
+      host.peekAt(1)?.value !== ";" && host.peekAt(1)?.value !== "}" &&
+      host.peekAt(1)?.value !== "&&" && host.peekAt(1)?.value !== "||" &&
+      host.peekAt(1)?.value !== "as" && host.peekAt(1)?.value !== "!" &&
+      host.peekAt(1)?.value !== "=" && host.peekAt(1)?.value !== "?") {
     const start = host.current;
     host.advance(); // consume 'lambda'
 
@@ -323,9 +332,9 @@ export function parsePrimary(host: PrefixHost, ): AST.Expr {
     if (shouldReinterpretAsIdentifier(host)) {
       return parseBacktickIdentifier(host);
     }
-    return Literals.parseTemplateLiteral(host as any);
+    return host.parsePostfix(Literals.parseTemplateLiteral(host as any));
   }
-  
+
   if (host.peek().type === TokenType.RegexLiteral) {
     return host.parsePostfix(Literals.parseRegexLiteral(host as any));
   }
@@ -572,7 +581,12 @@ export function parsePrimary(host: PrefixHost, ): AST.Expr {
   
   // match expression — but not when followed by assignment (e.g. match = str =~ rx)
   // or { (e.g. if match { ... } where match is a variable name used as condition)
-  if (host.check("match") && !host.isAssignmentOp(host.peekAt(1)!) && host.peekAt(1)?.value !== "{") {
+  if (host.check("match") && !host.isAssignmentOp(host.peekAt(1)!) && host.peekAt(1)?.value !== "{" &&
+      host.peekAt(1)?.value !== ")" && host.peekAt(1)?.value !== "," && host.peekAt(1)?.value !== ";" &&
+      host.peekAt(1)?.value !== "&&" && host.peekAt(1)?.value !== "||" && host.peekAt(1)?.value !== "?" &&
+      host.peekAt(1)?.value !== "]" && host.peekAt(1)?.value !== "[" && host.peekAt(1)?.value !== "!" &&
+      host.peekAt(1)?.value !== "." &&
+      host.peekAt(1)?.type !== TokenType.EOF) {
     host.advance();
     const switchExpr = Blocks.parseSwitch(host as any);
     return switchExpr as any;

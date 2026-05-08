@@ -313,7 +313,26 @@ export function parsePostfix(host: PostfixHost, expr: AST.Expr): AST.Expr {
           span: host.createSpanFrom(expr)
         };
         continue;
-      } else if (next && next.type === TokenType.Identifier) {
+      } else if (next?.value === "(") {
+        // Optional call (?.())
+        host.advance(); // consume ?.
+        host.advance(); // consume (
+        const args: AST.Expr[] = [];
+        if (!host.check(")")) {
+          do {
+            args.push(host.parseAssignmentExpression());
+          } while (host.match(","));
+        }
+        host.consume(")", "Expected ')' after optional call arguments");
+        expr = {
+          kind: "Call",
+          callee: expr,
+          args,
+          optional: true,
+          span: host.createSpanFrom(expr)
+        };
+        continue;
+      } else if (next && (next.type === TokenType.Identifier || next.type === TokenType.Keyword)) {
         // Optional chaining with property access (?.property)
         host.advance(); // consume ?.
         const property = host.parseIdentifier();
@@ -326,8 +345,7 @@ export function parsePostfix(host: PostfixHost, expr: AST.Expr): AST.Expr {
         };
         continue;
       }
-      // If ?. is not followed by [ or identifier, don't consume it
-      // This might be an error or part of something else
+      // If ?. is not followed by [, (, or identifier, don't consume it
     }
     
     // Regular index access

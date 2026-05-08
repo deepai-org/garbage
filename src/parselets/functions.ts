@@ -346,6 +346,10 @@ export function parseParameterList(host: FunctionHost): AST.Param[] {
 
   if (!host.check(")")) {
     do {
+      // Skip virtual semicolons before each param
+      while (host.peek().virtualSemi) host.advance();
+      // Trailing comma support: stop if we see )
+      if (host.check(")")) break;
       params.push(parseParameter(host));
       while (host.peek().virtualSemi) {
         host.advance();
@@ -484,7 +488,7 @@ export function parseParameter(host: FunctionHost): AST.Param {
 
   let defaultValue: AST.Expr | undefined;
   if (host.match("=")) {
-    defaultValue = host.parseExpression();
+    defaultValue = host.parseAssignmentExpression();
   }
 
   const param: AST.Param = {

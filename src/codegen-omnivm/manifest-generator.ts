@@ -1469,6 +1469,7 @@ export class ManifestCodeGenerator {
     for (let i = 0; i < node.names.length; i++) {
       const name = node.names[i].name;
       const valExpr = node.values[i];
+      if (!valExpr) continue;
       const aff = this.affinityMap.get(valExpr);
       const runtime = aff?.runtime || this.defaultRuntime;
 

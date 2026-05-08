@@ -283,18 +283,43 @@ export class Parser extends ParserCursor {
       type === TokenType.Keyword && (
         value === "import" || value === "require" ||
         value === "let" || value === "var" || value === "auto" ||
-        ((value === "fn" || value === "fun" || value === "function" || value === "def" || value === "func") && this.peekNext()?.value !== ".") ||
+        ((value === "fn" || value === "fun" || value === "function" || value === "def" || value === "func") && this.peekNext()?.value !== "." &&
+         // func/function followed by ( must look like a declaration, not a call
+         (this.peekNext()?.value !== "(" || this.peekNext()?.value === "(" && this.looksLikeFuncDecl())) ||
         value === "const" || value === "final" || value === "immutable" ||
         value === "class" || value === "struct" || value === "interface" ||
-        value === "trait" || value === "enum" ||
+        (value === "trait" && this.peekNext()?.type === TokenType.Identifier) || value === "enum" ||
         value === "package" || value === "export"
       ) ||
       // Also check for 'impl' as an identifier (Rust-style impl blocks)
       (type === TokenType.Identifier && value === "impl") ||
       type === TokenType.Operator && value === "#" && 
-      this.peekNext()?.type === TokenType.Identifier && 
+      this.peekNext()?.type === TokenType.Identifier &&
       this.peekNext()?.value === "include"
     );
+  }
+
+  /** Check if func/function( starts a declaration (body follows closing paren). */
+  private looksLikeFuncDecl(): boolean {
+    // Scan past matched parens from peekNext (which is "(")
+    let pos = this.current + 1; // start at (
+    let depth = 0;
+    while (pos < this.tokens.length) {
+      const t = this.tokens[pos];
+      if (t.value === "(") depth++;
+      else if (t.value === ")") {
+        depth--;
+        if (depth === 0) {
+          // Check what follows: {, :, ->, => all indicate declaration/expression, not call
+          const after = this.tokens[pos + 1];
+          if (!after) return false;
+          if (after.value === "{" || after.value === ":" || after.value === "->" || after.value === "=>") return true;
+          return false;
+        }
+      }
+      pos++;
+    }
+    return false;
   }
   
   public parseDeclaration(): AST.Decl {
@@ -411,7 +436,12 @@ export class Parser extends ParserCursor {
       this.advance();
       return Blocks.parseSwitch(this) as AST.Stmt;
     }
-    if (this.check("match") && !this.isAssignmentOp(this.peekAt(1)!) && this.peekAt(1)?.value !== "{") {
+    if (this.check("match") && !this.isAssignmentOp(this.peekAt(1)!) && this.peekAt(1)?.value !== "{" &&
+        this.peekAt(1)?.value !== ")" && this.peekAt(1)?.value !== "," && this.peekAt(1)?.value !== ";" &&
+        this.peekAt(1)?.value !== "&&" && this.peekAt(1)?.value !== "||" && this.peekAt(1)?.value !== "?" &&
+        this.peekAt(1)?.value !== "]" && this.peekAt(1)?.value !== "[" && this.peekAt(1)?.value !== "!" &&
+        this.peekAt(1)?.value !== "." &&
+        this.peekAt(1)?.type !== TokenType.EOF) {
       this.advance();
       return Blocks.parseSwitch(this) as AST.Stmt;
     }
@@ -627,6 +657,7 @@ export class Parser extends ParserCursor {
       // Check for 'as' type assertion (TypeScript)
       if (op.value === "as") {
         this.advance(); // consume 'as'
+        while (this.peek().virtualSemi) this.advance(); // skip vsemi before type
         const type = this.parseType();
         left = {
           kind: "TypeAssertion",
@@ -661,6 +692,7 @@ export class Parser extends ParserCursor {
         JSX.skipJSXWhitespace(this);
         const consequent = this.parseExpression();
         JSX.skipJSXWhitespace(this);
+        while (this.peek().virtualSemi) this.advance();
         this.consume(":", "Expected ':' in ternary expression");
         JSX.skipJSXWhitespace(this);
         const alternate = this.parseExpression(precedence);

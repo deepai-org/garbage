@@ -233,8 +233,46 @@ export function parseSimpleType(host: TypeHost): AST.TypeNode {
     };
   }
 
+  // Tuple type: [T1, T2, ...]
+  if (host.check("[") && host.peekNext()?.value !== "]") {
+    host.advance(); // consume [
+    const elements: AST.TypeNode[] = [];
+    if (!host.check("]")) {
+      elements.push(parseType(host));
+      while (host.match(",")) {
+        elements.push(parseType(host));
+      }
+    }
+    host.consume("]", "Expected ']' after tuple type");
+    return {
+      kind: "TupleType",
+      elements,
+      span: host.createSpan(start, host.current - 1)
+    } as any;
+  }
+
   // String literal type
   if (host.peek().type === TokenType.StringLiteral) {
+    const literal = host.advance();
+    return {
+      kind: "SimpleType",
+      id: { kind: "Identifier", name: literal.value, span: host.createSpan(start, start) },
+      span: host.createSpan(start, host.current - 1)
+    };
+  }
+
+  // Numeric literal type (e.g., version: 1)
+  if (host.peek().type === TokenType.NumericLiteral) {
+    const literal = host.advance();
+    return {
+      kind: "SimpleType",
+      id: { kind: "Identifier", name: literal.value, span: host.createSpan(start, start) },
+      span: host.createSpan(start, host.current - 1)
+    };
+  }
+
+  // Boolean literal type (true/false)
+  if (host.peek().value === "true" || host.peek().value === "false") {
     const literal = host.advance();
     return {
       kind: "SimpleType",
@@ -541,7 +579,8 @@ export function parseSimpleType(host: TypeHost): AST.TypeNode {
        token.value === "number" || token.value === "boolean" ||
        token.value === "string" || token.value === "object" ||
        token.value === "any" || token.value === "never" ||
-       token.value === "unknown" || token.value === "null")) {
+       token.value === "unknown" || token.value === "null" ||
+       token.value === "this")) {
     host.advance();
     id = {
       kind: "Identifier",

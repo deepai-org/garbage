@@ -74,10 +74,16 @@ export function parseIf(host: ControlFlowHost, ): AST.If {
       name: host.tokens.slice(cmdStart, host.current).map((t: any) => t.value).join(" "),
       span: host.createSpan(cmdStart, host.current - 1),
     } as AST.Identifier;
+  } else if (host.check("(")) {
+    // Parenthesized condition — consume ( expr ) explicitly to avoid
+    // the postfix parser treating the body's ( as a call
+    host.advance(); // consume (
+    test = host.parseExpression();
+    host.consume(")", "Expected ')' after if condition");
   } else {
     test = host.parseExpression();
   }
-  
+
   // Go-style if with init statement: if init; condition { ... }
   if (host.check(";") && host.peekNext()?.value !== "then") {
     // The test we just parsed is actually the init statement; parse the real condition
@@ -476,12 +482,18 @@ export function parseLoop(host: ControlFlowHost, ): AST.Loop {
       const checkpoint = host.current;
       const declKeyword = host.advance(); // consume const/let/var
       
-      if (host.peek().type === TokenType.Identifier || host.check("[") || host.check("{")) {
+      if (host.peek().type === TokenType.Identifier || host.peek().type === TokenType.Keyword || host.check("[") || host.check("{")) {
         let variable: AST.Identifier | AST.ArrayPattern | AST.ObjectPattern;
         if (host.check("[") || host.check("{")) {
           variable = Decls.parseDestructuringPattern(host as any);
         } else {
-          variable = host.parseIdentifier();
+          // Accept keywords as variable names (e.g., for (const fn of items))
+          const tok = host.advance();
+          variable = {
+            kind: "Identifier",
+            name: tok.value,
+            span: host.createSpanFrom(tok)
+          };
         }
 
         // Check for 'of' or 'in'

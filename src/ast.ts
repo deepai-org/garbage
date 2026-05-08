@@ -180,6 +180,7 @@ export interface Call {
   callee: Expr;
   args: Expr[];
   typeArgs?: TypeNode[];
+  optional?: boolean;
   span: Span;
 }
 

@@ -254,7 +254,8 @@ export function scanRegex(h: ScanHost): void {
   const startColumn = h.column - 1;
   let value = '/';
 
-  while (!h.isAtEnd() && h.peek() !== '/') {
+  let inCharClass = false;
+  while (!h.isAtEnd() && (h.peek() !== '/' || inCharClass)) {
     if (h.peek() === '\\') {
       value += h.advance();
       if (!h.isAtEnd()) {
@@ -264,6 +265,9 @@ export function scanRegex(h: ScanHost): void {
       // Error: unterminated regex
       break;
     } else {
+      const ch = h.peek();
+      if (ch === '[') inCharClass = true;
+      else if (ch === ']') inCharClass = false;
       value += h.advance();
     }
   }

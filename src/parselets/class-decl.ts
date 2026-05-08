@@ -35,6 +35,7 @@ export interface ClassHost {
 
   parseIdentifier(): AST.Identifier;
   parseExpression(): AST.Expr;
+  parseAssignmentExpression(): AST.Expr;
   parseType(): AST.TypeNode;
   parseBlock(): AST.Block;
 }
@@ -59,6 +60,10 @@ export function parseClassDecl(host: ClassHost, decorators?: AST.Expr[]): AST.Cl
         while (host.match("+")) {
           host.parseType();
         }
+      }
+      // Skip default type: = DefaultType
+      if (host.match("=")) {
+        host.parseType();
       }
     } while (host.match(","));
     host.consume(">", "Expected '>' after type parameters");
@@ -895,6 +900,18 @@ export function parseInterfaceDecl(host: ClassHost): AST.InterfaceDecl {
     typeParams = [];
     do {
       typeParams.push(host.parseIdentifier());
+      // Skip constraints: extends Type, : Type
+      if (host.match("extends", "super")) {
+        host.parseType();
+      } else if (host.check(":") && !host.check("::")) {
+        host.advance();
+        host.parseType();
+        while (host.match("+")) host.parseType();
+      }
+      // Skip default type: = DefaultType
+      if (host.match("=")) {
+        host.parseType();
+      }
     } while (host.match(","));
     host.consume(">", "Expected '>' after type parameters");
   }
@@ -1309,7 +1326,7 @@ export function parseEnumDecl(host: ClassHost): AST.EnumDecl {
     let value: AST.Expr | undefined;
 
     if (host.match("=")) {
-      value = host.parseExpression();
+      value = host.parseAssignmentExpression();
     }
 
     members.push({
