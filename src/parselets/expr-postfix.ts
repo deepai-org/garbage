@@ -681,10 +681,14 @@ export function parseArguments(host: PostfixHost, ): AST.Expr[] {
             comprehensions.push({ variables, iterable, condition });
             if (!host.check("for")) break;
           }
+          // Use first comprehension to build proper ListComprehension AST node
+          const firstComp = comprehensions[0];
           args.push({
             kind: "ListComprehension",
-            expr,
-            comprehensions,
+            expression: expr,
+            targets: firstComp.variables,
+            iterable: firstComp.iterable,
+            filter: firstComp.condition,
             span: host.createSpan(host.current - 1, host.current - 1)
           } as any);
           return args;
