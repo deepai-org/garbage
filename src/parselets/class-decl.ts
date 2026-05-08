@@ -376,7 +376,12 @@ export function parseClassDecl(host: ClassHost, decorators?: AST.Expr[]): AST.Cl
         } else if (value === "readonly") {
           isReadonly = true;
           host.advance();
-        } else if (value === "async" || value === "const" || value === "final") {
+        } else if (value === "final" || value === "abstract" || value === "synchronized" ||
+                   value === "native" || value === "volatile" || value === "transient" ||
+                   value === "override") {
+          unknownModifiers.push(value);
+          host.advance();
+        } else if (value === "async" || value === "const") {
           // These are handled elsewhere, stop collecting modifiers
           break;
         } else {
@@ -562,6 +567,42 @@ export function parseClassDecl(host: ClassHost, decorators?: AST.Expr[]): AST.Cl
           }
         }
 
+        // Java/C-style: ReturnType methodName(...) or Type fieldName = ...
+        // Detect: current is identifier/keyword, next is also identifier, and after that is ( or = or ; or ,
+        // This means current is a type and next is the actual name.
+        if (!fieldType) {
+          const cur = host.peek();
+          const nxt = host.peekNext();
+          if ((cur.type === TokenType.Identifier || cur.type === TokenType.Keyword) && nxt) {
+            // Check if current token could be a return type:
+            // pattern: Type Name( or Type Name = or Type Name ; or Type Name, or Type[] Name
+            // Also handle generic types: Type<X> Name(
+            let namePos = host.current + 1;
+            // Skip generic args: Type<X, Y>
+            if (nxt.value === "<") {
+              let depth = 1;
+              namePos = host.current + 2;
+              while (namePos < host.tokens.length && depth > 0) {
+                if (host.tokens[namePos].value === "<") depth++;
+                else if (host.tokens[namePos].value === ">") depth--;
+                namePos++;
+              }
+            }
+            // Skip array brackets: Type[] or Type[][]
+            while (namePos + 1 < host.tokens.length &&
+                   host.tokens[namePos]?.value === "[" && host.tokens[namePos + 1]?.value === "]") {
+              namePos += 2;
+            }
+            const possibleName = host.tokens[namePos];
+            const afterName = host.tokens[namePos + 1];
+            if (possibleName && (possibleName.type === TokenType.Identifier || possibleName.type === TokenType.Keyword) &&
+                afterName && (afterName.value === "(" || afterName.value === "=" || afterName.value === ";" || afterName.value === ",")) {
+              // Parse the type
+              fieldType = host.parseType();
+            }
+          }
+        }
+
         // Parse method/field name - allow keywords as identifiers in this context
         const nameToken = host.advance();
         memberName = {
@@ -597,6 +638,14 @@ export function parseClassDecl(host: ClassHost, decorators?: AST.Expr[]): AST.Cl
         // Method with parentheses: methodName(params): returnType { body }
         if (host.check("(")) {
           const params = Functions.parseParameterList(host as any);
+
+          // Java throws clause: method(params) throws Exception, IOException { }
+          if (host.peek().value === "throws") {
+            host.advance();
+            do {
+              host.parseType();
+            } while (host.match(","));
+          }
 
           // Optional return type
           let returnType: AST.TypeNode | undefined;

@@ -249,6 +249,18 @@ export class Parser extends ParserCursor {
              (next?.type === TokenType.Identifier && this.peekAt(2)?.value !== "=");
     }
     
+    // Java-style modifiers before class: public class, abstract class, public abstract class, etc.
+    if (value === "public" || value === "private" || value === "protected" || value === "abstract") {
+      // Scan ahead through modifiers to find class/interface/enum
+      for (let i = 1; i <= 5; i++) {
+        const ahead = this.peekAt(i);
+        if (!ahead) break;
+        if (ahead.value === "class" || ahead.value === "interface" || ahead.value === "enum") return true;
+        if (ahead.value !== "public" && ahead.value !== "private" && ahead.value !== "protected" &&
+            ahead.value !== "abstract" && ahead.value !== "static" && ahead.value !== "final") break;
+      }
+    }
+
     // Check for async/unsafe followed by function declarations
     if (value === "async" || value === "unsafe") {
       const next = this.peekNext();
@@ -348,6 +360,25 @@ export class Parser extends ParserCursor {
       this.advance(); // #
       this.advance(); // include
       return Imports.parseImport(this);
+    }
+
+    // Java-style modifiers before class/interface: public class, public abstract class, etc.
+    if (keyword === "public" || keyword === "private" || keyword === "protected" || keyword === "abstract") {
+      // Skip all modifiers until we find class/interface/enum
+      while (this.check("public") || this.check("private") || this.check("protected") ||
+             this.check("abstract") || this.check("static") || this.check("final")) {
+        this.advance();
+      }
+      if (this.match("class")) {
+        return ClassDecl.parseClassDecl(this);
+      }
+      if (this.match("interface")) {
+        return ClassDecl.parseInterfaceDecl(this);
+      }
+      if (this.match("enum")) {
+        return ClassDecl.parseEnumDecl(this);
+      }
+      throw this.error(this.peek(), "Expected class, interface, or enum after modifiers");
     }
 
     // async/unsafe modifiers before function decl

@@ -486,6 +486,25 @@ export function parseParameter(host: FunctionHost): AST.Param {
     // type stays as-is (the C++ type before &)
   }
 
+  // Java varargs: Type... paramName — ... comes after the type
+  // At this point, 'name' might be the type and '...' + identifier is the real param
+  if (host.check("...") && !isSpread) {
+    const afterDots = host.peekAt(1);
+    if (afterDots && (afterDots.type === TokenType.Identifier || afterDots.type === TokenType.Keyword)) {
+      // Reinterpret: current 'name' was actually the type
+      type = { kind: "SimpleType", id: name as AST.Identifier, span: (name as AST.Identifier).span } as AST.TypeNode;
+      host.advance(); // consume ...
+      isSpread = true;
+      const realName = host.advance();
+      name = {
+        kind: "Identifier",
+        name: realName.value,
+        originalSpelling: realName.value,
+        span: host.createSpanFrom(realName)
+      };
+    }
+  }
+
   let defaultValue: AST.Expr | undefined;
   if (host.match("=")) {
     defaultValue = host.parseAssignmentExpression();

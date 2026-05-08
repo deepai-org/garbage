@@ -889,9 +889,24 @@ export function parseTry(host: ControlFlowHost, ): AST.Try {
     } else if (host.match("(")) {
       // Traditional catch with parentheses
       if (!host.check(")")) {
-        param = host.parseIdentifier();
-        if (host.match(":")) {
+        // Java-style: catch (Type variable) — type comes first
+        // JS-style: catch (variable) — no type, or catch (variable: Type)
+        const afterFirst = host.peekAt(1);
+        if (afterFirst && afterFirst.type === TokenType.Identifier && host.peekAt(2)?.value === ")") {
+          // Java: catch (ExceptionType varName)
           type = host.parseType();
+          param = host.parseIdentifier();
+        } else if (afterFirst && afterFirst.type === TokenType.Identifier && host.peekAt(2)?.value !== ")") {
+          // Could be Java with qualified type: catch (java.io.IOException e)
+          type = host.parseType();
+          if (host.peek().type === TokenType.Identifier && !host.check(")")) {
+            param = host.parseIdentifier();
+          }
+        } else {
+          param = host.parseIdentifier();
+          if (host.match(":")) {
+            type = host.parseType();
+          }
         }
       }
       host.consume(")", "Expected ')' after catch clause");
