@@ -708,13 +708,15 @@ export class Parser extends ParserCursor {
         let foundElse = false;
         while (pos < this.tokens.length) {
           const v = this.tokens[pos].value;
+          // Break on block-starting { at depth 0 — not a Python ternary
+          if (depth === 0 && v === "{") break;
           if (v === "(" || v === "[" || v === "{") depth++;
           else if (v === ")" || v === "]" || v === "}") {
             if (depth === 0) break;
             depth--;
           }
           else if (depth === 0 && v === "else") { foundElse = true; break; }
-          else if (depth === 0 && (v === "for" || v === "," || this.tokens[pos].virtualSemi)) break;
+          else if (depth === 0 && (v === "for" || v === "," || v === ";" || this.tokens[pos].virtualSemi)) break;
           pos++;
         }
         if (foundElse) {
