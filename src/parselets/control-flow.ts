@@ -75,10 +75,11 @@ export function parseIf(host: ControlFlowHost, ): AST.If {
       span: host.createSpan(cmdStart, host.current - 1),
     } as AST.Identifier;
   } else if (host.check("(")) {
-    // Parenthesized condition — use parseExpression which will parse (expr)
-    // as a grouped expression. Then check if postfix produced a call
-    // when body starts with ( — if so, the call is actually if-body, not a call.
+    // Parenthesized condition — explicitly parse (expr) without postfix
+    // to avoid if (cond) (body) being parsed as if (cond(body))
+    host.advance(); // consume '('
     test = host.parseExpression();
+    host.consume(")", "Expected ')' after if condition");
   } else {
     test = host.parseExpression();
   }
