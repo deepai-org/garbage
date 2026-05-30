@@ -119,6 +119,9 @@ export function exprToCodeForRuntime(expr: AST.Expr, runtime: OmniRuntime, sourc
   if (expr.kind === "RuntimeTag") {
     return exprToCodeForRuntime(expr.expr, tagToRuntime(expr.runtime), source);
   }
+  if (runtime === OmniRuntime.Java) {
+    return spanExtract(expr, source) || exprToCode(expr, source);
+  }
   if (runtime === OmniRuntime.Python) {
     return exprToPythonCode(expr, source);
   }

@@ -357,6 +357,10 @@ See [`examples/`](examples/) for complete polyglot programs. All runtimes are **
 - **cursed-polyglot.poly** — Python/JS pipeline that ping-pongs between runtimes every single line
 - **cursed-concurrency.poly** — Python generators + Go channels/spawn handles + JS async all talking to each other
 - **django-go-typescript-views.poly** — Django-style views using Go and TypeScript without annotation pragmas
+- **java-gson-pandas-zod-express.poly** — Java Gson, Python Pandas, JS Zod, and Express in one endpoint-shaped flow
+- **java-commons-csv-pydantic-go-batching.poly** — Java Commons CSV parsing with Python validation and Go batching workers
+- **java-jsoup-bs4-cheerio.poly** — Java Jsoup, BeautifulSoup, and Cheerio parsing the same HTML fixture
+- **java-okhttp-httpx-go-retry.poly** — Java OkHttp request shaping with Python HTTPX and Go retry workers
 - **syntactic-dominance.poly** — Demonstrates how arrow functions override import provenance
 
 ## License

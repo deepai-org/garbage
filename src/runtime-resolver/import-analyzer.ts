@@ -94,6 +94,7 @@ const JAVA_MODULES = new Set([
   "org.springframework", "org.hibernate", "org.junit",
   "org.apache", "org.slf4j", "org.mockito",
   "com.google", "com.fasterxml.jackson", "com.squareup",
+  "okhttp3",
   "io.netty", "io.grpc", "io.reactivex",
   "jakarta.servlet", "jakarta.persistence",
   "lombok",
