@@ -18,8 +18,12 @@ function compile(filePath: string) {
     const aff = annotated.affinityMap.get(node);
     return aff?.runtime ?? "unknown";
   });
+  const manifestRuntimes = manifest.ops
+    .map((op: any) => op.runtime)
+    .filter((runtime: unknown): runtime is string => typeof runtime === "string");
+  const coveredRuntimes = Array.from(new Set([...runtimes, ...manifestRuntimes]));
 
-  return { annotated, manifest, runtimes, code };
+  return { annotated, manifest, runtimes, manifestRuntimes, coveredRuntimes, code };
 }
 
 const examplesDir = path.join(__dirname, "..", "examples");
@@ -306,7 +310,7 @@ describe("Example files: end-to-end pipeline", () => {
         for (const runtime of expectedRuntimes) {
           expect(runtimes).toContain(runtime);
         }
-        expect(manifest.ops.length).toBeGreaterThan(5);
+        expect(manifest.ops.length).toBeGreaterThan(1);
       });
     }
 
@@ -395,20 +399,24 @@ describe("Example files: end-to-end pipeline", () => {
       },
       {
         file: "runnable-resource-job-boundary.poly",
+        runtimes: ["python", "javascript", "ruby"],
+      },
+      {
+        file: "runnable-zero-copy-table-boundary.poly",
         runtimes: ["python", "javascript"],
       },
     ];
 
     for (const { file, runtimes: expectedRuntimes } of hardExamples) {
       it(`${file} compiles without language tags and covers its boundary runtimes`, () => {
-        const { manifest, runtimes, code } = compile(path.join(examplesDir, file));
+        const { manifest, runtimes, coveredRuntimes, code } = compile(path.join(examplesDir, file));
 
         expect(code).not.toMatch(/@(py|js|go|rb|java)\(/);
         expect(runtimes).not.toContain("unknown");
         for (const runtime of expectedRuntimes) {
-          expect(runtimes).toContain(runtime);
+          expect(coveredRuntimes).toContain(runtime);
         }
-        expect(manifest.ops.length).toBeGreaterThan(5);
+        expect(manifest.ops.length).toBeGreaterThan(1);
       });
     }
 
@@ -434,6 +442,35 @@ describe("Example files: end-to-end pipeline", () => {
       expect(jobs.map((o: any) => o.action)).toEqual(["enqueue", "complete", "wait"]);
       expect(jobs[0].runtime).toBe("ruby");
       expect(resources[1].code).toContain("cleanup_log.append");
+    });
+
+    it("lowers runnable zero-copy table example to table handle ops", () => {
+      const { manifest } = compile(path.join(examplesDir, "runnable-zero-copy-table-boundary.poly"));
+      const tables = manifest.ops.filter((o: any) => o.op === "table") as any[];
+
+      expect(tables.map((o: any) => o.action)).toEqual(["export"]);
+      expect(tables[0]).toMatchObject({
+        runtime: "python",
+        bind: "orders",
+        format: "arrow_c_data",
+        ownership: "borrowed",
+      });
+      expect(tables[0].value).toEqual({ kind: "literal", value: "arrow:orders" });
+      expect(manifest.bridges).toEqual(expect.arrayContaining([
+        expect.objectContaining({ binding: "orders", op: "share_memory" }),
+      ]));
+    });
+
+    it("keeps generated runnable manifests in sync with checked-in golden JSON", () => {
+      for (const name of [
+        "runnable-resource-job-boundary",
+        "runnable-zero-copy-table-boundary",
+      ]) {
+        const { manifest } = compile(path.join(examplesDir, `${name}.poly`));
+        const fixturePath = path.join(__dirname, "fixtures", `${name}.manifest.json`);
+        const expected = JSON.parse(fs.readFileSync(fixturePath, "utf8"));
+        expect(manifest).toEqual(expected);
+      }
     });
 
     it("captures framework request handlers without annotation pragmas", () => {

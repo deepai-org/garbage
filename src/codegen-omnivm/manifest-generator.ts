@@ -47,6 +47,7 @@ import {
   NativeOp,
   ChanOp,
   ResourceOp,
+  TableOp,
   JobOp,
   SelectOp,
   SelectCase,
@@ -66,7 +67,7 @@ import * as C from '../type-system/canonical';
 import { lowerAnnotatedProgram } from './lowering';
 import { LoweredManifestIR, LoweredManifestNode } from './lowering-ir';
 
-type BindingKind = "value" | "channel" | "stream" | "resource" | "job_handle" | "spawn_handle" | "function";
+type BindingKind = "value" | "channel" | "stream" | "resource" | "table" | "job_handle" | "spawn_handle" | "function";
 
 export class ManifestCodeGenerator {
   private affinityMap: Map<AST.Decl | AST.Stmt | AST.Expr, RuntimeAffinity> = new Map();
@@ -87,6 +88,8 @@ export class ManifestCodeGenerator {
   private typeChecker: BoundaryChecker = new BoundaryChecker();
   /** Registry of named types (class/interface/enum) for resolving type annotations. */
   private typeRegistry: Map<string, C.CanonicalType> = new Map();
+  private typedBindingKinds: Map<string, BindingKind> = new Map();
+  private typedBindingRuntimeHints: Map<string, OmniRuntime> = new Map();
   /** Bridge operations inferred directly from manifest captures and type annotations. */
   private explicitBridgeOps: ManifestBridgeOp[] = [];
   private usingCounter = 0;
@@ -110,6 +113,8 @@ export class ManifestCodeGenerator {
     this.boundaryDiagnosticKeys = new Set();
     this.typeChecker = new BoundaryChecker();
     this.typeRegistry = new Map();
+    this.typedBindingKinds = new Map();
+    this.typedBindingRuntimeHints = new Map();
     this.explicitBridgeOps = [];
     this.usingCounter = 0;
     this.loweredIR = lowerAnnotatedProgram(annotated);
@@ -292,6 +297,9 @@ export class ManifestCodeGenerator {
     }
     if (kind === "resource") {
       return { op: "proxy_with_finalizer", meta: { disposer: "close" } };
+    }
+    if (kind === "table") {
+      return { op: "share_memory", meta: { format: "arrow_c_data", ownership: "borrowed" } };
     }
 
     const typed = this.typeChecker.getBinding(binding);
@@ -490,6 +498,7 @@ export class ManifestCodeGenerator {
           const varType = this.resolveFromRegistry(node.type ? lowerType(node.type, runtime) : C.ANY);
           for (const name of node.names) {
             this.typeChecker.declare(name.name, varType, runtime);
+            this.recordTypedBindingHint(name.name, node.type);
           }
           break;
         }
@@ -497,6 +506,7 @@ export class ManifestCodeGenerator {
           const constType = this.resolveFromRegistry(node.type ? lowerType(node.type, runtime) : C.ANY);
           for (const name of node.names) {
             this.typeChecker.declare(name.name, constType, runtime);
+            this.recordTypedBindingHint(name.name, node.type);
           }
           break;
         }
@@ -1168,7 +1178,7 @@ export class ManifestCodeGenerator {
     return null;
   }
 
-  private isManifestHelperCall(expr: AST.Expr, objectName: "resource" | "job"): AST.Call | undefined {
+  private isManifestHelperCall(expr: AST.Expr, objectName: "resource" | "table" | "job"): AST.Call | undefined {
     if (expr.kind !== "Call" || expr.callee.kind !== "Member") return undefined;
     const member = expr.callee;
     if (member.object.kind !== "Identifier" || member.object.name !== objectName) return undefined;
@@ -1225,6 +1235,20 @@ export class ManifestCodeGenerator {
     }
 
     return undefined;
+  }
+
+  private tableExportOpFromDeclaration(name: string, value: AST.Expr, fallbackRuntime: OmniRuntime): TableOp | undefined {
+    if (this.declaredBindingKind(name) !== "table") return undefined;
+    return {
+      op: "table",
+      action: "export",
+      runtime: this.typedBindingRuntimeHints.get(name) || fallbackRuntime,
+      bind: name,
+      format: "arrow_c_data",
+      ownership: "borrowed",
+      release: "producer",
+      value: this.manifestValue(value),
+    };
   }
 
   private jobOpFromCall(expr: AST.Expr, bind?: string, fallbackRuntime?: OmniRuntime): JobOp | undefined {
@@ -1383,6 +1407,8 @@ export class ManifestCodeGenerator {
   }
 
   private declaredBindingKind(name: string): BindingKind {
+    const hinted = this.typedBindingKinds.get(name);
+    if (hinted) return hinted;
     const typed = this.typeChecker.getBinding(name);
     if (!typed) return "value";
     switch (typed.type.kind) {
@@ -1392,6 +1418,37 @@ export class ManifestCodeGenerator {
         return "resource";
       default:
         return "value";
+    }
+  }
+
+  private recordTypedBindingHint(name: string, type?: AST.TypeNode): void {
+    if (!type) return;
+    if (this.isTableType(type)) {
+      this.typedBindingKinds.set(name, "table");
+      this.typedBindingRuntimeHints.set(name, this.tableRuntimeHint(type));
+    }
+  }
+
+  private tableRuntimeHint(type: AST.TypeNode): OmniRuntime {
+    const name = this.typeName(type).toLowerCase();
+    if (/(pandas|pyarrow|dataframe|recordbatch)/.test(name)) return OmniRuntime.Python;
+    if (/(arrowtable|datatable|table|polars)/.test(name)) return OmniRuntime.Python;
+    return this.defaultRuntime;
+  }
+
+  private isTableType(type: AST.TypeNode): boolean {
+    const name = this.typeName(type).toLowerCase();
+    return /(dataframe|arrowtable|recordbatch|table|polars|pandas|pyarrow)/.test(name);
+  }
+
+  private typeName(type: AST.TypeNode): string {
+    switch (type.kind) {
+      case "SimpleType":
+        return type.id.name;
+      case "GenericType":
+        return type.base.name;
+      default:
+        return "";
     }
   }
 
@@ -2160,6 +2217,13 @@ export class ManifestCodeGenerator {
           continue;
         }
 
+        const tableOp = this.tableExportOpFromDeclaration(name, valExpr, runtime);
+        if (tableOp) {
+          ops.push(tableOp);
+          this.recordBinding(name, (tableOp.runtime as OmniRuntime) || runtime, "table", valExpr);
+          continue;
+        }
+
         const jobOp = this.jobOpFromCall(valExpr, name, runtime);
         if (jobOp) {
           ops.push(jobOp);
@@ -2273,6 +2337,13 @@ export class ManifestCodeGenerator {
       if (resourceOp) {
         ops.push(resourceOp);
         this.recordBinding(name, (resourceOp.runtime as OmniRuntime) || runtime, "resource", valExpr);
+        continue;
+      }
+
+      const tableOp = this.tableExportOpFromDeclaration(name, valExpr, runtime);
+      if (tableOp) {
+        ops.push(tableOp);
+        this.recordBinding(name, (tableOp.runtime as OmniRuntime) || runtime, "table", valExpr);
         continue;
       }
 

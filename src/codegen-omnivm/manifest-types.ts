@@ -91,6 +91,7 @@ export type ManifestOp =
   | SelectOp
   | SpawnOp
   | ResourceOp
+  | TableOp
   | JobOp
   | YieldOp
   | AwaitOp;
@@ -393,6 +394,22 @@ export interface ResourceOp {
   target?: string;
   kind?: string;
   disposer?: string;
+  code?: string;
+  value?: ManifestValue;
+}
+
+// ─── Tables / Zero-Copy Buffers ──────────────────────────────────
+
+/** Runtime-owned table or buffer view, preferably Arrow C Data Interface. */
+export interface TableOp {
+  op: "table";
+  action: "export" | "release";
+  runtime?: string;
+  bind?: string;
+  target?: string;
+  format?: string;
+  ownership?: "owned" | "borrowed" | "shared" | string;
+  release?: string;
   code?: string;
   value?: ManifestValue;
 }

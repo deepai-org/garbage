@@ -2297,6 +2297,28 @@ resource.close(tx, "cleanup_log.append('rollback')")
     expect(jobs[2]).toMatchObject({ bind: "result", target: "receipt" });
   });
 
+  test('typed table declarations lower to zero-copy table manifest ops automatically', () => {
+    const code = `
+const orders: PandasDataFrame = "arrow-buffer"
+console.log(orders)
+`;
+    const m = parseAndManifest(code);
+    const tables = findAllOps(m, "table") as any[];
+
+    expect(tables.map(op => op.action)).toEqual(["export"]);
+    expect(tables[0]).toMatchObject({
+      runtime: "python",
+      bind: "orders",
+      format: "arrow_c_data",
+      ownership: "borrowed",
+      release: "producer",
+      value: { kind: "literal", value: "arrow-buffer" },
+    });
+    expect(m.bridges).toEqual(expect.arrayContaining([
+      expect.objectContaining({ binding: "orders", op: "share_memory" }),
+    ]));
+  });
+
   test('typed stream captures emit deterministic stream_proxy bridge hints', () => {
     const code = `
 import os

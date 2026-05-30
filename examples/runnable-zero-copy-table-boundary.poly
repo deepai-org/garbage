@@ -1,0 +1,4 @@
+// Runnable table-handle contract: no JSON rows, just an inferred Arrow handle.
+
+const orders: PandasDataFrame = "arrow:orders"
+console.log("zero-copy table boundary", orders)

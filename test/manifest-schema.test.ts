@@ -41,6 +41,7 @@ describe('Dispatch Manifest Schema', () => {
       'SelectOp',
       'SpawnOp',
       'ResourceOp',
+      'TableOp',
       'JobOp',
       'YieldOp',
       'AwaitOp',
