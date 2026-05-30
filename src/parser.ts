@@ -648,7 +648,7 @@ export class Parser extends ParserCursor {
   public looksLikeFuncCall(): boolean { return ExprPrefix.looksLikeFuncCall(this); }
   public shouldReinterpretAsIdentifier(): boolean { return ExprPrefix.shouldReinterpretAsIdentifier(this); }
   public parseBacktickIdentifier(): AST.Identifier { return ExprPrefix.parseBacktickIdentifier(this); }
-  public parseNewExpression(): AST.Call { return ExprPrefix.parseNewExpression(this); }
+  public parseNewExpression(): AST.Expr { return ExprPrefix.parseNewExpression(this); }
   public parseGoCompositeLiteral(): AST.Expr { return ExprPrefix.parseGoCompositeLiteral(this); }
 
   // Expression parsing with Pratt parser

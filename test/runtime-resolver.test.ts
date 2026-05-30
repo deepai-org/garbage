@@ -629,6 +629,10 @@ describe('Global Root Propagation', () => {
     const aff = result.affinityMap.get(decl);
 
     expect(aff?.runtime).toBe(OmniRuntime.Java);
+    const newExprRuntimes = [...result.affinityMap]
+      .filter(([node]) => node.kind === 'NewExpr')
+      .map(([, nodeAff]) => nodeAff.runtime);
+    expect(newExprRuntimes).toEqual([OmniRuntime.Java]);
     const callRuntimes = [...result.affinityMap]
       .filter(([node]) => node.kind === 'Call')
       .map(([, nodeAff]) => nodeAff.runtime);

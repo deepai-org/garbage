@@ -104,6 +104,7 @@ export type Expr =
   | BooleanLiteral
   | NullLiteral
   | Identifier
+  | NewExpr
   | Call
   | Index
   | Member
@@ -182,6 +183,14 @@ export interface Call {
   args: Expr[];
   typeArgs?: TypeNode[];
   optional?: boolean;
+  span: Span;
+}
+
+export interface NewExpr {
+  kind: "NewExpr";
+  callee: Expr;
+  args: Expr[];
+  typeArgs?: TypeNode[];
   span: Span;
 }
 

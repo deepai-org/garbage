@@ -9,6 +9,7 @@ import {
 import { SymbolTable } from './symbol-table';
 import { analyzeImportPath, analyzeBareImport } from './import-analyzer';
 import { lookupBuiltinAffinity, lookupGlobalAffinity } from './method-tables';
+import { affinityFromEvidence, chooseRuntime, EVIDENCE_WEIGHTS } from './evidence';
 
 /**
  * Pass 1: Top-down structural analysis.
@@ -142,7 +143,13 @@ export class Pass1Structural {
       case "RuntimeTag":
         const taggedRuntime = this.parseRuntimeName(node.runtime);
         if (taggedRuntime) {
-          this.assign(node, taggedRuntime, "definite", { type: "runtime_tag", detail: `@${node.runtime}()` });
+          const aff = affinityFromEvidence(chooseRuntime([{
+            runtime: taggedRuntime,
+            source: "runtime_tag",
+            weight: EVIDENCE_WEIGHTS.explicit,
+            detail: `@${node.runtime}()`,
+          }], this.fileDirective || OmniRuntime.JavaScript));
+          this.assign(node, aff.runtime, aff.confidence, ...aff.evidence);
         }
         this.visitExpr(node.expr);
         break;
@@ -169,6 +176,10 @@ export class Pass1Structural {
       // --- Calls (builtin detection) ---
       case "Call":
         this.visitCall(node);
+        break;
+
+      case "NewExpr":
+        this.visitNewExpr(node);
         break;
 
       case "ExprStmt":
@@ -548,10 +559,13 @@ export class Pass1Structural {
         } else {
           const globalRuntime = lookupGlobalAffinity(expr.name);
           if (globalRuntime) {
-            this.assign(expr, globalRuntime, "inferred", {
-              type: "builtin",
+            const aff = affinityFromEvidence(chooseRuntime([{
+              runtime: globalRuntime,
+              source: "global",
+              weight: EVIDENCE_WEIGHTS.global,
               detail: `global: ${expr.name}`,
-            });
+            }], this.fileDirective || OmniRuntime.JavaScript));
+            this.assign(expr, aff.runtime, aff.confidence, ...aff.evidence);
           }
         }
         break;
@@ -566,6 +580,21 @@ export class Pass1Structural {
       default:
         // Literals and other leaf nodes — no further traversal needed
         break;
+    }
+  }
+
+  private visitNewExpr(node: AST.NewExpr): void {
+    this.visitExpr(node.callee);
+    for (const arg of node.args) {
+      this.visitExpr(arg);
+    }
+
+    const calleeAff = this.getAffinity(node.callee);
+    if (calleeAff && calleeAff.confidence !== "fallback") {
+      this.assign(node, calleeAff.runtime, calleeAff.confidence, {
+        type: "syntax",
+        detail: "constructor expression",
+      }, ...calleeAff.evidence);
     }
   }
 
@@ -596,19 +625,6 @@ export class Pass1Structural {
     const propertyAff = property && typeof property === "object" && "kind" in property && property.kind !== "Identifier"
       ? this.getAffinity(property as AST.Expr)
       : undefined;
-
-    if (expr.object.kind === "Identifier" && expr.object.name === "new" &&
-        propertyAff && propertyAff.runtime === OmniRuntime.Java &&
-        propertyAff.confidence !== "fallback") {
-      return {
-        runtime: OmniRuntime.Java,
-        confidence: propertyAff.confidence,
-        evidence: [
-          { type: "syntax", detail: "Java qualified constructor" },
-          ...propertyAff.evidence,
-        ],
-      };
-    }
 
     if (objectAff && objectAff.confidence !== "fallback") {
       return {

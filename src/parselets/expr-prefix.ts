@@ -768,31 +768,93 @@ export function parseGoCompositeLiteral(host: PrefixHost, ): AST.Expr {
 }
 
 
-export function parseNewExpression(host: PrefixHost, ): AST.Call {
+export function parseNewExpression(host: PrefixHost, ): AST.Expr {
   const start = host.current - 1;
-  const callee = parsePrimary(host);
-  
+  const callee = parseNewCallee(host);
+
   let args: AST.Expr[] = [];
   if (host.match("(")) {
     args = host.parseArguments();
     host.must(")", { recoverWithSynthetic: true });
   }
-  
-  return {
-    kind: "Call",
-    callee: {
-      kind: "Member",
-      object: {
-        kind: "Identifier",
-        name: "new",
-        span: host.createSpan(start, start)
-      },
-      property: callee as AST.Identifier,
-      span: host.createSpanFrom(callee)
-    },
+
+  const typeArgs = (callee as any)._genericArgs as AST.TypeNode[] | undefined;
+  if (typeArgs) delete (callee as any)._genericArgs;
+
+  return host.parsePostfix({
+    kind: "NewExpr",
+    callee,
     args,
+    ...(typeArgs ? { typeArgs } : {}),
     span: host.createSpan(start, host.current - 1)
-  };
+  });
+}
+
+function parseNewCallee(host: PrefixHost): AST.Expr {
+  let expr = parseNewCalleeAtom(host);
+
+  while (true) {
+    if (host.check("<") && !host.check("<-") && !host.check("<<") && !host.check("<=") && !host.hasWhitespaceBefore()) {
+      const checkpoint = host.current;
+      const genericArgs = host.tryParseGenericArgs();
+      if (genericArgs) {
+        (expr as any)._genericArgs = genericArgs;
+        continue;
+      }
+      host.current = checkpoint;
+    }
+
+    if (host.match(".", "::")) {
+      const property = parseNewCalleeIdentifier(host);
+      expr = {
+        kind: "Member",
+        object: expr,
+        property,
+        computed: false,
+        optional: false,
+        span: host.createSpanFrom(expr)
+      };
+      continue;
+    }
+
+    break;
+  }
+
+  return expr;
+}
+
+function parseNewCalleeAtom(host: PrefixHost): AST.Expr {
+  if (host.match("(")) {
+    const expr = host.parseExpression();
+    host.must(")", { recoverWithSynthetic: true });
+    return expr;
+  }
+
+  if (host.match("this", "super")) {
+    const token = host.previous()!;
+    return {
+      kind: "Identifier",
+      name: token.value,
+      span: host.createSpanFrom(token)
+    };
+  }
+
+  return parseNewCalleeIdentifier(host);
+}
+
+function parseNewCalleeIdentifier(host: PrefixHost): AST.Identifier {
+  const token = host.peek();
+  if (token.type === TokenType.Identifier || token.type === TokenType.Keyword) {
+    host.advance();
+    return {
+      kind: "Identifier",
+      name: token.value,
+      originalSpelling: token.value,
+      span: host.createSpanFrom(token)
+    };
+  }
+
+  throw host.error(token, "Expected constructor name after 'new'");
 }
 
 export function shouldReinterpretAsIdentifier(host: PrefixHost, ): boolean {

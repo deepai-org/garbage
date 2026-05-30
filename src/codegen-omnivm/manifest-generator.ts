@@ -61,6 +61,8 @@ import {
 import { BoundaryChecker, typeToString } from '../type-system/boundary-checker';
 import { lowerType } from '../type-system/lowering';
 import * as C from '../type-system/canonical';
+import { lowerAnnotatedProgram } from './lowering';
+import { LoweredManifestIR } from './lowering-ir';
 
 export class ManifestCodeGenerator {
   private affinityMap: Map<AST.Decl | AST.Stmt | AST.Expr, RuntimeAffinity> = new Map();
@@ -78,6 +80,8 @@ export class ManifestCodeGenerator {
   private typeChecker: BoundaryChecker = new BoundaryChecker();
   /** Registry of named types (class/interface/enum) for resolving type annotations. */
   private typeRegistry: Map<string, C.CanonicalType> = new Map();
+  /** Lowered manifest IR for diagnostics and future manifest emission. */
+  private loweredIR?: LoweredManifestIR;
 
   /**
    * Generate a dispatch manifest from an annotated program.
@@ -92,6 +96,7 @@ export class ManifestCodeGenerator {
     this.diagnostics = [];
     this.typeChecker = new BoundaryChecker();
     this.typeRegistry = new Map();
+    this.loweredIR = lowerAnnotatedProgram(annotated);
 
     // Pass 1: Declare all typed bindings in the type checker
     this.declareTypedBindings(annotated.program.body);
@@ -602,6 +607,8 @@ export class ManifestCodeGenerator {
         }
         return undefined;
       }
+      case "NewExpr":
+        return undefined;
       case "Member": {
         const member = expr as AST.Member;
         if (member.object.kind === "Identifier") {
@@ -2220,6 +2227,11 @@ export class ManifestCodeGenerator {
         }
 
         return `${callee}(${args.join(", ")})`;
+      }
+      case "NewExpr": {
+        const callee = this.goExprToCode(expr.callee, params, locals, calledFuncs);
+        const args = expr.args.map(a => this.goExprToCode(a, params, locals, calledFuncs));
+        return `new ${callee}(${args.join(", ")})`;
       }
       case "Member":
         return `${this.goExprToCode(expr.object, params, locals, calledFuncs)}.${expr.property.name}`;

@@ -10,6 +10,7 @@ import {
 import { SymbolTable } from './symbol-table';
 import { lookupGlobalAffinity, lookupMethodAffinity } from './method-tables';
 import { computeBridgeCost } from './cost-model';
+import { affinityFromEvidence, chooseRuntime, EVIDENCE_WEIGHTS } from './evidence';
 
 /**
  * Pass 2: Bottom-up affinity propagation.
@@ -210,6 +211,9 @@ export class Pass2Propagation {
       case "Call":
         return this.propagateCall(expr);
 
+      case "NewExpr":
+        return this.propagateNewExpr(expr);
+
       case "Member":
         return this.propagateMember(expr);
 
@@ -369,6 +373,37 @@ export class Pass2Propagation {
     return nodeAff;
   }
 
+  private propagateNewExpr(node: AST.NewExpr): RuntimeAffinity {
+    const calleeAff = this.propagateExpr(node.callee);
+    for (const arg of node.args) {
+      this.propagateExpr(arg);
+    }
+
+    const existing = this.affinityMap.get(node);
+    if (calleeAff.confidence !== "fallback" && (!existing || existing.confidence === "fallback" ||
+        (existing.confidence === "inferred" && existing.evidence[0]?.type === "scope"))) {
+      this.affinityMap.set(node, {
+        ...calleeAff,
+        evidence: [
+          { type: "syntax", detail: `constructor expression: ${calleeAff.runtime}` },
+          ...calleeAff.evidence,
+        ],
+      });
+    }
+
+    const nodeAff = this.getOrDefault(node);
+    if (calleeAff.runtime !== nodeAff.runtime) {
+      this.insertBridge(calleeAff.runtime, nodeAff.runtime, this.inferMarshalKind(node));
+    }
+    for (const arg of node.args) {
+      const argAff = this.getOrDefault(arg);
+      if (argAff.runtime !== nodeAff.runtime) {
+        this.insertBridge(argAff.runtime, nodeAff.runtime, this.inferMarshalKind(arg));
+      }
+    }
+    return nodeAff;
+  }
+
   private propagateMember(node: AST.Member): RuntimeAffinity {
     const objAff = this.propagateExpr(node.object);
     const propertyAff = this.propagateMemberProperty(node);
@@ -378,20 +413,6 @@ export class Pass2Propagation {
     const methodRuntime = methodName ? lookupMethodAffinity(methodName) : undefined;
 
     const existing = this.affinityMap.get(node);
-
-    if (node.object.kind === "Identifier" && node.object.name === "new" &&
-        propertyAff && propertyAff.runtime === OmniRuntime.Java &&
-        propertyAff.confidence !== "fallback") {
-      this.affinityMap.set(node, {
-        runtime: OmniRuntime.Java,
-        confidence: propertyAff.confidence,
-        evidence: [
-          { type: "syntax", detail: "Java qualified constructor" },
-          ...propertyAff.evidence,
-        ],
-      });
-      return this.getOrDefault(node);
-    }
 
     // Key rule: object provenance beats method name tables.
     // If `files` came from `os.listdir()` (Python), then `files.map()` should
@@ -591,11 +612,13 @@ export class Pass2Propagation {
       const globalRuntime = lookupGlobalAffinity(node.name);
       if (globalRuntime && (!existing || existing.confidence === "fallback" ||
           (existing.confidence === "inferred" && existing.evidence[0]?.type === "scope"))) {
-        this.affinityMap.set(node, {
+        const aff = affinityFromEvidence(chooseRuntime([{
           runtime: globalRuntime,
-          confidence: "inferred",
-          evidence: [{ type: "builtin", detail: `global: ${node.name}` }],
-        });
+          source: "global",
+          weight: EVIDENCE_WEIGHTS.global,
+          detail: `global: ${node.name}`,
+        }], this.defaultRuntime));
+        this.affinityMap.set(node, aff);
       }
     }
     return this.getOrDefault(node);
@@ -692,7 +715,7 @@ export class Pass2Propagation {
   private isExpr(node: any): boolean {
     const exprKinds = new Set([
       "NumericLiteral", "StringLiteral", "RegexLiteral", "BooleanLiteral",
-      "NullLiteral", "Identifier", "Call", "Index", "Member", "Unary",
+      "NullLiteral", "Identifier", "NewExpr", "Call", "Index", "Member", "Unary",
       "Binary", "Assign", "Lambda", "Ternary", "ArrayLiteral", "SetLiteral",
       "ObjectLiteral", "ListComprehension", "Spread", "Yield", "TypeAssertion",
       "JSXElement", "JSXFragment", "Match", "RuntimeTag",

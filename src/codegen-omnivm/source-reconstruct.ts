@@ -46,6 +46,10 @@ export function exprToCode(expr: AST.Expr, source?: string): string {
     case "Call":
       const args = expr.args.map(a => exprToCode(a, source)).join(", ");
       return `${exprToCode(expr.callee, source)}(${args})`;
+    case "NewExpr": {
+      const args = expr.args.map(a => exprToCode(a, source)).join(", ");
+      return `new ${exprToCode(expr.callee, source)}(${args})`;
+    }
     case "Binary":
       return `(${exprToCode(expr.left, source)} ${expr.op} ${exprToCode(expr.right, source)})`;
     case "Unary": {
@@ -149,6 +153,8 @@ function exprToPythonCode(expr: AST.Expr, source?: string): string {
     }
     case "Call":
       return `${exprToPythonCode(expr.callee, source)}(${expr.args.map(a => exprToPythonCode(a, source)).join(", ")})`;
+    case "NewExpr":
+      return exprToCode(expr, source);
     case "Member":
       return `${exprToPythonCode(expr.object, source)}.${expr.property.name}`;
     case "Index":
@@ -644,6 +650,10 @@ function collectIds(
       collectIds(node.callee, ids, locals);
       for (const arg of node.args) collectIds(arg, ids, locals);
       break;
+    case "NewExpr":
+      collectIds(node.callee, ids, locals);
+      for (const arg of node.args) collectIds(arg, ids, locals);
+      break;
     case "Binary":
       collectIds(node.left, ids, locals);
       collectIds(node.right, ids, locals);
@@ -868,7 +878,7 @@ function collectIds(
 export function isExprKind(kind: string): boolean {
   return [
     "NumericLiteral", "StringLiteral", "RegexLiteral", "BooleanLiteral",
-    "NullLiteral", "Identifier", "Call", "Index", "Member", "Unary",
+    "NullLiteral", "Identifier", "NewExpr", "Call", "Index", "Member", "Unary",
     "Binary", "Assign", "Lambda", "Ternary", "ArrayLiteral", "SetLiteral",
     "ObjectLiteral", "ListComprehension", "Spread", "Yield", "TypeAssertion",
     "JSXElement", "JSXFragment", "Match", "RuntimeTag",

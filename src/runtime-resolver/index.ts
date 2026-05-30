@@ -16,6 +16,7 @@ export { SymbolTable } from './symbol-table';
 export { lookupMethodAffinity, lookupBuiltinAffinity } from './method-tables';
 export { analyzeImportPath, analyzeBareImport } from './import-analyzer';
 export { computeBridgeCost, totalBridgeCost, majorityRuntime } from './cost-model';
+export * from './evidence';
 
 /**
  * RuntimeResolver: determines which OmniVM runtime should execute each AST node.
@@ -164,6 +165,10 @@ export class RuntimeResolver {
         }
         break;
       case "Call":
+        children.push(node.callee);
+        children.push(...node.args);
+        break;
+      case "NewExpr":
         children.push(node.callee);
         children.push(...node.args);
         break;

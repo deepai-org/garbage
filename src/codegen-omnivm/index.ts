@@ -27,6 +27,8 @@ export { AsyncOrchestrator } from './async-orchestrator';
 export { consolidateBlocks, isConsolidatable, isCompiledRuntime } from './runtime-blocks';
 export { ManifestCodeGenerator } from './manifest-generator';
 export * from './manifest-types';
+export * from './lowering';
+export * from './lowering-ir';
 
 /**
  * OmniVMCodeGenerator: generates JavaScript dispatch code that calls

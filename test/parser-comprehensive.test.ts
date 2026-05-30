@@ -417,8 +417,10 @@ describe('Comprehensive Parser Tests', () => {
     test('parses new expressions', () => {
       const ast = parseCode('new Array(10);');
       const stmt = ast.body[0] as AST.ExprStmt;
-      const call = stmt.expr as AST.Call;
-      expect(call.kind).toBe('Call');
+      const expr = stmt.expr as AST.NewExpr;
+      expect(expr.kind).toBe('NewExpr');
+      expect((expr.callee as AST.Identifier).name).toBe('Array');
+      expect(expr.args).toHaveLength(1);
     });
 
     test('handles multiple statements on one line', () => {

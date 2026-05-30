@@ -159,6 +159,10 @@ export class StringInterpolationEmitter {
       case "Call":
         const args = expr.args.map(a => this.exprToCode(a)).join(", ");
         return `${this.exprToCode(expr.callee)}(${args})`;
+      case "NewExpr": {
+        const args = expr.args.map(a => this.exprToCode(a)).join(", ");
+        return `new ${this.exprToCode(expr.callee)}(${args})`;
+      }
       case "Binary":
         return `${this.exprToCode(expr.left)} ${expr.op} ${this.exprToCode(expr.right)}`;
       case "Index":
