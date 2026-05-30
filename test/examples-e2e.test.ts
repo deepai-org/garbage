@@ -91,37 +91,39 @@ describe("Example files: end-to-end pipeline", () => {
 
     it("assigns python to imports and crawl", () => {
       expect(runtimes[0]).toBe("python"); // import os
-      expect(runtimes[1]).toBe("python"); // import json
-      expect(runtimes[4]).toBe("python"); // def crawl
+      expect(runtimes[3]).toBe("python"); // def crawl
     });
 
     it("assigns go to channels and workers", () => {
-      expect(runtimes[2]).toBe("go"); // inbox = make(16)
-      expect(runtimes[3]).toBe("go"); // outbox = make(16)
-      expect(runtimes[6]).toBe("go"); // func worker
-      expect(runtimes[7]).toBe("go"); // go worker(1)
+      expect(runtimes[1]).toBe("go"); // inbox = make(16)
+      expect(runtimes[2]).toBe("go"); // outbox = make(16)
+      expect(runtimes[5]).toBe("go"); // func worker
+      expect(runtimes[6]).toBe("go"); // go worker(1)
     });
 
-    it("assigns javascript to async function", () => {
-      expect(runtimes[5]).toBe("javascript"); // async function process
+    it("assigns javascript to process function", () => {
+      expect(runtimes[4]).toBe("javascript"); // function process
     });
 
     it("assigns go to close() and channel sends", () => {
-      expect(runtimes[12]).toBe("go"); // close(inbox)
-      expect(runtimes[19]).toBe("go"); // const done = make(0)
-      expect(runtimes[20]).toBe("go"); // done <- report
-      expect(runtimes[21]).toBe("go"); // close(done)
+      expect(runtimes[11]).toBe("go"); // close(inbox)
+      expect(runtimes[14]).toBe("go"); // close(outbox)
+      expect(runtimes[21]).toBe("go"); // const done = make(1)
+      expect(runtimes[22]).toBe("go"); // done <- report
+      expect(runtimes[23]).toBe("go"); // close(done)
     });
 
     it("assigns js to arrow-function expressions", () => {
-      expect(runtimes[14]).toBe("javascript"); // names = raw.map(r => ...)
-      expect(runtimes[15]).toBe("javascript"); // deduped = names.filter(...)
+      expect(runtimes[12]).toBe("javascript"); // raw = Array.from(inbox).map(...)
+      expect(runtimes[15]).toBe("javascript"); // rows = Array.from(outbox).map(...)
+      expect(runtimes[16]).toBe("javascript"); // names = rows.map(r => ...)
+      expect(runtimes[17]).toBe("javascript"); // deduped = names.filter(...)
     });
 
-    it("assigns python to sorted/len/json.dumps", () => {
-      expect(runtimes[16]).toBe("python"); // ranked = sorted(deduped)
-      expect(runtimes[17]).toBe("python"); // total = len(ranked)
-      expect(runtimes[18]).toBe("python"); // report = json.dumps(ranked)
+    it("assigns python to sorted/len/final report", () => {
+      expect(runtimes[18]).toBe("python"); // ranked = sorted(deduped)
+      expect(runtimes[19]).toBe("python"); // total = len(ranked)
+      expect(runtimes[20]).toBe("python"); // report = ranked
     });
 
     it("emits chan ops for make/send/close", () => {
@@ -148,7 +150,7 @@ describe("Example files: end-to-end pipeline", () => {
     });
 
     it("detects f-string print as python", () => {
-      expect(runtimes[22]).toBe("python"); // print(f"Processed {total}...")
+      expect(runtimes[24]).toBe("python"); // print(f"Processed {total}...")
     });
 
     it("has type crossing summary", () => {

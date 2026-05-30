@@ -1,8 +1,7 @@
 // Cursed Concurrency Blender
-// Python generators → Go channels → JS async → all talking to each other.
+// Python generators → Go channels → JS transforms → all talking to each other.
 
 import os
-import json
 
 // [go] buffered channels
 const inbox = make(16)
@@ -13,15 +12,17 @@ def crawl(root):
   for entry in os.scandir(root):
     yield {"name": entry["name"], "size": os.path.getsize(entry["path"])}
 
-// [js] async transformer — arrows force JS even though it reads from Go channels
-async function process(item) {
-  const enriched = await fetch(`/api/enrich?name=${item.name}`)
-  const payload = await enriched.json()
-  return payload
+// [js] transformer — arrows below force JS while reading from Go channels
+function process(item) {
+  return {
+    "name": item.name,
+    "size": item.size,
+    "label": `${item.name}:${item.size}`
+  }
 }
 
 // [go] worker function: compileable as an OmniVM plugin; channel ops below
-// still exercise manifest-level send/close behavior.
+// still exercise manifest-level send/close behavior across runtimes.
 func worker(id) {
   return id
 }
@@ -37,18 +38,26 @@ for item in crawl("/var/data"):
   inbox <- item
 close(inbox)
 
-// [js] arrows yank the results back to JS land
-const raw = Array.from(outbox).map(r => r)
-const names = raw.map(r => r.name.toUpperCase())
+// [js] drain the Go channel into JS, transform the Python payloads
+const raw = Array.from(inbox).map(item => process(item))
+
+// [go] publish transformed rows back through another Go channel
+for result in raw:
+  outbox <- result
+close(outbox)
+
+// [js] arrows yank the channel results back to JS land
+const rows = Array.from(outbox).map(r => r)
+const names = rows.map(r => r.name.toUpperCase())
 const deduped = names.filter((n, i) => names.indexOf(n) === i)
 
 // [python] python takes over for the final analysis
 const ranked = sorted(deduped)
 const total = len(ranked)
-const report = json.dumps(ranked)
+const report = ranked
 
 // [go] publish the final result on a done channel
-const done = make(0)
+const done = make(1)
 done <- report
 close(done)
 
