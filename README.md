@@ -20,8 +20,9 @@ const loud = files.map(f => f.toUpperCase())
 const filtered = [f for f in loud if f.endswith(".log")]
 
 // Go: spin up concurrent workers
-go worker(1)
-go worker(2)
+const w1 = go worker(1)
+const w2 = go worker(2)
+const joined = wait(w1, w2)
 
 print(f"Found {len(filtered)} log files")
 ```
@@ -30,7 +31,7 @@ print(f"Found {len(filtered)} log files")
 
 ```bash
 npm install
-npm test          # Run all 1050+ tests
+npm test          # Run all 1075+ tests
 npm run build     # Compile TypeScript
 ```
 
@@ -41,6 +42,16 @@ npm run polyc -- myapp.poly
 ```
 
 This outputs a **dispatch manifest** — a JSON IR that OmniVM interprets, dispatching each code fragment to the appropriate runtime.
+
+To run the generated manifest, build OmniVM and pass the output to its manifest runner:
+
+```bash
+npm run polyc -- examples/cursed-concurrency.poly -o /tmp/cursed-concurrency.json
+docker run --rm \
+  -v /tmp/cursed-concurrency.json:/tmp/cursed-concurrency.json \
+  --entrypoint manifest-runner omnivm \
+  /tmp/cursed-concurrency.json
+```
 
 ### As a Library
 
@@ -74,6 +85,33 @@ Source (.poly) → Lexer → Parser → AST
 3. **Runtime Resolver** — Two-pass analysis determines which language each expression belongs to using import provenance, syntactic dominance (arrows → JS, list comprehensions → Python), cross-runtime variable tracking, and cost modeling
 4. **Type System** — Unified canonical type IR validates data flowing across runtime boundaries and emits bridge operations for the manifest
 5. **Manifest Generator** — Emits a dispatch manifest that tells OmniVM how to orchestrate calls across runtimes with automatic bridging
+
+## Concurrency Model
+
+PolyScript treats Go concurrency syntax as first-class `.poly` syntax and lowers it into OmniVM manifest operations.
+
+```polyscript
+const inbox = make(chan int)
+const outbox = make(chan int)
+
+func worker(id int) {
+  for item := range inbox {
+    outbox <- item * id
+  }
+  return id
+}
+
+const w1 = go worker(1)
+const w2 = go worker(2)
+
+inbox <- 10
+close(inbox)
+
+const joined = wait(w1, w2)
+close(outbox)
+```
+
+`go worker(...)` returns a manifest-visible spawn handle. `wait()` with no arguments waits for all spawned workers and returns their count; `wait(handle)` returns one worker's result; `wait(h1, h2)` waits for each handle and returns an array of results in argument order. Channels are also manifest-visible values, so JavaScript, Python, and Go fragments can consume the same channel when the manifest runner captures it into that runtime.
 
 ## Runtime Resolver
 
@@ -240,13 +278,21 @@ The manifest is a sequence of ops that OmniVM executes. No language is "on top" 
 | `if` / `loop` | Control flow |
 | `try` / `throw` | Error handling with cross-runtime catch |
 | `parallel` | Cooperative concurrency across runtimes |
-| `chan` / `select` / `spawn` | Go-style concurrency primitives |
+| `chan` / `select` / `spawn` | Go-style concurrency primitives; spawned workers can bind handles |
 | `await` | Async pump signal |
 | `concat` | Polyglot string interpolation |
 
 The manifest also includes a `bridges` array (bridge ops needed at boundary points) and a `typeSummary` (crossing statistics) when cross-runtime type checking detects boundary crossings.
 
 Go functions emit a `source` field (complete compilation unit) with `exports` (PascalCase symbol names for `plugin.Lookup`) and `requires` (external dependencies injected via `Init()`).
+
+Spawn expressions lower to `spawn` ops with an optional `bind` field:
+
+```json
+{ "op": "spawn", "runtime": "go", "code": "worker(1)", "bind": "w1" }
+```
+
+The OmniVM manifest runner owns the runtime behavior for handles, channels, `recv`, `send`, `close`, and `wait`.
 
 ## Project Structure
 
@@ -283,7 +329,7 @@ src/
     import-analyzer.ts    #   Import path → runtime mapping
     cost-model.ts         #   Bridge cost computation
   codegen-omnivm/         # Dispatch manifest + source reconstruction
-test/                     # 1050+ tests across 41 suites
+test/                     # 1075+ tests across 42 suites
 examples/                 # Polyglot example files
 ```
 
@@ -292,7 +338,8 @@ examples/                 # Polyglot example files
 See [`examples/`](examples/) for complete polyglot programs. All runtimes are **autodetected** — the comments in the files are just for human readers.
 
 - **cursed-polyglot.poly** — Python/JS pipeline that ping-pongs between runtimes every single line
-- **cursed-concurrency.poly** — Python generators + Go channels + JS async all talking to each other
+- **cursed-concurrency.poly** — Python generators + Go channels/spawn handles + JS async all talking to each other
+- **django-go-typescript-views.poly** — Django-style views using Go and TypeScript without annotation pragmas
 - **syntactic-dominance.poly** — Demonstrates how arrow functions override import provenance
 
 ## License
