@@ -15,6 +15,13 @@ func retry_worker(id) {
   return id
 }
 
+func retry_backoff(attempt) {
+  if attempt == nil {
+    return 0
+  }
+  return 50
+}
+
 const endpoint = "https://api.example.test/v1/items?b=2&a=1"
 status = httpx.Response(200).status_code
 const parsed = url.parse(endpoint)
@@ -28,5 +35,6 @@ close(retry_in)
 const joined = wait(h1, h2)
 close(retry_out)
 const attempts = Array.from(retry_out)
+const backoff = retry_backoff(attempts.length)
 
-console.log(`HTTPX/URL/Go aggregator endpoint=${normalized} attempts=${attempts.length} workers=${joined.length}`)
+print(f"HTTPX/URL/Go aggregator endpoint={normalized} attempts={len(attempts)} workers={len(joined)} backoff={backoff}ms")
