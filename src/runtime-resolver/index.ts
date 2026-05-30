@@ -45,7 +45,7 @@ export class RuntimeResolver {
     const fileDirective = program.runtimeDirective;
 
     // Pass 1: structural analysis
-    const pass1 = new Pass1Structural(symbolTable, fileDirective);
+    const pass1 = new Pass1Structural(symbolTable, fileDirective, source);
     const affinityMap = pass1.run(program);
 
     // Pass 2: propagation

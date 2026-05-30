@@ -227,6 +227,7 @@ describe("Example files: end-to-end pipeline", () => {
       ) as any;
 
       expect(djangoView?.runtime).toBe("python");
+      expect(djangoView?.code).not.toContain("@py");
       expect(djangoView?.code).toContain("JsonResponse");
       expect(djangoView?.code).toContain("go_view(request.path)");
       expect(djangoView?.code).toContain("ts_view(request.path)");

@@ -19,7 +19,7 @@ function ts_view(path: string) {
 settings.configure(SECRET_KEY="poly", DEFAULT_CHARSET="utf-8", ALLOWED_HOSTS=["*"])
 django.setup()
 
-django_view = @py(lambda request: JsonResponse({"framework": "django", "go": go_view(request.path), "ts": json.loads(ts_view(request.path)), "path": request.path}))
+django_view = lambda request: JsonResponse({"framework": "django", "go": go_view(request.path), "ts": json.loads(ts_view(request.path)), "path": request.path})
 request = RequestFactory().get("/poly/django")
 response = django_view(request)
 

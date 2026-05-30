@@ -118,6 +118,15 @@ describe('DeclareOp', () => {
       expect(op.from).toBeUndefined();
     }
   });
+
+  test('Python lambda assignment emits native Python lambda', () => {
+    const m = parseAndManifest('view = lambda request: JsonResponse({"path": request.path})');
+    const op = m.ops[0] as any;
+    expect(op.op).toBe('eval');
+    expect(op.runtime).toBe('python');
+    expect(op.bind).toBe('view');
+    expect(op.code).toBe('lambda request: JsonResponse({"path": request.path})');
+  });
 });
 
 // --- FuncDefOp: function definitions ---

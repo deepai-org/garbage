@@ -22,12 +22,15 @@ export class Pass1Structural {
   private symbolTable: SymbolTable;
   private fileDirective?: OmniRuntime;
   private scopeStack: OmniRuntime[] = [];
+  private source?: string;
 
   constructor(
     symbolTable: SymbolTable,
     fileDirective?: string,
+    source?: string,
   ) {
     this.symbolTable = symbolTable;
+    this.source = source;
     if (fileDirective) {
       this.fileDirective = this.parseRuntimeName(fileDirective);
     }
@@ -510,7 +513,7 @@ export class Pass1Structural {
         }
         break;
       case "Lambda":
-        this.assign(expr, OmniRuntime.JavaScript, "definite", { type: "syntax", detail: "arrow function =>" });
+        this.assignLambdaSyntax(expr);
         this.symbolTable.pushScope();
         for (const param of expr.params) {
           if (param.name.kind === "Identifier") {
@@ -585,6 +588,27 @@ export class Pass1Structural {
       return;
     }
     this.affinityMap.set(node, { runtime, confidence, evidence });
+  }
+
+  private assignLambdaSyntax(expr: AST.Lambda): void {
+    const raw = this.source && expr.span && expr.span.end > expr.span.start
+      ? this.source.slice(expr.span.start, expr.span.end).trim()
+      : undefined;
+
+    if (raw?.startsWith("lambda ")) {
+      this.assign(expr, OmniRuntime.Python, "definite", { type: "syntax", detail: "lambda expression" });
+      return;
+    }
+
+    if (raw?.includes("=>")) {
+      this.assign(expr, OmniRuntime.JavaScript, "definite", { type: "syntax", detail: "arrow function =>" });
+      return;
+    }
+
+    this.assign(expr, this.currentScopeRuntime() || OmniRuntime.JavaScript, "inferred", {
+      type: "node_type",
+      detail: "lambda expression",
+    });
   }
 
   private getAffinity(node: AST.Decl | AST.Stmt | AST.Expr): RuntimeAffinity | undefined {

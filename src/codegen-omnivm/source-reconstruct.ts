@@ -89,13 +89,8 @@ export function exprToCode(expr: AST.Expr, source?: string): string {
       const targets = expr.targets.map(t => t.name).join(", ");
       const filter = expr.filter ? ` if ${exprToCode(expr.filter, source)}` : "";
       return `[${exprToCode(expr.expression, source)} for ${targets} in ${exprToCode(expr.iterable, source)}${filter}]`;
-    case "RuntimeTag": {
-      if (expr.runtime === "py" && expr.expr.kind === "Lambda") {
-        const raw = spanExtract(expr.expr, source)?.trim();
-        if (raw?.startsWith("lambda ")) return raw;
-      }
+    case "RuntimeTag":
       return exprToCode(expr.expr, source);
-    }
     case "JSXElement":
       return jsxToCreateElement(expr, source);
     case "JSXFragment":
@@ -115,6 +110,60 @@ export function exprToCode(expr: AST.Expr, source?: string): string {
       return `(${exprToCode(expr.expr, source)} as ${typeToCode(expr.type, source)})`;
     default:
       return spanExtract(expr, source) || "/* expr */";
+  }
+}
+
+export function exprToCodeForRuntime(expr: AST.Expr, runtime: OmniRuntime, source?: string): string {
+  if (expr.kind === "RuntimeTag") {
+    return exprToCodeForRuntime(expr.expr, tagToRuntime(expr.runtime), source);
+  }
+  if (runtime === OmniRuntime.Python) {
+    return exprToPythonCode(expr, source);
+  }
+  return exprToCode(expr, source);
+}
+
+function exprToPythonCode(expr: AST.Expr, source?: string): string {
+  switch (expr.kind) {
+    case "Lambda":
+      return lambdaToPythonCode(expr, source);
+    case "BooleanLiteral":
+      return expr.value ? "True" : "False";
+    case "NullLiteral":
+      return "None";
+    case "ArrayLiteral":
+      return `[${expr.elements.map(e => exprToPythonCode(e, source)).join(", ")}]`;
+    case "ObjectLiteral": {
+      const objProps = expr.properties.map(p => {
+        const key = p.computed
+          ? `[${exprToPythonCode(p.key as AST.Expr, source)}]`
+          : (p.key.kind === "Identifier" ? JSON.stringify(p.key.name) : exprToPythonCode(p.key as AST.Expr, source));
+        return `${key}: ${exprToPythonCode(p.value, source)}`;
+      }).join(", ");
+      return `{${objProps}}`;
+    }
+    case "Call":
+      return `${exprToPythonCode(expr.callee, source)}(${expr.args.map(a => exprToPythonCode(a, source)).join(", ")})`;
+    case "Member":
+      return `${exprToPythonCode(expr.object, source)}.${expr.property.name}`;
+    case "Index":
+      return `${exprToPythonCode(expr.object, source)}[${exprToPythonCode(expr.index, source)}]`;
+    case "Binary":
+      return `(${exprToPythonCode(expr.left, source)} ${expr.op} ${exprToPythonCode(expr.right, source)})`;
+    case "Unary": {
+      if (expr.prefix) {
+        const op = expr.op === "!" ? "not " : expr.op;
+        const space = /^[a-z]+$/i.test(op) && !op.endsWith(" ") ? " " : "";
+        return `${op}${space}${exprToPythonCode(expr.argument, source)}`;
+      }
+      return `${exprToPythonCode(expr.argument, source)}${expr.op}`;
+    }
+    case "Assign":
+      return `${exprToPythonCode(expr.left, source)} ${expr.op} ${exprToPythonCode(expr.right, source)}`;
+    case "RuntimeTag":
+      return exprToPythonCode(expr.expr, source);
+    default:
+      return exprToCode(expr, source);
   }
 }
 
@@ -537,6 +586,22 @@ function lambdaToCode(expr: AST.Lambda, paramsCode: string, source?: string): st
     return `${asyncPrefix}(${paramsCode}) => (${bodyCode})`;
   }
   return `${asyncPrefix}(${paramsCode}) => ${bodyCode}`;
+}
+
+function lambdaToPythonCode(expr: AST.Lambda, source?: string): string {
+  const raw = spanExtract(expr, source)?.trim();
+  if (raw?.startsWith("lambda ")) return raw;
+
+  const params = expr.params.map(p => paramToCode(p, source)).join(", ");
+  if ('kind' in expr.body && (expr.body as any).kind === "Block") {
+    const block = expr.body as AST.Block;
+    if (block.statements.length === 1 && block.statements[0].kind === "ExprStmt") {
+      return `lambda ${params}: ${exprToPythonCode((block.statements[0] as AST.ExprStmt).expr, source)}`;
+    }
+    return raw || `lambda ${params}: None`;
+  }
+
+  return `lambda ${params}: ${exprToPythonCode(expr.body as AST.Expr, source)}`;
 }
 
 // ─── Identifier Collection (for captures analysis) ────────────────

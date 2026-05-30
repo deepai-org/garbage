@@ -16,6 +16,7 @@ import {
 import { consolidateBlocks, isConsolidatable, isCompiledRuntime, RuntimeBlock } from './runtime-blocks';
 import {
   exprToCode,
+  exprToCodeForRuntime,
   nodeToSourceCode,
   paramToCode,
   importSpecsToCode,
@@ -804,7 +805,7 @@ export class ManifestCodeGenerator {
       const captures = this.computeCaptures(expr, runtime);
       return {
         runtime,
-        code: exprToCode(expr, this.source),
+        code: this.exprCode(expr, runtime),
         bind: `${bindPrefix}_${i}`,
         ...(captures ? { captures } : {}),
       };
@@ -836,7 +837,7 @@ export class ManifestCodeGenerator {
       from: {
         op: "eval",
         runtime,
-        code: exprToCode(inner, this.source),
+        code: this.exprCode(inner, runtime),
         bind: bind || "__awaited",
         ...(captures ? { captures } : {}),
       },
@@ -1028,6 +1029,10 @@ export class ManifestCodeGenerator {
     return this.emitExprAsOp(node.expr, blockRuntime);
   }
 
+  private exprCode(expr: AST.Expr, runtime: OmniRuntime): string {
+    return exprToCodeForRuntime(expr, runtime, this.source);
+  }
+
   private emitEcho(node: AST.Echo, blockRuntime: OmniRuntime): NativeOp {
     const aff = this.affinityMap.get(node);
     const runtime = aff?.runtime || blockRuntime;
@@ -1109,7 +1114,7 @@ export class ManifestCodeGenerator {
         from: {
           op: "eval",
           runtime,
-          code: exprToCode(expr.right, this.source),
+          code: this.exprCode(expr.right, runtime),
           bind: "__rhs",
           ...(captures ? { captures } : {}),
         },
@@ -1152,7 +1157,7 @@ export class ManifestCodeGenerator {
       return {
         op: "eval",
         runtime,
-        code: exprToCode(expr.right, this.source),
+        code: this.exprCode(expr.right, runtime),
         bind: bindName,
         ...(captures ? { captures } : {}),
       };
@@ -1173,7 +1178,7 @@ export class ManifestCodeGenerator {
       return {
         op: "exec",
         runtime: tagRt,
-        code: exprToCode(expr.expr, this.source),
+        code: this.exprCode(expr.expr, tagRt),
         ...(captures ? { captures } : {}),
       };
     }
@@ -1187,7 +1192,7 @@ export class ManifestCodeGenerator {
     return {
       op: "exec",
       runtime,
-      code: exprToCode(expr, this.source),
+      code: this.exprCode(expr, runtime),
       ...(captures ? { captures } : {}),
     };
   }
@@ -1474,7 +1479,7 @@ export class ManifestCodeGenerator {
           ops.push({
             op: "eval",
             runtime,
-            code: exprToCode(valExpr, this.source),
+            code: this.exprCode(valExpr, runtime),
             bind: name,
             ...(captures ? { captures } : {}),
           });
@@ -1562,7 +1567,7 @@ export class ManifestCodeGenerator {
         ops.push({
           op: "eval",
           runtime,
-          code: exprToCode(valExpr, this.source),
+          code: this.exprCode(valExpr, runtime),
           bind: name,
           ...(captures ? { captures } : {}),
         });
@@ -1676,7 +1681,7 @@ export class ManifestCodeGenerator {
     return {
       op: "eval",
       runtime,
-      code: exprToCode(valExpr, this.source),
+      code: this.exprCode(valExpr, runtime),
       bind: bindName,
       ...(captures ? { captures } : {}),
     };
@@ -2158,7 +2163,7 @@ export class ManifestCodeGenerator {
         from: {
           op: "eval",
           runtime,
-          code: exprToCode(val, this.source),
+          code: this.exprCode(val, runtime),
           bind: "__ret",
           ...(captures ? { captures } : {}),
         },

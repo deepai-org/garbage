@@ -17,7 +17,7 @@ function parseCode(code: string): AST.Program {
 function resolve(code: string) {
   const ast = parseCode(code);
   const resolver = new RuntimeResolver();
-  return resolver.resolve(ast);
+  return resolver.resolve(ast, code);
 }
 
 // --- Parser Enrichment Tests ---
@@ -131,6 +131,26 @@ describe('Parser Enrichment', () => {
     const tag = findRuntimeTag(stmt);
     expect(tag).not.toBeNull();
     expect(tag!.runtime).toBe('go');
+  });
+});
+
+describe('Lambda Runtime Syntax', () => {
+  test('Python lambda syntax resolves to Python', () => {
+    const result = resolve('view = lambda request: JsonResponse({"path": request.path})');
+    const stmt = result.program.body[0] as AST.ExprStmt;
+    const assign = stmt.expr as AST.Assign;
+    const lambda = assign.right as AST.Lambda;
+
+    expect(result.affinityMap.get(lambda)?.runtime).toBe(OmniRuntime.Python);
+    expect(result.affinityMap.get(assign)?.runtime).toBe(OmniRuntime.Python);
+  });
+
+  test('JavaScript arrow syntax resolves to JavaScript', () => {
+    const result = resolve('const view = (request) => JsonResponse({"path": request.path})');
+    const decl = result.program.body[0] as AST.ConstDecl;
+    const lambda = decl.values[0] as AST.Lambda;
+
+    expect(result.affinityMap.get(lambda)?.runtime).toBe(OmniRuntime.JavaScript);
   });
 });
 
