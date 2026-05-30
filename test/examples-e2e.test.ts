@@ -200,8 +200,7 @@ describe("Example files: end-to-end pipeline", () => {
 
     it("imports Django in Python and emits Go plus JavaScript handlers", () => {
       expect(runtimes).not.toContain("unknown");
-      expect(runtimes.slice(0, 5)).toEqual([
-        "python",
+      expect(runtimes.slice(0, 4)).toEqual([
         "python",
         "python",
         "python",
@@ -231,6 +230,7 @@ describe("Example files: end-to-end pipeline", () => {
       expect(djangoView?.code).toContain("JsonResponse");
       expect(djangoView?.code).toContain("go_view(request.path)");
       expect(djangoView?.code).toContain("ts_view(request.path)");
+      expect(djangoView?.code).not.toContain("json.loads");
       expect(djangoView?.code).toContain("lambda request");
     });
   });
@@ -240,7 +240,7 @@ describe("Example files: end-to-end pipeline", () => {
       path.join(examplesDir, "express-python-view.poly")
     );
 
-    it("imports Express in JavaScript and JSON in Python", () => {
+    it("imports Express in JavaScript and defines the view in Python", () => {
       expect(runtimes).not.toContain("unknown");
       expect(runtimes[0]).toBe("javascript");
       expect(runtimes[1]).toBe("python");
@@ -265,6 +265,7 @@ describe("Example files: end-to-end pipeline", () => {
 
       expect(route?.runtime).toBe("javascript");
       expect(route?.code).toContain("py_view(req.path)");
+      expect(route?.code).not.toContain("JSON.parse");
       expect(registration?.runtime).toBe("javascript");
     });
   });

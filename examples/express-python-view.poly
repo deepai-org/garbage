@@ -1,17 +1,15 @@
 import express
-import json
 
 def py_view(path):
-  return json.dumps({
+  return {
     "framework": "express",
     "runtime": "python",
     "path": path
-  })
+  }
 
 const app = express()
 const express_view = (req, res) => {
-  const payload = JSON.parse(py_view(req.path))
-  res.status(200).json(payload)
+  res.status(200).json(py_view(req.path))
 }
 const res = {
   "statusCode": 0,
