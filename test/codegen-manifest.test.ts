@@ -732,8 +732,9 @@ describe('Go Runtime Restrictions', () => {
     // var function pointer for fetch_events
     expect(funcOp.source).toContain('var fetch_events func(interface{}, interface{}) interface{}');
     // Init function for OmniVM to call at plugin load time
-    expect(funcOp.source).toContain('func Init(fetch_eventsFn func(interface{}, interface{}) interface{})');
-    expect(funcOp.source).toContain('fetch_events = fetch_eventsFn');
+    expect(funcOp.source).toContain('func Init(deps map[string]interface{})');
+    expect(funcOp.source).toContain('deps["fetch_events"].(func(interface{}, interface{}) interface{})');
+    expect(funcOp.source).toContain('fetch_events = fn');
     // The main function still calls it
     expect(funcOp.source).toContain('fetch_events(x, 5)');
     // requires field tells OmniVM what needs injection

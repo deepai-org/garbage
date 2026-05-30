@@ -265,6 +265,9 @@ export const BUILTIN_AFFINITY: Record<string, OmniRuntime> = {
   panic: OmniRuntime.Go,
   real: OmniRuntime.Go,
   recover: OmniRuntime.Go,
+  recv: OmniRuntime.Go,
+  send: OmniRuntime.Go,
+  wait: OmniRuntime.Go,
   fmt: OmniRuntime.Go,
 
   // Ruby builtins

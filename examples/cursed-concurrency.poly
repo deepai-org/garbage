@@ -12,7 +12,7 @@ def crawl(root):
   for entry in os.scandir(root):
     yield {"name": entry["name"], "size": os.path.getsize(entry["path"])}
 
-// [js] transformer — arrows below force JS while reading from Go channels
+// [js] transformer — arrows below force JS while reading from a Go channel
 function process(item) {
   return {
     "name": item.name,
@@ -21,9 +21,16 @@ function process(item) {
   }
 }
 
-// [go] worker function: compileable as an OmniVM plugin; channel ops below
-// still exercise manifest-level send/close behavior across runtimes.
+// [go] worker function: compiled as an OmniVM plugin and connected to
+// manifest channels through Go helper functions.
 func worker(id) {
+  while true {
+    item := recv("inbox")
+    if item == nil {
+      return id
+    }
+    send("outbox", item)
+  }
   return id
 }
 
@@ -38,17 +45,14 @@ for item in crawl("/var/data"):
   inbox <- item
 close(inbox)
 
-// [js] drain the Go channel into JS, transform the Python payloads
-const raw = Array.from(inbox).map(item => process(item))
-
-// [go] publish transformed rows back through another Go channel
-for result in raw:
-  outbox <- result
+// [go] join the workers before closing their output channel
+const joined = wait()
 close(outbox)
 
-// [js] arrows yank the channel results back to JS land
+// [js] Array.from consumes the Go channel's JS iterable adapter
 const rows = Array.from(outbox).map(r => r)
-const names = rows.map(r => r.name.toUpperCase())
+const raw = rows.map(item => process(item))
+const names = raw.map(r => r.name.toUpperCase())
 const deduped = names.filter((n, i) => names.indexOf(n) === i)
 
 // [python] python takes over for the final analysis
@@ -60,5 +64,7 @@ const report = ranked
 const done = make(1)
 done <- report
 close(done)
+const final_report = list(done)
+const delivered = len(final_report)
 
-print(f"Processed {total} items across 3 runtimes")
+print(f"Processed {total} items across 3 runtimes; delivered {delivered} report")

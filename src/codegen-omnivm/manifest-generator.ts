@@ -1836,6 +1836,10 @@ export class ManifestCodeGenerator {
 
     const calledFuncs = new Map<string, number>(); // name → arg count
     const definedLocals = new Set<string>();
+    for (const stmt of node.body.statements) {
+      this.collectGoCalls(stmt, calledFuncs);
+    }
+
     const bodyLines = node.body.statements.map(
       s => this.goStmtToCode(s, paramNames, definedLocals, calledFuncs)
     );
@@ -1863,14 +1867,13 @@ export class ManifestCodeGenerator {
       lines.push(...varDecls, "");
       // Init function: OmniVM calls this at plugin load time to inject
       // real implementations for external dependencies.
-      const initParams = requires.map(r => {
+      lines.push(`func Init(deps map[string]interface{}) {`);
+      for (const r of requires) {
         const argc = calledFuncs.get(r) || 0;
         const fParamTypes = Array.from({ length: argc }, () => "interface{}").join(", ");
-        return `${r}Fn func(${fParamTypes}) interface{}`;
-      });
-      lines.push(`func Init(${initParams.join(", ")}) {`);
-      for (const r of requires) {
-        lines.push(`\t${r} = ${r}Fn`);
+        lines.push(`\tif fn, ok := deps["${r}"].(func(${fParamTypes}) interface{}); ok {`);
+        lines.push(`\t\t${r} = fn`);
+        lines.push(`\t}`);
       }
       lines.push("}", "");
     }
@@ -1901,6 +1904,39 @@ export class ManifestCodeGenerator {
   }
 
   // ─── Go Source Reconstruction ──────────────────────────────────
+
+  private collectGoCalls(node: unknown, calledFuncs: Map<string, number>): void {
+    if (!node || typeof node !== "object") return;
+    if (Array.isArray(node)) {
+      for (const item of node) this.collectGoCalls(item, calledFuncs);
+      return;
+    }
+
+    const n = node as any;
+    if (n.kind === "Call" && n.callee?.kind === "Identifier") {
+      calledFuncs.set(n.callee.name, Math.max(
+        calledFuncs.get(n.callee.name) ?? 0,
+        n.args?.length ?? 0
+      ));
+    }
+
+    for (const [key, value] of Object.entries(n)) {
+      if (key === "span") continue;
+      this.collectGoCalls(value, calledFuncs);
+    }
+  }
+
+  private goBlockToCode(
+    statements: Array<AST.Stmt | AST.Decl>,
+    params: Set<string>,
+    locals: Set<string>,
+    calledFuncs: Map<string, number>
+  ): string {
+    return statements
+      .flatMap(s => this.goStmtToCode(s, params, locals, calledFuncs).split("\n"))
+      .map(line => `\t${line}`)
+      .join("\n");
+  }
 
   private goStmtToCode(
     node: AST.Stmt | AST.Decl,
@@ -1937,6 +1973,26 @@ export class ManifestCodeGenerator {
           }
           return `var ${n.name} ${t}`;
         }).join("; ");
+      case "Loop": {
+        const body = this.goBlockToCode(node.body.statements, params, locals, calledFuncs);
+        if (node.mode === "while" && node.test) {
+          const test = this.goExprToCode(node.test, params, locals, calledFuncs);
+          return `for ${test} {\n${body}\n}`;
+        }
+        return `for {\n${body}\n}`;
+      }
+      case "If": {
+        const arms = node.arms.map((arm, idx) => {
+          const test = this.goExprToCode(arm.test, params, locals, calledFuncs);
+          const body = this.goBlockToCode(arm.body.statements, params, locals, calledFuncs);
+          return `${idx === 0 ? "if" : "else if"} ${test} {\n${body}\n}`;
+        });
+        if (node.elseBody) {
+          const elseBody = this.goBlockToCode(node.elseBody.statements, params, locals, calledFuncs);
+          arms.push(`else {\n${elseBody}\n}`);
+        }
+        return arms.join(" ");
+      }
       default:
         return this.goSpanFallback(node);
     }
