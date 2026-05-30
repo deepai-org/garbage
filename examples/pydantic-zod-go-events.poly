@@ -1,0 +1,28 @@
+import pydantic
+import zod from "zod"
+
+func stable_event_id(source) {
+  return source
+}
+
+const raw_event = {"provider": "stripe", "amount": 42, "email": "Ada@Example.COM"}
+const validated = pydantic.TypeAdapter(dict).validate_python(raw_event)
+const event_id = stable_event_id(validated["provider"])
+
+function shape_client_event(event) {
+  const Schema = zod.z.object({
+    "provider": zod.z.string(),
+    "amount": zod.z.number(),
+    "email": zod.z.string()
+  })
+  const parsed = Schema.parse(event)
+  return {
+    "provider": parsed.provider,
+    "amount": parsed.amount,
+    "email": parsed.email.toLowerCase()
+  }
+}
+
+const client_event = shape_client_event(validated)
+
+console.log(`Pydantic/Zod/Go event ${event_id} ${client_event.email} amount=${client_event.amount}`)

@@ -2004,6 +2004,9 @@ export class ManifestCodeGenerator {
       'make', 'len', 'cap', 'append', 'copy', 'delete', 'new',
       'panic', 'recover', 'close', 'print', 'println',
       'complex', 'real', 'imag',
+      'bool', 'byte', 'rune', 'string', 'int', 'int8', 'int16', 'int32', 'int64',
+      'uint', 'uint8', 'uint16', 'uint32', 'uint64', 'float32', 'float64',
+      '[]byte', '[]rune',
     ]);
     const requires: string[] = [];
     const varDecls: string[] = [];
@@ -2016,6 +2019,14 @@ export class ManifestCodeGenerator {
 
     // Build complete Go compilation unit
     const lines: string[] = ["package polyfunc", ""];
+    const imports = this.inferGoImports(bodyLines.join("\n"));
+    if (imports.length > 0) {
+      lines.push("import (");
+      for (const imp of imports) {
+        lines.push(`\t"${imp}"`);
+      }
+      lines.push(")", "");
+    }
     if (varDecls.length > 0) {
       lines.push(...varDecls, "");
       // Init function: OmniVM calls this at plugin load time to inject
@@ -2048,6 +2059,27 @@ export class ManifestCodeGenerator {
     };
 
     return [funcDef];
+  }
+
+  private inferGoImports(source: string): string[] {
+    const imports: Array<[RegExp, string]> = [
+      [/\bhmac\./, "crypto/hmac"],
+      [/\bsha256\./, "crypto/sha256"],
+      [/\bmd5\./, "crypto/md5"],
+      [/\brand\./, "crypto/rand"],
+      [/\bhex\./, "encoding/hex"],
+      [/\bbase64\./, "encoding/base64"],
+      [/\bjson\./, "encoding/json"],
+      [/\bfmt\./, "fmt"],
+      [/\bstrings\./, "strings"],
+      [/\btime\./, "time"],
+    ];
+
+    const selected = new Set<string>();
+    for (const [pattern, path] of imports) {
+      if (pattern.test(source)) selected.add(path);
+    }
+    return Array.from(selected).sort();
   }
 
   private toPascalCase(name: string): string {

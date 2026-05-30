@@ -9,7 +9,8 @@ const PYTHON_MODULES = new Set([
   "logging", "unittest", "pytest", "asyncio", "aiohttp", "requests",
   "flask", "django", "fastapi", "numpy", "pandas", "scipy", "matplotlib",
   "tensorflow", "torch", "sklearn", "sqlalchemy", "celery", "pydantic",
-  "beautifulsoup4", "selenium", "scrapy", "PIL", "cv2", "pickle",
+  "beautifulsoup4", "bs4", "jinja2", "httpx", "markdown",
+  "selenium", "scrapy", "PIL", "cv2", "pickle",
   "subprocess", "threading", "multiprocessing", "socket", "http",
   "urllib", "email", "csv", "xml", "html", "hashlib", "hmac",
   "secrets", "random", "statistics", "decimal", "fractions",
@@ -26,7 +27,8 @@ const GO_MODULES = new Set([
   "fmt", "os", "io", "net", "http", "strings", "strconv", "math",
   "sort", "sync", "context", "time", "encoding", "encoding/json",
   "encoding/xml", "encoding/csv", "encoding/base64", "encoding/binary",
-  "database/sql", "crypto", "crypto/sha256", "crypto/md5", "crypto/rand",
+  "database/sql", "crypto", "crypto/hmac", "crypto/sha256", "crypto/md5", "crypto/rand",
+  "encoding/hex",
   "path", "path/filepath", "regexp", "log", "errors", "reflect",
   "unsafe", "runtime", "testing", "flag", "bufio", "bytes",
   "container/list", "container/heap", "container/ring",
@@ -46,6 +48,7 @@ const JS_MODULES = new Set([
   "react", "react-dom", "vue", "angular", "svelte", "next", "nuxt",
   "express", "koa", "fastify", "hapi", "nest", "nestjs",
   "lodash", "underscore", "ramda", "rxjs", "immutable",
+  "zod", "cheerio", "marked", "d3-shape",
   "axios", "node-fetch", "got", "superagent",
   "moment", "dayjs", "date-fns", "luxon",
   "webpack", "rollup", "vite", "parcel", "esbuild",
@@ -123,6 +126,9 @@ export function analyzeImportPath(path: string): RuntimeAffinity | undefined {
 
   // Python modules
   if (PYTHON_MODULES.has(path)) {
+    return { runtime: OmniRuntime.Python, confidence: "inferred", evidence: [evidence] };
+  }
+  if ([...PYTHON_MODULES].some(mod => path.startsWith(`${mod}.`))) {
     return { runtime: OmniRuntime.Python, confidence: "inferred", evidence: [evidence] };
   }
 

@@ -145,6 +145,9 @@ export class Pass2Propagation {
             (varExisting.confidence === "inferred" && varExisting.evidence[0]?.type === "scope"))) {
           this.affinityMap.set(node, { ...valAff });
         }
+        if (valAff && valAff.confidence !== "fallback") {
+          this.defineDeclaredNames(node.names, valAff, node);
+        }
         return this.getOrDefault(node);
       }
 
@@ -157,6 +160,22 @@ export class Pass2Propagation {
             (!constExisting || constExisting.confidence === "fallback" ||
             (constExisting.confidence === "inferred" && constExisting.evidence[0]?.type === "scope"))) {
           this.affinityMap.set(node, { ...constValAff });
+        }
+        if (constValAff && constValAff.confidence !== "fallback") {
+          this.defineDeclaredNames(node.names, constValAff, node);
+        }
+        return this.getOrDefault(node);
+      }
+
+      case "Reassign": {
+        const exprAff = this.propagateExpr(node.expr);
+        if (exprAff && exprAff.confidence !== "fallback") {
+          this.affinityMap.set(node, { ...exprAff });
+          this.symbolTable.define(node.name.name, {
+            name: node.name.name,
+            affinity: { ...exprAff },
+            declNode: node,
+          });
         }
         return this.getOrDefault(node);
       }
@@ -201,8 +220,17 @@ export class Pass2Propagation {
         return this.propagateUnary(expr);
 
       case "Assign":
-        this.propagateExpr(expr.left);
         const rightAff = this.propagateExpr(expr.right);
+        if (expr.left.kind === "Identifier" && rightAff.confidence !== "fallback") {
+          this.affinityMap.set(expr.left, { ...rightAff });
+          this.symbolTable.define(expr.left.name, {
+            name: expr.left.name,
+            affinity: { ...rightAff },
+            declNode: expr,
+          });
+        } else {
+          this.propagateExpr(expr.left);
+        }
         this.ensureAffinity(expr, rightAff);
         return rightAff;
 
@@ -235,8 +263,11 @@ export class Pass2Propagation {
         return this.propagateExpr(expr.expr);
 
       case "Index":
-        this.propagateExpr(expr.object);
+        const objectAff = this.propagateExpr(expr.object);
         this.propagateExpr(expr.index);
+        if (objectAff.confidence !== "fallback") {
+          this.ensureAffinity(expr, objectAff);
+        }
         return this.getOrDefault(expr);
 
       case "ListComprehension":
@@ -257,7 +288,7 @@ export class Pass2Propagation {
         return this.getOrDefault(expr);
 
       case "Identifier":
-        return this.getOrDefault(expr);
+        return this.propagateIdentifier(expr);
 
       case "StringLiteral":
         return this.propagateStringLiteral(expr);
@@ -287,14 +318,14 @@ export class Pass2Propagation {
     for (const arg of node.args) {
       const argAff = this.affinityMap.get(arg);
       if (argAff) {
-        const hasSyntaxEvidence = argAff.evidence.some(e => e.type === "syntax");
+        const hasSyntaxEvidence = arg.kind !== "Identifier" && argAff.evidence.some(e => e.type === "syntax");
         if (hasSyntaxEvidence) {
           syntaxVotes.set(argAff.runtime, (syntaxVotes.get(argAff.runtime) || 0) + 1);
         }
       }
     }
 
-    if (syntaxVotes.size === 1) {
+    if (syntaxVotes.size === 1 && existing?.confidence !== "definite") {
       // Exactly one language has syntax evidence — it wins
       const [winnerRuntime] = syntaxVotes.keys();
       this.affinityMap.set(node, {
@@ -348,7 +379,7 @@ export class Pass2Propagation {
     //   2. The method's runtime MATCHES the object's runtime (reinforcing, not contradicting)
     const objIsKnown = objAff.confidence !== "fallback";
 
-    if (objIsKnown && (!existing || existing.confidence !== "definite")) {
+    if (objIsKnown) {
       // Object has a real runtime — inherit from object
       this.affinityMap.set(node, {
         runtime: objAff.runtime,
@@ -521,6 +552,31 @@ export class Pass2Propagation {
   }
 
   // --- Helpers ---
+
+  private propagateIdentifier(node: AST.Identifier): RuntimeAffinity {
+    const symbol = this.symbolTable.lookup(node.name);
+    const existing = this.affinityMap.get(node);
+    if (symbol && symbol.affinity.confidence !== "fallback" &&
+        (!existing || existing.confidence === "fallback" ||
+        (existing.confidence === "inferred" && existing.evidence[0]?.type === "scope"))) {
+      this.affinityMap.set(node, { ...symbol.affinity });
+    }
+    return this.getOrDefault(node);
+  }
+
+  private defineDeclaredNames(
+    names: AST.Identifier[],
+    affinity: RuntimeAffinity,
+    declNode: AST.Decl | AST.Stmt | AST.Expr,
+  ): void {
+    for (const name of names) {
+      this.symbolTable.define(name.name, {
+        name: name.name,
+        affinity: { ...affinity },
+        declNode,
+      });
+    }
+  }
 
   private ensureAffinity(node: AST.Decl | AST.Stmt | AST.Expr, affinity: RuntimeAffinity): void {
     if (!this.affinityMap.has(node)) {
