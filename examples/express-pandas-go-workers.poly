@@ -1,4 +1,5 @@
 import express
+import io
 import pandas
 import lodash from "lodash"
 
@@ -7,14 +8,11 @@ func enrich_region(region) {
 }
 
 const app = express()
-const raw_orders = [
-  {"region": "west", "amount": 32},
-  {"region": "east", "amount": 18},
-  {"region": "west", "amount": 8},
-  {"region": "north", "amount": 12}
-]
+csv_upload = "region,amount\n west ,32\n east ,18\n west ,8\n north ,12"
+orders = pandas.read_csv(io.StringIO(str(csv_upload).replace("\n", chr(10))))
+orders["region"] = orders["region"].str.strip()
 
-summary = pandas.DataFrame(raw_orders).groupby("region")["amount"].sum().reset_index().to_dict("records")
+summary = orders.groupby("region")["amount"].sum().reset_index().to_dict("records")
 const w1 = go enrich_region("west")
 const w2 = go enrich_region("east")
 const workers = wait(w1, w2)
