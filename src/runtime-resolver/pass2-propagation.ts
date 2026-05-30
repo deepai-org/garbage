@@ -252,6 +252,10 @@ export class Pass2Propagation {
         this.propagateExpr(expr.expr);
         return this.getOrDefault(expr);
 
+      case "Go":
+        this.propagateExpr(expr.expr);
+        return this.getOrDefault(expr);
+
       case "Identifier":
         return this.getOrDefault(expr);
 

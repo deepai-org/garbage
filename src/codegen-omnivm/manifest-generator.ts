@@ -1297,7 +1297,7 @@ export class ManifestCodeGenerator {
 
   // ─── Spawn (goroutine) ─────────────────────────────────────────
 
-  private emitSpawn(node: AST.Go): SpawnOp {
+  private emitSpawn(node: AST.Go, bind?: string): SpawnOp {
     const aff = this.affinityMap.get(node);
     const runtime = aff?.runtime || OmniRuntime.Go;
     const captures = this.computeCaptures(node.expr, runtime);
@@ -1305,6 +1305,7 @@ export class ManifestCodeGenerator {
       op: "spawn",
       runtime,
       code: exprToCode(node.expr, this.source),
+      ...(bind ? { bind } : {}),
       ...(captures ? { captures } : {}),
     };
   }
@@ -1419,6 +1420,12 @@ export class ManifestCodeGenerator {
         const aff = this.affinityMap.get(valExpr);
         const runtime = aff?.runtime || this.defaultRuntime;
 
+        if (valExpr.kind === "Go") {
+          ops.push(this.emitSpawn(valExpr, name));
+          this.recordBinding(name, OmniRuntime.Go);
+          continue;
+        }
+
         // Parallel pattern check
         const parallel = this.isParallelPattern(valExpr);
         if (parallel) {
@@ -1507,6 +1514,12 @@ export class ManifestCodeGenerator {
       const aff = this.affinityMap.get(valExpr);
       const runtime = aff?.runtime || this.defaultRuntime;
 
+      if (valExpr.kind === "Go") {
+        ops.push(this.emitSpawn(valExpr, name));
+        this.recordBinding(name, OmniRuntime.Go);
+        continue;
+      }
+
       // Parallel pattern check
       const parallel = this.isParallelPattern(valExpr);
       if (parallel) {
@@ -1587,6 +1600,12 @@ export class ManifestCodeGenerator {
     if (node.pairs) {
       for (const pair of node.pairs) {
         const name = pair.name.name;
+
+        if (pair.expr.kind === "Go") {
+          ops.push(this.emitSpawn(pair.expr, name));
+          this.recordBinding(name, OmniRuntime.Go);
+          continue;
+        }
 
         // Await (non-parallel) → AwaitOp with bind
         const awaitExpr = this.isAwaitExpr(pair.expr);

@@ -35,10 +35,10 @@ func worker(id) {
 }
 
 // [go] spin up the swarm
-go worker(1)
-go worker(2)
-go worker(3)
-go worker(4)
+const w1 = go worker(1)
+const w2 = go worker(2)
+const w3 = go worker(3)
+const w4 = go worker(4)
 
 // [python] drain generator into go channel
 for item in crawl("/var/data"):
@@ -46,7 +46,8 @@ for item in crawl("/var/data"):
 close(inbox)
 
 // [go] join the workers before closing their output channel
-const joined = wait()
+const joined = wait(w1, w2, w3, w4)
+const worker_count = len(joined)
 close(outbox)
 
 // [js] Array.from consumes the Go channel's JS iterable adapter
@@ -67,4 +68,4 @@ close(done)
 const final_report = list(done)
 const delivered = len(final_report)
 
-print(f"Processed {total} items across 3 runtimes; delivered {delivered} report")
+print(f"Processed {total} items across 3 runtimes; workers {worker_count}; delivered {delivered} report")

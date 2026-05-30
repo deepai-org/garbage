@@ -214,6 +214,17 @@ export function parsePrimary(host: PrefixHost, ): AST.Expr {
   if (host.match("yield")) {
     return ControlFlow.parseYieldExpression(host as any);
   }
+
+  // Handle Go spawn expressions: const h = go worker(1)
+  if (host.match("go")) {
+    const start = host.current - 1;
+    const expr = host.parseExpression();
+    return {
+      kind: "Go",
+      expr,
+      span: host.createSpan(start, host.current - 1)
+    } as AST.Go;
+  }
   
   // Handle channel receive operator
   if (host.check("<-")) {
@@ -878,4 +889,3 @@ export function looksLikeFuncCall(host: PrefixHost, ): boolean {
   }
   return false;
 }
-

@@ -361,6 +361,8 @@ export interface SpawnOp {
   op: "spawn";
   runtime: string;
   code: string;
+  /** Optional manifest binding for the returned spawn handle. */
+  bind?: string;
   captures?: CaptureMap;
 }
 

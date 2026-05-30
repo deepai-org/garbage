@@ -118,6 +118,7 @@ export type Expr =
   | ListComprehension
   | Spread
   | Yield
+  | Go
   | TypeAssertion
   | JSXElement
   | JSXFragment

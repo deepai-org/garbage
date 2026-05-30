@@ -91,6 +91,8 @@ export function exprToCode(expr: AST.Expr, source?: string): string {
       return `[${exprToCode(expr.expression, source)} for ${targets} in ${exprToCode(expr.iterable, source)}${filter}]`;
     case "RuntimeTag":
       return exprToCode(expr.expr, source);
+    case "Go":
+      return `go ${exprToCode(expr.expr, source)}`;
     case "JSXElement":
       return jsxToCreateElement(expr, source);
     case "JSXFragment":

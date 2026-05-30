@@ -98,7 +98,7 @@ describe("Example files: end-to-end pipeline", () => {
       expect(runtimes[1]).toBe("go"); // inbox = make(16)
       expect(runtimes[2]).toBe("go"); // outbox = make(16)
       expect(runtimes[5]).toBe("go"); // func worker
-      expect(runtimes[6]).toBe("go"); // go worker(1)
+      expect(runtimes[6]).toBe("go"); // w1 = go worker(1)
     });
 
     it("assigns javascript to process function", () => {
@@ -107,26 +107,27 @@ describe("Example files: end-to-end pipeline", () => {
 
     it("assigns go to close() and channel sends", () => {
       expect(runtimes[11]).toBe("go"); // close(inbox)
-      expect(runtimes[12]).toBe("go"); // joined = wait()
-      expect(runtimes[13]).toBe("go"); // close(outbox)
-      expect(runtimes[21]).toBe("go"); // const done = make(1)
-      expect(runtimes[22]).toBe("go"); // done <- report
-      expect(runtimes[23]).toBe("go"); // close(done)
+      expect(runtimes[12]).toBe("go"); // joined = wait(w1, w2, w3, w4)
+      expect(runtimes[14]).toBe("go"); // close(outbox)
+      expect(runtimes[22]).toBe("go"); // const done = make(1)
+      expect(runtimes[23]).toBe("go"); // done <- report
+      expect(runtimes[24]).toBe("go"); // close(done)
     });
 
     it("assigns js to arrow-function expressions", () => {
-      expect(runtimes[14]).toBe("javascript"); // rows = Array.from(outbox).map(...)
-      expect(runtimes[15]).toBe("javascript"); // raw = rows.map(...)
-      expect(runtimes[16]).toBe("javascript"); // names = raw.map(r => ...)
-      expect(runtimes[17]).toBe("javascript"); // deduped = names.filter(...)
+      expect(runtimes[15]).toBe("javascript"); // rows = Array.from(outbox).map(...)
+      expect(runtimes[16]).toBe("javascript"); // raw = rows.map(...)
+      expect(runtimes[17]).toBe("javascript"); // names = raw.map(r => ...)
+      expect(runtimes[18]).toBe("javascript"); // deduped = names.filter(...)
     });
 
     it("assigns python to sorted/len/final report", () => {
-      expect(runtimes[18]).toBe("python"); // ranked = sorted(deduped)
-      expect(runtimes[19]).toBe("python"); // total = len(ranked)
-      expect(runtimes[20]).toBe("python"); // report = ranked
-      expect(runtimes[24]).toBe("python"); // final_report = list(done)
-      expect(runtimes[25]).toBe("python"); // delivered = len(final_report)
+      expect(runtimes[13]).toBe("python"); // worker_count = len(joined)
+      expect(runtimes[19]).toBe("python"); // ranked = sorted(deduped)
+      expect(runtimes[20]).toBe("python"); // total = len(ranked)
+      expect(runtimes[21]).toBe("python"); // report = ranked
+      expect(runtimes[25]).toBe("python"); // final_report = list(done)
+      expect(runtimes[26]).toBe("python"); // delivered = len(final_report)
     });
 
     it("emits chan ops for make/send/close", () => {
@@ -140,6 +141,7 @@ describe("Example files: end-to-end pipeline", () => {
     it("emits spawn ops for goroutines", () => {
       const spawnOps = manifest.ops.filter((o: any) => o.op === "spawn");
       expect(spawnOps.length).toBe(4);
+      expect(spawnOps.map((o: any) => o.bind)).toEqual(["w1", "w2", "w3", "w4"]);
     });
 
     it("emits func_def with correct bodyRuntime", () => {
@@ -153,7 +155,7 @@ describe("Example files: end-to-end pipeline", () => {
     });
 
     it("detects f-string print as python", () => {
-      expect(runtimes[26]).toBe("python"); // print(f"Processed {total}...")
+      expect(runtimes[27]).toBe("python"); // print(f"Processed {total}...")
     });
 
     it("has type crossing summary", () => {

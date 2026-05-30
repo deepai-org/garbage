@@ -659,6 +659,16 @@ describe('Go Runtime Restrictions', () => {
     expect(spawnOp.code).toContain('fetch_data');
   });
 
+  test('Go spawn expression binds returned handle', () => {
+    const code = 'const h = go fetch_data()';
+    const m = parseAndManifest(code);
+    const spawnOp = m.ops.find(op => op.op === 'spawn') as any;
+    expect(spawnOp).toBeDefined();
+    expect(spawnOp.runtime).toBe('go');
+    expect(spawnOp.code).toBe('fetch_data()');
+    expect(spawnOp.bind).toBe('h');
+  });
+
   test('defer produces exec op with defer code', () => {
     const code = 'defer cleanup()';
     const m = parseAndManifest(code);
