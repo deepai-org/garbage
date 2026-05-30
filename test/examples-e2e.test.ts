@@ -269,6 +269,96 @@ describe("Example files: end-to-end pipeline", () => {
     }
   });
 
+  describe("edge library examples", () => {
+    const edgeExamples: Array<{ file: string; runtimes: string[] }> = [
+      {
+        file: "async-httpx-rxjs-errgroup.poly",
+        runtimes: ["python", "javascript", "go"],
+      },
+      {
+        file: "pandas-pydantic-zod-dry-validation.poly",
+        runtimes: ["python", "javascript", "ruby"],
+      },
+      {
+        file: "orm-session-boundaries.poly",
+        runtimes: ["python", "javascript", "ruby"],
+      },
+      {
+        file: "framework-middleware-render.poly",
+        runtimes: ["python", "javascript", "ruby"],
+      },
+      {
+        file: "java-futures-jdbc-streaming.poly",
+        runtimes: ["java", "python"],
+      },
+      {
+        file: "go-http-cobra-observability.poly",
+        runtimes: ["go"],
+      },
+    ];
+
+    for (const { file, runtimes: expectedRuntimes } of edgeExamples) {
+      it(`${file} compiles without language tags and exercises expected runtimes`, () => {
+        const { manifest, runtimes, code } = compile(path.join(examplesDir, file));
+
+        expect(code).not.toMatch(/@(py|js|go|rb|java)\(/);
+        expect(runtimes).not.toContain("unknown");
+        for (const runtime of expectedRuntimes) {
+          expect(runtimes).toContain(runtime);
+        }
+        expect(manifest.ops.length).toBeGreaterThan(5);
+      });
+    }
+
+    it("models async streams as explicit materialization and worker joins", () => {
+      const { manifest } = compile(path.join(examplesDir, "async-httpx-rxjs-errgroup.poly"));
+      const chanOps = manifest.ops.filter((o: any) => o.op === "chan");
+      const spawnOps = manifest.ops.filter((o: any) => o.op === "spawn");
+      const snapshot = manifest.ops.find(
+        (o: any) => o.op === "eval" && String(o.code).includes("Array.from(chunks)")
+      ) as any;
+
+      expect(chanOps.map((o: any) => o.action)).toEqual(
+        expect.arrayContaining(["make", "send", "close"])
+      );
+      expect(spawnOps.length).toBe(2);
+      expect(snapshot?.runtime).toBe("javascript");
+    });
+
+    it("keeps framework handlers and server rendering in native runtimes", () => {
+      const { manifest } = compile(path.join(examplesDir, "framework-middleware-render.poly"));
+      const dashboard = manifest.ops.find(
+        (o: any) => o.op === "func_def" && o.name === "dashboard"
+      ) as any;
+      const renderPage = manifest.ops.find(
+        (o: any) => o.op === "func_def" && o.name === "render_page"
+      ) as any;
+      const rack = manifest.ops.find(
+        (o: any) => o.op === "eval" && o.bind === "rack_response"
+      ) as any;
+
+      expect(dashboard?.bodyRuntime).toBe("python");
+      expect(renderPage?.bodyRuntime).toBe("javascript");
+      expect(rack?.runtime).toBe("ruby");
+      expect(rack?.code).toContain("Rack::Response");
+    });
+
+    it("keeps ORM client handles local while crossing materialized rows", () => {
+      const { manifest } = compile(path.join(examplesDir, "orm-session-boundaries.poly"));
+      const prisma = manifest.ops.find(
+        (o: any) => o.op === "eval" && o.bind === "prisma"
+      ) as any;
+      const materialized = manifest.ops.find(
+        (o: any) => o.op === "eval" && o.bind === "materialized"
+      ) as any;
+
+      expect(prisma?.runtime).toBe("javascript");
+      expect(prisma?.code).toContain("new PrismaClient()");
+      expect(materialized?.runtime).toBe("javascript");
+      expect(materialized?.captures).toHaveProperty("active_record_table");
+    });
+  });
+
   describe("express-python-view.poly", () => {
     const { manifest, runtimes } = compile(
       path.join(examplesDir, "express-python-view.poly")

@@ -36,7 +36,7 @@ const GO_MODULES = new Set([
   "net/http", "net/url", "net/rpc", "net/smtp",
   "os/exec", "os/signal", "os/user",
   "io/ioutil", "io/fs",
-  "sync/atomic",
+  "sync/atomic", "log/slog",
   "image", "image/png", "image/jpeg",
   "archive/tar", "archive/zip",
   "compress/gzip", "compress/zlib",
@@ -45,7 +45,7 @@ const GO_MODULES = new Set([
 ]);
 
 const JS_MODULES = new Set([
-  "react", "react-dom", "vue", "angular", "svelte", "next", "nuxt",
+  "react", "react-dom", "react-dom/server", "vue", "angular", "svelte", "next", "nuxt",
   "express", "koa", "fastify", "hapi", "nest", "nestjs",
   "lodash", "underscore", "ramda", "rxjs", "immutable",
   "zod", "cheerio", "marked", "d3-shape",
@@ -54,7 +54,7 @@ const JS_MODULES = new Set([
   "webpack", "rollup", "vite", "parcel", "esbuild",
   "babel", "typescript", "ts-node",
   "jest", "mocha", "chai", "jasmine", "vitest",
-  "mongoose", "sequelize", "typeorm", "prisma", "knex",
+  "mongoose", "sequelize", "typeorm", "prisma", "@prisma/client", "knex",
   "socket.io", "ws", "redis", "bull", "amqplib",
   "passport", "jsonwebtoken", "bcrypt", "helmet",
   "chalk", "commander", "inquirer", "yargs", "ora",
@@ -70,11 +70,12 @@ const JS_MODULES = new Set([
 
 const RUBY_MODULES = new Set([
   "rails", "sinatra", "rack", "puma", "unicorn", "thin",
-  "activerecord", "activesupport", "actionpack", "actionview",
+  "activerecord", "active_record", "activesupport", "actionpack", "actionview",
   "nokogiri", "httparty", "faraday", "rest-client",
   "rspec", "minitest", "capybara", "factory_bot",
   "devise", "cancancan", "pundit", "omniauth",
   "sidekiq", "resque", "delayed_job", "good_job",
+  "dry-validation", "dry/validation",
   "rubocop", "bundler", "rake", "thor",
   "json", "yaml", "csv", "erb", "haml", "slim",
   "redis", "pg", "mysql2", "sqlite3", "mongoid",
@@ -108,6 +109,7 @@ export function analyzeImportPath(path: string): RuntimeAffinity | undefined {
 
   // Go module paths: quoted strings with / and often domain-like prefixes
   if (path.startsWith("github.com/") || path.startsWith("golang.org/") ||
+      path.startsWith("go.uber.org/") ||
       path.startsWith("google.golang.org/")) {
     return { runtime: OmniRuntime.Go, confidence: "definite", evidence: [evidence] };
   }

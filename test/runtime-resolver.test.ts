@@ -273,6 +273,15 @@ describe('Import Analysis', () => {
     expect(result!.runtime).toBe(OmniRuntime.JavaScript);
   });
 
+  test('edge ecosystem package aliases infer their owning runtimes', () => {
+    expect(analyzeImportPath('react-dom/server')!.runtime).toBe(OmniRuntime.JavaScript);
+    expect(analyzeImportPath('@prisma/client')!.runtime).toBe(OmniRuntime.JavaScript);
+    expect(analyzeImportPath('active_record')!.runtime).toBe(OmniRuntime.Ruby);
+    expect(analyzeImportPath('dry/validation')!.runtime).toBe(OmniRuntime.Ruby);
+    expect(analyzeImportPath('go.uber.org/zap')!.runtime).toBe(OmniRuntime.Go);
+    expect(analyzeImportPath('log/slog')!.runtime).toBe(OmniRuntime.Go);
+  });
+
   test('unknown module returns undefined', () => {
     const result = analyzeImportPath('completely_unknown_module_xyz');
     expect(result).toBeUndefined();

@@ -361,6 +361,12 @@ See [`examples/`](examples/) for complete polyglot programs. All runtimes are **
 - **java-commons-csv-pydantic-go-batching.poly** — Java Commons CSV parsing with Python validation and Go batching workers
 - **java-jsoup-bs4-cheerio.poly** — Java Jsoup, BeautifulSoup, and Cheerio parsing the same HTML fixture
 - **java-okhttp-httpx-go-retry.poly** — Java OkHttp request shaping with Python HTTPX and Go retry workers
+- **async-httpx-rxjs-errgroup.poly** — Python asyncio/HTTPX, RxJS stream operators, and Go errgroup workers with explicit stream materialization
+- **pandas-pydantic-zod-dry-validation.poly** — Pandas groupby/window output with nested Pydantic, Zod, and dry-validation error-shape boundaries
+- **orm-session-boundaries.poly** — SQLAlchemy, Prisma, and ActiveRecord session/client shapes where only materialized records cross runtimes
+- **framework-middleware-render.poly** — FastAPI-style handlers, Express middleware, React server rendering, and Rack responses
+- **java-futures-jdbc-streaming.poly** — Java CompletableFuture, JDBC, OkHttp, and Jackson values analyzed by Python
+- **go-http-cobra-observability.poly** — Go net/http, database/sql, Cobra, zap, and slog shapes in one handler/CLI flow
 - **syntactic-dominance.poly** — Demonstrates how arrow functions override import provenance
 
 ## License
