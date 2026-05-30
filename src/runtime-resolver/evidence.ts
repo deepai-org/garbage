@@ -4,6 +4,7 @@ export type EvidenceSource =
   | "runtime_tag"
   | "directive"
   | "import"
+  | "builtin"
   | "global"
   | "syntax"
   | "keyword"
@@ -30,6 +31,7 @@ export const EVIDENCE_WEIGHTS = {
   explicit: Number.POSITIVE_INFINITY,
   directive: 1000,
   import: 800,
+  builtin: 750,
   global: 700,
   syntax: 650,
   keyword: 600,

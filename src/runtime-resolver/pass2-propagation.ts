@@ -435,11 +435,16 @@ export class Pass2Propagation {
       });
     } else if (methodRuntime && (!existing || existing.confidence !== "definite") && !objIsKnown) {
       // Object is unknown (fallback) — method name provides the best evidence
-      this.affinityMap.set(node, {
+      const aff = affinityFromEvidence(chooseRuntime([{
         runtime: methodRuntime,
-        confidence: "inferred",
+        source: "method",
+        weight: EVIDENCE_WEIGHTS.method,
+        detail: `.${methodName}()`,
+      }], this.defaultRuntime));
+      this.affinityMap.set(node, {
+        ...aff,
         evidence: [
-          { type: "method", detail: `.${methodName}()` },
+          ...aff.evidence,
           ...objAff.evidence,
         ],
       });

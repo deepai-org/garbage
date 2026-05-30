@@ -423,6 +423,37 @@ describe('Comprehensive Parser Tests', () => {
       expect(expr.args).toHaveLength(1);
     });
 
+    test('parses new expressions before chained member calls', () => {
+      const ast = parseCode('new com.example.Widget().render();');
+      const stmt = ast.body[0] as AST.ExprStmt;
+      const call = stmt.expr as AST.Call;
+      expect(call.kind).toBe('Call');
+      expect(call.callee.kind).toBe('Member');
+      const member = call.callee as AST.Member;
+      expect(member.property.name).toBe('render');
+      expect(member.object.kind).toBe('NewExpr');
+      const newExpr = member.object as AST.NewExpr;
+      expect(newExpr.callee.kind).toBe('Member');
+    });
+
+    test('parses generic constructor type arguments on NewExpr', () => {
+      const ast = parseCode('new Map<string, number>();');
+      const stmt = ast.body[0] as AST.ExprStmt;
+      const expr = stmt.expr as AST.NewExpr;
+      expect(expr.kind).toBe('NewExpr');
+      expect(expr.typeArgs).toBeDefined();
+      expect(expr.typeArgs).toHaveLength(2);
+    });
+
+    test('parses parenthesized constructor callee', () => {
+      const ast = parseCode('new (factory())();');
+      const stmt = ast.body[0] as AST.ExprStmt;
+      const expr = stmt.expr as AST.NewExpr;
+      expect(expr.kind).toBe('NewExpr');
+      expect(expr.callee.kind).toBe('Call');
+      expect(expr.args).toHaveLength(0);
+    });
+
     test('handles multiple statements on one line', () => {
       const ast = parseCode('x = 1; y = 2; z = 3;');
       expect(ast.body).toHaveLength(3);

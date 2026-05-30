@@ -44,6 +44,7 @@ export interface LoweredCallRuntimeFunc extends LoweredBase {
   kind: "CallRuntimeFunc";
   callee: string;
   args: AST.Expr[];
+  expr: AST.Call;
   bind?: string;
 }
 
@@ -59,6 +60,7 @@ export interface LoweredChannelOp extends LoweredBase {
   kind: "ChannelMake" | "ChannelSend" | "ChannelRecv" | "ChannelClose";
   action: ChannelAction;
   channel?: string;
+  size?: number;
   value?: AST.Expr;
   bind?: string;
 }

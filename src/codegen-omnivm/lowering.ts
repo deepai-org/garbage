@@ -1,6 +1,6 @@
 import * as AST from '../ast';
 import { AnnotatedProgram, OmniRuntime } from '../runtime-resolver/types';
-import { exprToCode, nodeToSourceCode } from './source-reconstruct';
+import { exprToCode } from './source-reconstruct';
 import {
   LoweredManifestIR,
   LoweredManifestNode,
@@ -91,7 +91,7 @@ class ManifestLowerer {
         kind: "Spawn",
         runtime: OmniRuntime.Go,
         sourceNode,
-        native: this.nativePayload(sourceNode),
+        native: this.nativePayload(expr),
         bind,
         expr,
       };
@@ -103,9 +103,10 @@ class ManifestLowerer {
         kind: "CallRuntimeFunc",
         runtime,
         sourceNode,
-        native: this.nativePayload(sourceNode),
+        native: this.nativePayload(expr),
         callee: expr.callee.name,
         args: expr.args,
+        expr,
         bind,
       };
     }
@@ -115,7 +116,7 @@ class ManifestLowerer {
       kind: "EvalExpr",
       runtime,
       sourceNode,
-      native: this.nativePayload(sourceNode),
+      native: this.nativePayload(expr),
       bind,
       expr,
     };
@@ -129,6 +130,9 @@ class ManifestLowerer {
   ): LoweredManifestNode | undefined {
     if (expr.kind === "Call" && expr.callee.kind === "Identifier") {
       if (expr.callee.name === "make") {
+        const size = expr.args.length > 0 && expr.args[0].kind === "NumericLiteral"
+          ? Number(expr.args[0].raw)
+          : undefined;
         return {
           id: this.allocId(),
           kind: "ChannelMake",
@@ -137,6 +141,7 @@ class ManifestLowerer {
           sourceNode,
           native: this.nativePayload(sourceNode),
           bind,
+          ...(size !== undefined ? { size } : {}),
         };
       }
       if (expr.callee.name === "close" && expr.args[0]) {
@@ -198,7 +203,7 @@ class ManifestLowerer {
   private nativePayload(node: AST.Decl | AST.Stmt | AST.Expr): NativePayload | undefined {
     if (!this.annotated.source || !node.span || node.span.end <= node.span.start) return undefined;
     return {
-      source: nodeToSourceCode(node, this.annotated.source),
+      source: this.annotated.source.slice(node.span.start, node.span.end),
       span: node.span,
     };
   }

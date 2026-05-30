@@ -62,7 +62,7 @@ import { BoundaryChecker, typeToString } from '../type-system/boundary-checker';
 import { lowerType } from '../type-system/lowering';
 import * as C from '../type-system/canonical';
 import { lowerAnnotatedProgram } from './lowering';
-import { LoweredManifestIR } from './lowering-ir';
+import { LoweredManifestIR, LoweredManifestNode } from './lowering-ir';
 
 export class ManifestCodeGenerator {
   private affinityMap: Map<AST.Decl | AST.Stmt | AST.Expr, RuntimeAffinity> = new Map();
@@ -82,6 +82,8 @@ export class ManifestCodeGenerator {
   private typeRegistry: Map<string, C.CanonicalType> = new Map();
   /** Lowered manifest IR for diagnostics and future manifest emission. */
   private loweredIR?: LoweredManifestIR;
+  /** Lowered nodes indexed by their source AST node for incremental IR-backed emission. */
+  private loweredNodesBySource: Map<AST.Program | AST.Decl | AST.Stmt | AST.Expr, LoweredManifestNode[]> = new Map();
 
   /**
    * Generate a dispatch manifest from an annotated program.
@@ -97,6 +99,7 @@ export class ManifestCodeGenerator {
     this.typeChecker = new BoundaryChecker();
     this.typeRegistry = new Map();
     this.loweredIR = lowerAnnotatedProgram(annotated);
+    this.loweredNodesBySource = this.indexLoweredNodes(this.loweredIR);
 
     // Pass 1: Declare all typed bindings in the type checker
     this.declareTypedBindings(annotated.program.body);
@@ -136,6 +139,27 @@ export class ManifestCodeGenerator {
    */
   generateJSON(annotated: AnnotatedProgram): string {
     return JSON.stringify(this.generate(annotated), null, 2);
+  }
+
+  private indexLoweredNodes(ir: LoweredManifestIR): Map<AST.Program | AST.Decl | AST.Stmt | AST.Expr, LoweredManifestNode[]> {
+    const bySource = new Map<AST.Program | AST.Decl | AST.Stmt | AST.Expr, LoweredManifestNode[]>();
+    for (const node of ir.nodes) {
+      const existing = bySource.get(node.sourceNode) || [];
+      existing.push(node);
+      bySource.set(node.sourceNode, existing);
+    }
+    return bySource;
+  }
+
+  private loweredNodesFor(node: AST.Program | AST.Decl | AST.Stmt | AST.Expr): LoweredManifestNode[] {
+    return this.loweredNodesBySource.get(node) || [];
+  }
+
+  private loweredNodeForBinding(
+    source: AST.Decl | AST.Stmt | AST.Expr,
+    bind: string | undefined,
+  ): LoweredManifestNode | undefined {
+    return this.loweredNodesFor(source).find(node => "bind" in node && node.bind === bind);
   }
 
   // ─── Captures Analysis ──────────────────────────────────────────
@@ -234,6 +258,7 @@ export class ManifestCodeGenerator {
   }
 
   private diagnoseExpr(expr: AST.Expr, runtime: OmniRuntime): void {
+    this.diagnoseBoundaryExpr(expr);
     if (expr.kind !== "Call" || expr.callee.kind !== "Identifier") return;
     if (expr.callee.name !== "wait") return;
     if (runtime !== OmniRuntime.Go) {
@@ -265,6 +290,37 @@ export class ManifestCodeGenerator {
         );
       }
     }
+  }
+
+  private diagnoseBoundaryExpr(expr: AST.Expr): void {
+    const materialized = this.detectArrayFrom(expr);
+    if (materialized && materialized.kind === "Identifier") {
+      const kind = this.bindingKind(materialized.name);
+      if (!kind) {
+        this.addDiagnostic(
+          "warning",
+          "unknown-stream-materialization",
+          `Array.from(${materialized.name}) materializes a stream-like value, but '${materialized.name}' has not been bound yet. Channels must be created with make(...) before materialization.`,
+          materialized,
+        );
+      } else if (kind !== "channel") {
+        this.addDiagnostic(
+          "warning",
+          "non-stream-materialization",
+          `Array.from(${materialized.name}) is an explicit stream materialization, but '${materialized.name}' is a ${kind.replace("_", " ")} binding, not a channel or stream.`,
+          materialized,
+        );
+      }
+    }
+  }
+
+  private detectArrayFrom(expr: AST.Expr): AST.Expr | undefined {
+    if (expr.kind !== "Call") return undefined;
+    if (expr.callee.kind !== "Member") return undefined;
+    const callee = expr.callee;
+    if (callee.property.name !== "from") return undefined;
+    if (callee.object.kind !== "Identifier" || callee.object.name !== "Array") return undefined;
+    return expr.args[0];
   }
 
   // ─── Type System Integration ─────────────────────────────────────
@@ -1132,11 +1188,21 @@ export class ManifestCodeGenerator {
   // ─── Expression Emission ──────────────────────────────────────
 
   private emitExprStmt(node: AST.ExprStmt, blockRuntime: OmniRuntime): ManifestOp {
+    const lowered = this.loweredNodesFor(node)[0];
+    const loweredOp = lowered ? this.emitLoweredNode(lowered, false) : undefined;
+    if (loweredOp) return loweredOp;
     return this.emitExprAsOp(node.expr, blockRuntime);
   }
 
   private exprCode(expr: AST.Expr, runtime: OmniRuntime): string {
     return exprToCodeForRuntime(expr, runtime, this.source);
+  }
+
+  private loweredExprCode(expr: AST.Expr, runtime: OmniRuntime, nativeSource?: string): string {
+    if (runtime === OmniRuntime.JavaScript) {
+      return this.exprCode(expr, runtime);
+    }
+    return nativeSource || this.exprCode(expr, runtime);
   }
 
   private emitEcho(node: AST.Echo, blockRuntime: OmniRuntime): NativeOp {
@@ -1324,6 +1390,113 @@ export class ManifestCodeGenerator {
       runtime: OmniRuntime.Go,
       code: exprToCode(expr, this.source),
     };
+  }
+
+  private emitLoweredNode(node: LoweredManifestNode, mutable: boolean): ManifestOp | undefined {
+    switch (node.kind) {
+      case "ChannelMake":
+        if (node.bind) this.recordBinding(node.bind, node.runtime, "channel");
+        return {
+          op: "chan",
+          action: "make",
+          runtime: node.runtime,
+          ...(node.bind ? { bind: node.bind } : {}),
+          ...(node.size !== undefined ? { size: node.size } : {}),
+        } as ChanOp;
+
+      case "ChannelRecv":
+        if (node.channel) this.diagnoseChannelRef(node.channel, "recv", node.sourceNode);
+        if (node.bind) this.recordBinding(node.bind, node.runtime);
+        return {
+          op: "chan",
+          action: "recv",
+          runtime: node.runtime,
+          ...(node.channel ? { channel: node.channel } : {}),
+          ...(node.bind ? { bind: node.bind } : {}),
+        } as ChanOp;
+
+      case "ChannelSend": {
+        const valueExpr = node.value;
+        const value: ManifestValue | undefined = valueExpr
+          ? this.isSimpleLiteral(valueExpr)
+            ? { kind: "literal", value: this.literalValue(valueExpr) }
+            : { kind: "ref", name: exprToCode(valueExpr, this.source) }
+          : undefined;
+        if (node.channel) this.diagnoseChannelRef(node.channel, "send", node.sourceNode);
+        const captures = this.computeCaptures(node.sourceNode as AST.Expr | AST.Stmt | AST.Decl, node.runtime);
+        return {
+          op: "chan",
+          action: "send",
+          runtime: node.runtime,
+          ...(node.channel ? { channel: node.channel } : {}),
+          ...(value ? { value } : {}),
+          ...(captures ? { captures } : {}),
+        } as ChanOp;
+      }
+
+      case "ChannelClose":
+        if (node.channel) this.diagnoseChannelRef(node.channel, "close", node.sourceNode);
+        return {
+          op: "chan",
+          action: "close",
+          runtime: node.runtime,
+          ...(node.channel ? { channel: node.channel } : {}),
+        } as ChanOp;
+
+      case "Spawn":
+        if (node.bind) this.recordBinding(node.bind, OmniRuntime.Go, "spawn_handle");
+        return this.emitSpawn(node.expr, node.bind);
+
+      case "EvalExpr": {
+        if (!node.bind) return undefined;
+        if (this.isParallelPattern(node.expr) || this.isAwaitExpr(node.expr)) return undefined;
+        if (this.isSimpleLiteral(node.expr)) {
+          this.recordBinding(node.bind, node.runtime);
+          return {
+            op: "declare",
+            bind: node.bind,
+            mutable,
+            value: { kind: "literal", value: this.literalValue(node.expr) },
+          };
+        }
+        this.diagnoseExpr(node.expr, node.runtime);
+        const captures = this.computeCaptures(node.expr, node.runtime);
+        this.recordBinding(node.bind, node.runtime);
+        return {
+          op: "eval",
+          runtime: node.runtime,
+          code: this.loweredExprCode(node.expr, node.runtime, node.native?.source),
+          bind: node.bind,
+          ...(captures ? { captures } : {}),
+        };
+      }
+
+      case "CallRuntimeFunc": {
+        if (!node.bind) return undefined;
+        if (node.callee === "wait") return undefined;
+        const captures = this.computeCaptures(node.sourceNode as AST.Expr | AST.Stmt | AST.Decl, node.runtime);
+        this.recordBinding(node.bind, node.runtime);
+        if (node.runtime === OmniRuntime.Go) {
+          return {
+            op: "eval",
+            runtime: OmniRuntime.Go,
+            func: node.callee,
+            args: node.args.map(a => exprToCode(a, this.source)),
+            bind: node.bind,
+          };
+        }
+        return {
+          op: "eval",
+          runtime: node.runtime,
+          code: this.loweredExprCode(node.expr, node.runtime, node.native?.source),
+          bind: node.bind,
+          ...(captures ? { captures } : {}),
+        };
+      }
+
+      default:
+        return undefined;
+    }
   }
 
   // ─── Channel Detection Helpers ──────────────────────────────
@@ -1553,6 +1726,12 @@ export class ManifestCodeGenerator {
         const valExpr = node.values[i];
         const aff = this.affinityMap.get(valExpr);
         const runtime = aff?.runtime || this.defaultRuntime;
+        const lowered = this.loweredNodeForBinding(node, name);
+        const loweredOp = lowered ? this.emitLoweredNode(lowered, true) : undefined;
+        if (loweredOp) {
+          ops.push(loweredOp);
+          continue;
+        }
 
         if (valExpr.kind === "Go") {
           ops.push(this.emitSpawn(valExpr, name));
@@ -1649,6 +1828,12 @@ export class ManifestCodeGenerator {
       if (!valExpr) continue;
       const aff = this.affinityMap.get(valExpr);
       const runtime = aff?.runtime || this.defaultRuntime;
+      const lowered = this.loweredNodeForBinding(node, name);
+      const loweredOp = lowered ? this.emitLoweredNode(lowered, false) : undefined;
+      if (loweredOp) {
+        ops.push(loweredOp);
+        continue;
+      }
 
       if (valExpr.kind === "Go") {
         ops.push(this.emitSpawn(valExpr, name));

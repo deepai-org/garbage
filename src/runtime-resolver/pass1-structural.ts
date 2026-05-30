@@ -346,7 +346,13 @@ export class Pass1Structural {
       : analyzeBareImport(node.path);
 
     if (affinity) {
-      this.assign(node, affinity.runtime, affinity.confidence, affinity.evidence[0]);
+      const aff = affinityFromEvidence(chooseRuntime([{
+        runtime: affinity.runtime,
+        source: "import",
+        weight: EVIDENCE_WEIGHTS.import,
+        detail: affinity.evidence[0]?.detail || `import: ${node.path}`,
+      }], this.fileDirective || OmniRuntime.JavaScript));
+      this.assign(node, aff.runtime, aff.confidence, ...aff.evidence);
       // Register imported name
       const name = node.alias?.name || node.path.replace(/['"]/g, "").split("/").pop() || node.path;
       this.symbolTable.define(name, {
@@ -360,7 +366,13 @@ export class Pass1Structural {
     const affinity = analyzeImportPath(node.path);
 
     if (affinity) {
-      this.assign(node, affinity.runtime, affinity.confidence, affinity.evidence[0]);
+      const aff = affinityFromEvidence(chooseRuntime([{
+        runtime: affinity.runtime,
+        source: "import",
+        weight: EVIDENCE_WEIGHTS.import,
+        detail: affinity.evidence[0]?.detail || `import: ${node.path}`,
+      }], this.fileDirective || OmniRuntime.JavaScript));
+      this.assign(node, aff.runtime, aff.confidence, ...aff.evidence);
       // Register imported names
       if (node.defaultImport) {
         this.symbolTable.define(node.defaultImport.name, {
@@ -390,10 +402,13 @@ export class Pass1Structural {
     if (node.callee.kind === "Identifier") {
       const builtinRuntime = lookupBuiltinAffinity(node.callee.name);
       if (builtinRuntime) {
-        this.assign(node, builtinRuntime, "definite", {
-          type: "builtin",
+        const aff = affinityFromEvidence(chooseRuntime([{
+          runtime: builtinRuntime,
+          source: "builtin",
+          weight: EVIDENCE_WEIGHTS.builtin,
           detail: `builtin: ${node.callee.name}`,
-        });
+        }], this.fileDirective || OmniRuntime.JavaScript));
+        this.assign(node, aff.runtime, aff.confidence, ...aff.evidence);
       }
     }
 

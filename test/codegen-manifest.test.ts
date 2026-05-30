@@ -1765,6 +1765,16 @@ const joined = wait(h)`;
     const m = parseAndManifest(code);
     expect(m.diagnostics).toBeUndefined();
   });
+
+  test('Array.from on unknown stream emits materialization diagnostic', () => {
+    const m = parseAndManifest('const rows = Array.from(outbox)');
+    expect(m.diagnostics?.some(d => d.code === 'unknown-stream-materialization')).toBe(true);
+  });
+
+  test('Array.from on manifest channel is accepted as explicit materialization', () => {
+    const m = parseAndManifest('const outbox = make(2)\nconst rows = Array.from(outbox)');
+    expect(m.diagnostics).toBeUndefined();
+  });
 });
 
 // ─── Generators / Yield ───────────────────────────────────────────

@@ -36,6 +36,8 @@ const xs = Array.from(inbox)
       'EvalExpr',
     ]);
     expect(ir.nodes.slice(0, 7).every(n => n.native?.source)).toBe(true);
+    const evalNode = ir.nodes.find(n => n.kind === 'EvalExpr') as any;
+    expect(evalNode.native.source).toBe('Array.from(inbox)');
   });
 
   test('records explicit bridge value nodes from resolver crossings', () => {
