@@ -359,6 +359,82 @@ describe("Example files: end-to-end pipeline", () => {
     });
   });
 
+  describe("hard boundary example suite", () => {
+    const hardExamples: Array<{ file: string; runtimes: string[] }> = [
+      {
+        file: "true-async-stream-boundary.poly",
+        runtimes: ["python", "javascript", "go"],
+      },
+      {
+        file: "live-middleware-opaque-handles.poly",
+        runtimes: ["python", "javascript", "ruby", "go"],
+      },
+      {
+        file: "database-transaction-resource-boundary.poly",
+        runtimes: ["python", "javascript", "ruby", "java"],
+      },
+      {
+        file: "cross-runtime-job-queue.poly",
+        runtimes: ["python", "javascript", "ruby", "go"],
+      },
+      {
+        file: "dataframe-arrow-zero-copy-boundary.poly",
+        runtimes: ["python", "javascript"],
+      },
+      {
+        file: "reactive-future-streams.poly",
+        runtimes: ["python", "javascript", "java"],
+      },
+      {
+        file: "template-component-rendering-boundary.poly",
+        runtimes: ["python", "javascript", "ruby", "java"],
+      },
+      {
+        file: "typed-validation-error-fidelity.poly",
+        runtimes: ["python", "javascript", "ruby", "java"],
+      },
+    ];
+
+    for (const { file, runtimes: expectedRuntimes } of hardExamples) {
+      it(`${file} compiles without language tags and covers its boundary runtimes`, () => {
+        const { manifest, runtimes, code } = compile(path.join(examplesDir, file));
+
+        expect(code).not.toMatch(/@(py|js|go|rb|java)\(/);
+        expect(runtimes).not.toContain("unknown");
+        for (const runtime of expectedRuntimes) {
+          expect(runtimes).toContain(runtime);
+        }
+        expect(manifest.ops.length).toBeGreaterThan(5);
+      });
+    }
+
+    it("preserves async stream materialization as a manifest channel capture", () => {
+      const { manifest } = compile(path.join(examplesDir, "true-async-stream-boundary.poly"));
+      const chanOps = manifest.ops.filter((o: any) => o.op === "chan");
+      const streamSnapshot = manifest.ops.find(
+        (o: any) => o.op === "eval" && String(o.code).includes("Array.from(stream_chunks)")
+      ) as any;
+
+      expect(chanOps.map((o: any) => o.action)).toEqual(
+        expect.arrayContaining(["make", "send", "close"])
+      );
+      expect(streamSnapshot?.runtime).toBe("javascript");
+    });
+
+    it("captures framework request handlers without annotation pragmas", () => {
+      const { manifest } = compile(path.join(examplesDir, "live-middleware-opaque-handles.poly"));
+      const fastapiHandler = manifest.ops.find(
+        (o: any) => o.op === "func_def" && o.name === "fastapi_handler"
+      ) as any;
+      const middleware = manifest.ops.find(
+        (o: any) => o.op === "func_def" && o.name === "express_middleware"
+      ) as any;
+
+      expect(fastapiHandler?.bodyRuntime).toBe("python");
+      expect(middleware?.bodyRuntime).toBe("javascript");
+    });
+  });
+
   describe("express-python-view.poly", () => {
     const { manifest, runtimes } = compile(
       path.join(examplesDir, "express-python-view.poly")

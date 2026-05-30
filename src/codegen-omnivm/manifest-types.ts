@@ -90,6 +90,8 @@ export type ManifestOp =
   | ChanOp
   | SelectOp
   | SpawnOp
+  | ResourceOp
+  | JobOp
   | YieldOp
   | AwaitOp;
 
@@ -378,6 +380,34 @@ export interface SpawnOp {
   /** Optional manifest binding for the returned spawn handle. */
   bind?: string;
   captures?: CaptureMap;
+}
+
+// ─── Opaque Resources ────────────────────────────────────────────
+
+/** Runtime-owned opaque resource handle with explicit lifecycle. */
+export interface ResourceOp {
+  op: "resource";
+  action: "open" | "close";
+  runtime?: string;
+  bind?: string;
+  target?: string;
+  kind?: string;
+  disposer?: string;
+  value?: ManifestValue;
+}
+
+// ─── Jobs ────────────────────────────────────────────────────────
+
+/** Delayed/background job handle. */
+export interface JobOp {
+  op: "job";
+  action: "enqueue" | "complete" | "wait";
+  runtime?: string;
+  bind?: string;
+  target?: string;
+  kind?: string;
+  payload?: ManifestValue;
+  value?: ManifestValue;
 }
 
 // ─── Yield (generator) ───────────────────────────────────────────

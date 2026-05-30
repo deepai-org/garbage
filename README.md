@@ -127,6 +127,7 @@ Core rules:
 | Serialization | JSON belongs in application semantics: HTTP bodies, persisted documents, APIs, or intentionally opaque payloads. It should not be required as glue between `.poly` statements. |
 | Channels | `const ch = make(size)` creates a manifest channel. `ch <- value`, `<-ch`, and `close(ch)` lower to channel ops. Non-Go runtimes receive channel captures as snapshots/adapters. |
 | Spawn handles | `const h = go worker(args)` binds a spawn handle. Prefer named handles plus `wait(h)` or `wait(h1, h2)` over bare fire-and-forget spawns when later code depends on worker completion. |
+| Resources and jobs | Live request/response, transaction, connection, stream, and queued-job internals should cross as explicit manifest handles or proxies. Materialize rows, events, HTML, and validation errors before ordinary value crossing. |
 | Worker shape | Long-term portable workers are named Go functions that return a value and use manifest helpers such as `recv("channel")` and `send("channel", value)`. Inline spawn closures may parse, but they are not the durable contract for OmniVM joins. |
 | Diagnostics | The compiler emits manifest diagnostics for likely runtime-boundary mistakes, including `wait(...)` on non-handles, channel operations on unknown/non-channel bindings, and spawn forms OmniVM cannot reliably join. |
 
@@ -367,6 +368,14 @@ See [`examples/`](examples/) for complete polyglot programs. All runtimes are **
 - **framework-middleware-render.poly** — FastAPI-style handlers, Express middleware, React server rendering, and Rack responses
 - **java-futures-jdbc-streaming.poly** — Java CompletableFuture, JDBC, OkHttp, and Jackson values analyzed by Python
 - **go-http-cobra-observability.poly** — Go net/http, database/sql, Cobra, zap, and slog shapes in one handler/CLI flow
+- **true-async-stream-boundary.poly** — HTTPX async streams crossing into RxJS and Go workers through an explicit stream/materialization boundary
+- **live-middleware-opaque-handles.poly** — FastAPI, Express, Rack, and Go HTTP handler shapes where request/response objects stay opaque
+- **database-transaction-resource-boundary.poly** — SQLAlchemy, Prisma, ActiveRecord, and JDBC transaction/resource boundaries with materialized rows
+- **cross-runtime-job-queue.poly** — Celery, Sidekiq, BullMQ, and Go worker-pool job handle shapes
+- **dataframe-arrow-zero-copy-boundary.poly** — Pandas, PyArrow, Polars, and JS analytical table shapes for future buffer/table bridges
+- **reactive-future-streams.poly** — Java CompletableFuture/Reactor, RxJS, and Python async stream contracts
+- **template-component-rendering-boundary.poly** — Jinja2, React SSR, Rack, and Spring-style model rendering where only HTML crosses
+- **typed-validation-error-fidelity.poly** — Pydantic, Zod, dry-validation, and Java Bean Validation structured error paths
 - **syntactic-dominance.poly** — Demonstrates how arrow functions override import provenance
 
 ## License

@@ -280,6 +280,11 @@ describe('Import Analysis', () => {
     expect(analyzeImportPath('dry/validation')!.runtime).toBe(OmniRuntime.Ruby);
     expect(analyzeImportPath('go.uber.org/zap')!.runtime).toBe(OmniRuntime.Go);
     expect(analyzeImportPath('log/slog')!.runtime).toBe(OmniRuntime.Go);
+    expect(analyzeImportPath('pyarrow')!.runtime).toBe(OmniRuntime.Python);
+    expect(analyzeImportPath('polars')!.runtime).toBe(OmniRuntime.Python);
+    expect(analyzeImportPath('bullmq')!.runtime).toBe(OmniRuntime.JavaScript);
+    expect(analyzeImportPath('duckdb')!.runtime).toBe(OmniRuntime.JavaScript);
+    expect(analyzeImportPath('reactor.core')!.runtime).toBe(OmniRuntime.Java);
   });
 
   test('unknown module returns undefined', () => {

@@ -40,6 +40,8 @@ describe('Dispatch Manifest Schema', () => {
       'ChanOp',
       'SelectOp',
       'SpawnOp',
+      'ResourceOp',
+      'JobOp',
       'YieldOp',
       'AwaitOp',
     ]);
