@@ -127,9 +127,14 @@ Core rules:
 | Serialization | JSON belongs in application semantics: HTTP bodies, persisted documents, APIs, or intentionally opaque payloads. It should not be required as glue between `.poly` statements. |
 | Channels | `const ch = make(size)` creates a manifest channel. `ch <- value`, `<-ch`, and `close(ch)` lower to channel ops. Non-Go runtimes receive channel captures as snapshots/adapters. |
 | Spawn handles | `const h = go worker(args)` binds a spawn handle. Prefer named handles plus `wait(h)` or `wait(h1, h2)` over bare fire-and-forget spawns when later code depends on worker completion. |
-| Resources and jobs | Live request/response, transaction, connection, stream, and queued-job internals should cross as explicit manifest handles or proxies. Materialize rows, events, HTML, and validation errors before ordinary value crossing. |
+| Resources and jobs | `resource.open/close` and `job.enqueue/complete/wait` lower to first-class OmniVM manifest ops. Live request/response, transaction, connection, stream, and queued-job internals should cross as explicit handles or proxies. |
 | Worker shape | Long-term portable workers are named Go functions that return a value and use manifest helpers such as `recv("channel")` and `send("channel", value)`. Inline spawn closures may parse, but they are not the durable contract for OmniVM joins. |
 | Diagnostics | The compiler emits manifest diagnostics for likely runtime-boundary mistakes, including `wait(...)` on non-handles, channel operations on unknown/non-channel bindings, and spawn forms OmniVM cannot reliably join. |
+
+For tabular data, the intended long-term boundary is a zero-copy Arrow handle,
+not JSON rows. Garbage should eventually lower DataFrame/Arrow-friendly library
+values to an OmniVM `table` handle using the Arrow C Data Interface in-process,
+with Arrow IPC or an explicit copy only when pointer sharing is not available.
 
 ## Runtime Resolver
 

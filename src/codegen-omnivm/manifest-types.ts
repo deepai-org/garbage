@@ -393,6 +393,7 @@ export interface ResourceOp {
   target?: string;
   kind?: string;
   disposer?: string;
+  code?: string;
   value?: ManifestValue;
 }
 

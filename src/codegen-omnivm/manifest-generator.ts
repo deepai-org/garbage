@@ -46,6 +46,8 @@ import {
   ImportOp,
   NativeOp,
   ChanOp,
+  ResourceOp,
+  JobOp,
   SelectOp,
   SelectCase,
   SpawnOp,
@@ -64,6 +66,8 @@ import * as C from '../type-system/canonical';
 import { lowerAnnotatedProgram } from './lowering';
 import { LoweredManifestIR, LoweredManifestNode } from './lowering-ir';
 
+type BindingKind = "value" | "channel" | "stream" | "resource" | "job_handle" | "spawn_handle" | "function";
+
 export class ManifestCodeGenerator {
   private affinityMap: Map<AST.Decl | AST.Stmt | AST.Expr, RuntimeAffinity> = new Map();
   private defaultRuntime: OmniRuntime = OmniRuntime.JavaScript;
@@ -71,7 +75,7 @@ export class ManifestCodeGenerator {
   /** Tracks variable bindings and their defining runtime for captures analysis. */
   private bindingTable: Map<string, OmniRuntime> = new Map();
   /** Tracks manifest-visible binding roles for semantic diagnostics. */
-  private bindingKinds: Map<string, "value" | "channel" | "spawn_handle" | "function"> = new Map();
+  private bindingKinds: Map<string, BindingKind> = new Map();
   /** Records why a binding was assigned to its owning runtime. */
   private bindingAffinities: Map<string, RuntimeAffinity> = new Map();
   /** Non-fatal diagnostics that help users understand runtime boundary mistakes. */
@@ -83,6 +87,9 @@ export class ManifestCodeGenerator {
   private typeChecker: BoundaryChecker = new BoundaryChecker();
   /** Registry of named types (class/interface/enum) for resolving type annotations. */
   private typeRegistry: Map<string, C.CanonicalType> = new Map();
+  /** Bridge operations inferred directly from manifest captures and type annotations. */
+  private explicitBridgeOps: ManifestBridgeOp[] = [];
+  private usingCounter = 0;
   /** Lowered manifest IR for diagnostics and future manifest emission. */
   private loweredIR?: LoweredManifestIR;
   /** Lowered nodes indexed by their source AST node for incremental IR-backed emission. */
@@ -103,6 +110,8 @@ export class ManifestCodeGenerator {
     this.boundaryDiagnosticKeys = new Set();
     this.typeChecker = new BoundaryChecker();
     this.typeRegistry = new Map();
+    this.explicitBridgeOps = [];
+    this.usingCounter = 0;
     this.loweredIR = lowerAnnotatedProgram(annotated);
     this.loweredNodesBySource = this.indexLoweredNodes(this.loweredIR);
 
@@ -117,7 +126,8 @@ export class ManifestCodeGenerator {
     }
 
     // Collect bridge ops and type summary from the checker
-    const bridgeOps = this.typeChecker.getBridgeOps();
+    const bridgeOps = this.typeChecker.getBridgeOps().map(b => this.toBridgeManifestOp(b));
+    const bridges = this.dedupeBridgeOps([...bridgeOps, ...this.explicitBridgeOps]);
     const summary = this.typeChecker.getSummary();
 
     const manifest: DispatchManifest = {
@@ -127,8 +137,10 @@ export class ManifestCodeGenerator {
     };
 
     // Only attach type info if there are actual crossings
+    if (bridges.length > 0) {
+      manifest.bridges = bridges;
+    }
     if (summary.crossings > 0) {
-      manifest.bridges = bridgeOps.map(b => this.toBridgeManifestOp(b));
       manifest.typeSummary = summary;
     }
 
@@ -191,6 +203,7 @@ export class ManifestCodeGenerator {
         // Type-check the crossing if it's actually cross-runtime
         if (boundIn !== targetRuntime) {
           this.checkTypeCrossing(name, targetRuntime);
+          this.addBridgeHintForCapture(name, boundIn, targetRuntime);
           if (this.bindingKind(name) !== "channel") {
             this.addBoundaryDiagnostic(name, boundIn, targetRuntime, node);
           }
@@ -198,6 +211,7 @@ export class ManifestCodeGenerator {
       } else if (boundIn !== targetRuntime) {
         // Top-level: only capture cross-runtime references.
         this.checkTypeCrossing(name, targetRuntime);
+        this.addBridgeHintForCapture(name, boundIn, targetRuntime);
         if (this.bindingKind(name) !== "channel") {
           this.addBoundaryDiagnostic(name, boundIn, targetRuntime, node);
         }
@@ -213,7 +227,7 @@ export class ManifestCodeGenerator {
   private recordBinding(
     name: string,
     runtime: OmniRuntime,
-    kind: "value" | "channel" | "spawn_handle" | "function" = "value",
+    kind: BindingKind = "value",
     sourceNode?: AST.Program | AST.Decl | AST.Stmt | AST.Expr,
   ): void {
     this.bindingTable.set(name, runtime);
@@ -255,8 +269,79 @@ export class ManifestCodeGenerator {
     };
   }
 
-  private bindingKind(name: string): "value" | "channel" | "spawn_handle" | "function" | undefined {
+  private bindingKind(name: string): BindingKind | undefined {
     return this.bindingKinds.get(name);
+  }
+
+  private addBridgeHintForCapture(binding: string, from: OmniRuntime, to: OmniRuntime): void {
+    const hint = this.bridgeHintForBinding(binding);
+    if (!hint) return;
+    this.addExplicitBridge({
+      binding,
+      from,
+      to,
+      op: hint.op,
+      ...(hint.meta ? { meta: hint.meta } : {}),
+    });
+  }
+
+  private bridgeHintForBinding(binding: string): { op: string; meta?: Record<string, unknown> } | undefined {
+    const kind = this.bindingKind(binding);
+    if (kind === "channel" || kind === "stream") {
+      return { op: "stream_proxy", meta: { backpressure: true } };
+    }
+    if (kind === "resource") {
+      return { op: "proxy_with_finalizer", meta: { disposer: "close" } };
+    }
+
+    const typed = this.typeChecker.getBinding(binding);
+    if (!typed) return undefined;
+
+    switch (typed.type.kind) {
+      case "stream":
+        return { op: "stream_proxy", meta: { backpressure: (typed.type as C.StreamType).backpressure ?? true } };
+      case "disposable":
+        return { op: "attach_disposer", meta: { disposer: (typed.type as C.DisposableType).disposer || "dispose" } };
+      case "array":
+        return { op: "copy_array" };
+      case "func":
+        return { op: "proxy_callable" };
+      case "struct":
+        if ((typed.type as C.StructType).nominal) {
+          return { op: "proxy_with_finalizer", meta: { type: (typed.type as C.StructType).name || binding } };
+        }
+        return undefined;
+      default:
+        return undefined;
+    }
+  }
+
+  private addExplicitBridge(bridge: ManifestBridgeOp): void {
+    const key = this.bridgeKey(bridge);
+    if (this.explicitBridgeOps.some(existing => this.bridgeKey(existing) === key)) return;
+    this.explicitBridgeOps.push(bridge);
+  }
+
+  private dedupeBridgeOps(bridges: ManifestBridgeOp[]): ManifestBridgeOp[] {
+    const seen = new Set<string>();
+    const out: ManifestBridgeOp[] = [];
+    for (const bridge of bridges) {
+      const key = this.bridgeKey(bridge);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(bridge);
+    }
+    return out;
+  }
+
+  private bridgeKey(bridge: ManifestBridgeOp): string {
+    return [
+      bridge.binding,
+      bridge.op,
+      bridge.from || "",
+      bridge.to || "",
+      JSON.stringify(bridge.meta || {}),
+    ].join("|");
   }
 
   private addBoundaryDiagnostic(
@@ -363,7 +448,7 @@ export class ManifestCodeGenerator {
           `Array.from(${materialized.name}) materializes a stream-like value, but '${materialized.name}' has not been bound yet. Channels must be created with make(...) before materialization.`,
           materialized,
         );
-      } else if (kind !== "channel") {
+      } else if (kind !== "channel" && kind !== "stream") {
         this.addDiagnostic(
           "warning",
           "non-stream-materialization",
@@ -1083,6 +1168,130 @@ export class ManifestCodeGenerator {
     return null;
   }
 
+  private isManifestHelperCall(expr: AST.Expr, objectName: "resource" | "job"): AST.Call | undefined {
+    if (expr.kind !== "Call" || expr.callee.kind !== "Member") return undefined;
+    const member = expr.callee;
+    if (member.object.kind !== "Identifier" || member.object.name !== objectName) return undefined;
+    return expr;
+  }
+
+  private resourceOpFromCall(expr: AST.Expr, bind?: string, fallbackRuntime?: OmniRuntime): ResourceOp | undefined {
+    const call = this.isManifestHelperCall(expr, "resource");
+    if (!call || call.callee.kind !== "Member") return undefined;
+    const action = call.callee.property.name;
+    const runtimeFallback = fallbackRuntime || this.defaultRuntime;
+
+    if (action === "open") {
+      let argOffset = 0;
+      let runtime = runtimeFallback;
+      if (this.isRuntimeStringValue(call.args[0]) && call.args.length > 1) {
+        runtime = this.manifestRuntimeFromValue(call.args[0], runtimeFallback);
+        argOffset = 1;
+      }
+      const kind = this.manifestStringFromValue(call.args[argOffset]);
+      const disposer = this.manifestStringFromValue(call.args[argOffset + 1]);
+      const valueArg = call.args[argOffset + 2];
+      return {
+        op: "resource",
+        action: "open",
+        runtime,
+        ...(bind ? { bind } : {}),
+        ...(kind ? { kind } : {}),
+        ...(disposer ? { disposer } : {}),
+        ...(valueArg ? { value: this.manifestValue(valueArg) } : {}),
+      };
+    }
+
+    if (action === "close") {
+      const targetArg = call.args[0];
+      const target = targetArg?.kind === "Identifier"
+        ? targetArg.name
+        : this.manifestStringFromValue(targetArg);
+      if (!target) return undefined;
+      const runtimeArg = call.args.find(arg => this.isRuntimeStringValue(arg));
+      const runtime = runtimeArg ? this.manifestRuntimeFromValue(runtimeArg, runtimeFallback) : undefined;
+      const op: ResourceOp = {
+        op: "resource",
+        action: "close",
+        target,
+        ...(runtime ? { runtime } : {}),
+      };
+      const code = call.args
+        .slice(1)
+        .map(arg => this.manifestStringFromValue(arg))
+        .find(value => value && !this.isRuntimeString(value));
+      if (code) (op as ResourceOp & { code: string }).code = code;
+      return op;
+    }
+
+    return undefined;
+  }
+
+  private jobOpFromCall(expr: AST.Expr, bind?: string, fallbackRuntime?: OmniRuntime): JobOp | undefined {
+    const call = this.isManifestHelperCall(expr, "job");
+    if (!call || call.callee.kind !== "Member") return undefined;
+    const action = call.callee.property.name;
+    const runtimeFallback = fallbackRuntime || this.defaultRuntime;
+
+    if (action === "enqueue") {
+      let argOffset = 0;
+      let runtime = runtimeFallback;
+      if (this.isRuntimeStringValue(call.args[0]) && call.args.length > 1) {
+        runtime = this.manifestRuntimeFromValue(call.args[0], runtimeFallback);
+        argOffset = 1;
+      }
+      const kind = this.manifestStringFromValue(call.args[argOffset]);
+      const payload = call.args[argOffset + 1];
+      return {
+        op: "job",
+        action: "enqueue",
+        runtime,
+        ...(bind ? { bind } : {}),
+        ...(kind ? { kind } : {}),
+        ...(payload ? { payload: this.manifestValue(payload) } : {}),
+      };
+    }
+
+    if (action === "complete") {
+      const target = this.manifestTargetName(call.args[0]);
+      if (!target) return undefined;
+      return {
+        op: "job",
+        action: "complete",
+        target,
+        ...(call.args[1] ? { value: this.manifestValue(call.args[1]) } : {}),
+      };
+    }
+
+    if (action === "wait") {
+      const target = this.manifestTargetName(call.args[0]);
+      if (!target) return undefined;
+      return {
+        op: "job",
+        action: "wait",
+        target,
+        ...(bind ? { bind } : {}),
+      };
+    }
+
+    return undefined;
+  }
+
+  private manifestTargetName(expr: AST.Expr | undefined): string | undefined {
+    if (!expr) return undefined;
+    if (expr.kind === "Identifier") return expr.name;
+    return this.manifestStringFromValue(expr);
+  }
+
+  private isRuntimeStringValue(expr: AST.Expr | undefined): boolean {
+    const value = this.manifestStringFromValue(expr);
+    return !!value && this.isRuntimeString(value);
+  }
+
+  private isRuntimeString(value: string): boolean {
+    return ["py", "python", "js", "javascript", "typescript", "go", "rb", "ruby", "java", "rust", "c", "cpp", "c++"].includes(value.toLowerCase());
+  }
+
   // ─── Literal Detection ──────────────────────────────────────────
 
   /**
@@ -1119,6 +1328,98 @@ export class ManifestCodeGenerator {
       default:
         return null;
     }
+  }
+
+  private manifestValue(expr: AST.Expr): ManifestValue {
+    const literal = this.tryLiteralValue(expr);
+    if (literal.ok) {
+      return { kind: "literal", value: literal.value };
+    }
+    if (expr.kind === "Identifier") {
+      return { kind: "ref", name: expr.name };
+    }
+    return { kind: "literal", value: exprToCode(expr, this.source) };
+  }
+
+  private tryLiteralValue(expr: AST.Expr): { ok: true; value: unknown } | { ok: false } {
+    if (this.isSimpleLiteral(expr)) return { ok: true, value: this.literalValue(expr) };
+    if (expr.kind === "ArrayLiteral") {
+      const values: unknown[] = [];
+      for (const element of expr.elements) {
+        const value = this.tryLiteralValue(element);
+        if (!value.ok) return { ok: false };
+        values.push(value.value);
+      }
+      return { ok: true, value: values };
+    }
+    if (expr.kind === "ObjectLiteral") {
+      const object: Record<string, unknown> = {};
+      for (const prop of expr.properties) {
+        if (prop.computed) return { ok: false };
+        const key = this.literalObjectKey(prop.key);
+        if (key === undefined) return { ok: false };
+        const value = this.tryLiteralValue(prop.value);
+        if (!value.ok) return { ok: false };
+        object[key] = value.value;
+      }
+      return { ok: true, value: object };
+    }
+    return { ok: false };
+  }
+
+  private literalObjectKey(key: AST.ObjectProperty["key"]): string | undefined {
+    switch (key.kind) {
+      case "Identifier":
+        return key.name;
+      case "NumericLiteral":
+        return String(Number(key.raw));
+      case "StringLiteral":
+        return key.parts.length === 1 && key.parts[0].kind === "Text"
+          ? String(key.parts[0].value)
+          : undefined;
+      default:
+        return undefined;
+    }
+  }
+
+  private declaredBindingKind(name: string): BindingKind {
+    const typed = this.typeChecker.getBinding(name);
+    if (!typed) return "value";
+    switch (typed.type.kind) {
+      case "stream":
+        return "stream";
+      case "disposable":
+        return "resource";
+      default:
+        return "value";
+    }
+  }
+
+  private manifestRuntimeFromValue(expr: AST.Expr | undefined, fallback: OmniRuntime): OmniRuntime {
+    if (!expr) return fallback;
+    if (expr.kind !== "StringLiteral" || expr.parts.length !== 1 || expr.parts[0].kind !== "Text") return fallback;
+    const value = String(expr.parts[0].value).toLowerCase();
+    switch (value) {
+      case "python": return OmniRuntime.Python;
+      case "javascript":
+      case "typescript": return OmniRuntime.JavaScript;
+      case "go": return OmniRuntime.Go;
+      case "ruby": return OmniRuntime.Ruby;
+      case "java": return OmniRuntime.Java;
+      case "rust": return OmniRuntime.Rust;
+      case "c":
+      case "cpp":
+      case "c++": return OmniRuntime.C;
+    }
+    const runtime = tagToRuntime(value);
+    return runtime || fallback;
+  }
+
+  private manifestStringFromValue(expr: AST.Expr | undefined): string | undefined {
+    if (!expr || expr.kind !== "StringLiteral" || expr.parts.length !== 1 || expr.parts[0].kind !== "Text") {
+      return undefined;
+    }
+    return String(expr.parts[0].value);
   }
 
   // ─── Block Emission ───────────────────────────────────────────
@@ -1224,6 +1525,9 @@ export class ManifestCodeGenerator {
         return [{ op: "exec", runtime: deferRuntime, code: deferCode }];
       }
 
+      case "Using":
+        return [this.emitUsing(node, blockRuntime)];
+
       case "Select":
         return [this.emitSelect(node)];
 
@@ -1248,10 +1552,67 @@ export class ManifestCodeGenerator {
   // ─── Expression Emission ──────────────────────────────────────
 
   private emitExprStmt(node: AST.ExprStmt, blockRuntime: OmniRuntime): ManifestOp {
+    const aff = this.affinityMap.get(node.expr);
+    const runtime = aff?.runtime || blockRuntime;
+    const resourceOp = this.resourceOpFromCall(node.expr, undefined, runtime);
+    if (resourceOp) return resourceOp;
+    const jobOp = this.jobOpFromCall(node.expr, undefined, runtime);
+    if (jobOp) return jobOp;
+
     const lowered = this.loweredNodesFor(node)[0];
     const loweredOp = lowered ? this.emitLoweredNode(lowered, false) : undefined;
     if (loweredOp) return loweredOp;
     return this.emitExprAsOp(node.expr, blockRuntime);
+  }
+
+  private emitUsing(node: AST.Using, blockRuntime: OmniRuntime): TryOp {
+    const resourceOps: ManifestOp[] = [];
+    let resourceName: string | undefined;
+
+    if (node.resource.kind === "VarDecl" || node.resource.kind === "ConstDecl") {
+      const names = node.resource.names;
+      resourceName = names[0]?.name;
+      resourceOps.push(...(node.resource.kind === "VarDecl"
+        ? this.emitVarDecl(node.resource)
+        : this.emitConstDecl(node.resource)));
+    } else {
+      resourceName = `__using_resource_${++this.usingCounter}`;
+      const resourceExpr = node.resource as AST.Expr;
+      const aff = this.affinityMap.get(resourceExpr);
+      const runtime = aff?.runtime || blockRuntime;
+      const open = this.resourceOpFromCall(resourceExpr, resourceName, runtime);
+      if (open) {
+        resourceOps.push(open);
+        this.recordBinding(resourceName, (open.runtime as OmniRuntime) || runtime, "resource", resourceExpr);
+      } else {
+        const captures = this.computeCaptures(resourceExpr, runtime);
+        resourceOps.push({
+          op: "eval",
+          runtime,
+          bind: resourceName,
+          code: this.exprCode(resourceExpr, runtime),
+          ...(captures ? { captures } : {}),
+        });
+        this.recordBinding(resourceName, runtime, "resource", resourceExpr);
+      }
+    }
+
+    const bodyOps: ManifestOp[] = [];
+    for (const stmt of node.body.statements) {
+      const aff = this.affinityMap.get(stmt);
+      bodyOps.push(...this.emitNode(stmt, aff?.runtime || blockRuntime));
+    }
+
+    const closeOp: ResourceOp = resourceName
+      ? { op: "resource", action: "close", target: resourceName }
+      : { op: "resource", action: "close", target: "__unknown_resource" };
+
+    return {
+      op: "try",
+      body: [...resourceOps, ...bodyOps],
+      catches: [],
+      finallyBody: [closeOp],
+    };
   }
 
   private exprCode(expr: AST.Expr, runtime: OmniRuntime): string {
@@ -1317,6 +1678,12 @@ export class ManifestCodeGenerator {
         size: makeCall.size,
       } as ChanOp;
     }
+
+    const resourceOp = this.resourceOpFromCall(expr, undefined, runtime);
+    if (resourceOp) return resourceOp;
+
+    const jobOp = this.jobOpFromCall(expr, undefined, runtime);
+    if (jobOp) return jobOp;
 
     // Channel operations
     const chanOp = this.detectChanOp(expr, runtime);
@@ -1786,6 +2153,20 @@ export class ManifestCodeGenerator {
         const valExpr = node.values[i];
         const aff = this.affinityMap.get(valExpr);
         const runtime = aff?.runtime || this.defaultRuntime;
+        const resourceOp = this.resourceOpFromCall(valExpr, name, runtime);
+        if (resourceOp) {
+          ops.push(resourceOp);
+          this.recordBinding(name, (resourceOp.runtime as OmniRuntime) || runtime, "resource", valExpr);
+          continue;
+        }
+
+        const jobOp = this.jobOpFromCall(valExpr, name, runtime);
+        if (jobOp) {
+          ops.push(jobOp);
+          this.recordBinding(name, (jobOp.runtime as OmniRuntime) || runtime, jobOp.action === "enqueue" ? "job_handle" : "value", valExpr);
+          continue;
+        }
+
         const lowered = this.loweredNodeForBinding(node, name);
         const loweredOp = lowered ? this.emitLoweredNode(lowered, true) : undefined;
         if (loweredOp) {
@@ -1866,7 +2247,7 @@ export class ManifestCodeGenerator {
             ...(captures ? { captures } : {}),
           });
         }
-        this.recordBinding(name, runtime, "value", valExpr);
+        this.recordBinding(name, runtime, this.declaredBindingKind(name), valExpr);
       } else {
         // Forward declaration (no value)
         ops.push({
@@ -1888,6 +2269,20 @@ export class ManifestCodeGenerator {
       if (!valExpr) continue;
       const aff = this.affinityMap.get(valExpr);
       const runtime = aff?.runtime || this.defaultRuntime;
+      const resourceOp = this.resourceOpFromCall(valExpr, name, runtime);
+      if (resourceOp) {
+        ops.push(resourceOp);
+        this.recordBinding(name, (resourceOp.runtime as OmniRuntime) || runtime, "resource", valExpr);
+        continue;
+      }
+
+      const jobOp = this.jobOpFromCall(valExpr, name, runtime);
+      if (jobOp) {
+        ops.push(jobOp);
+        this.recordBinding(name, (jobOp.runtime as OmniRuntime) || runtime, jobOp.action === "enqueue" ? "job_handle" : "value", valExpr);
+        continue;
+      }
+
       const lowered = this.loweredNodeForBinding(node, name);
       const loweredOp = lowered ? this.emitLoweredNode(lowered, false) : undefined;
       if (loweredOp) {
@@ -1968,7 +2363,7 @@ export class ManifestCodeGenerator {
           ...(captures ? { captures } : {}),
         });
       }
-      this.recordBinding(name, runtime, "value", valExpr);
+      this.recordBinding(name, runtime, this.declaredBindingKind(name), valExpr);
     }
     return ops;
   }

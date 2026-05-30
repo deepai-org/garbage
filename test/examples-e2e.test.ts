@@ -393,6 +393,10 @@ describe("Example files: end-to-end pipeline", () => {
         file: "typed-validation-error-fidelity.poly",
         runtimes: ["python", "javascript", "ruby", "java"],
       },
+      {
+        file: "runnable-resource-job-boundary.poly",
+        runtimes: ["python", "javascript"],
+      },
     ];
 
     for (const { file, runtimes: expectedRuntimes } of hardExamples) {
@@ -419,6 +423,17 @@ describe("Example files: end-to-end pipeline", () => {
         expect.arrayContaining(["make", "send", "close"])
       );
       expect(streamSnapshot?.runtime).toBe("javascript");
+    });
+
+    it("lowers runnable resource/job example to first-class manifest ops", () => {
+      const { manifest } = compile(path.join(examplesDir, "runnable-resource-job-boundary.poly"));
+      const resources = manifest.ops.filter((o: any) => o.op === "resource") as any[];
+      const jobs = manifest.ops.filter((o: any) => o.op === "job") as any[];
+
+      expect(resources.map((o: any) => o.action)).toEqual(["open", "close"]);
+      expect(jobs.map((o: any) => o.action)).toEqual(["enqueue", "complete", "wait"]);
+      expect(jobs[0].runtime).toBe("ruby");
+      expect(resources[1].code).toContain("cleanup_log.append");
     });
 
     it("captures framework request handlers without annotation pragmas", () => {

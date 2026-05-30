@@ -2263,6 +2263,59 @@ result = sorted(names)`;
 // --- Type System Integration ---
 
 describe('Type System Bridge Integration', () => {
+  test('resource and job helper calls lower to manifest ops', () => {
+    const code = `
+const tx = resource.open("python", "sqlalchemy.transaction", "rollback")
+const payload = { user: "ada", task: "receipt" }
+const receipt = job.enqueue("ruby", "sidekiq", payload)
+job.complete(receipt, "ok")
+const result = job.wait(receipt)
+resource.close(tx, "cleanup_log.append('rollback')")
+`;
+    const m = parseAndManifest(code);
+    const resources = findAllOps(m, "resource") as any[];
+    const jobs = findAllOps(m, "job") as any[];
+
+    expect(resources.map(op => op.action)).toEqual(["open", "close"]);
+    expect(resources[0]).toMatchObject({
+      runtime: "python",
+      bind: "tx",
+      kind: "sqlalchemy.transaction",
+      disposer: "rollback",
+    });
+    expect(resources[1]).toMatchObject({
+      target: "tx",
+      code: "cleanup_log.append('rollback')",
+    });
+    expect(jobs.map(op => op.action)).toEqual(["enqueue", "complete", "wait"]);
+    expect(jobs[0]).toMatchObject({
+      runtime: "ruby",
+      bind: "receipt",
+      kind: "sidekiq",
+      payload: { kind: "ref", name: "payload" },
+    });
+    expect(jobs[2]).toMatchObject({ bind: "result", target: "receipt" });
+  });
+
+  test('typed stream captures emit deterministic stream_proxy bridge hints', () => {
+    const code = `
+import os
+const chunks: Stream<string> = os.listdir("/tmp")
+console.log(Array.from(chunks))
+`;
+    const m = parseAndManifest(code);
+    expect(m.bridges).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          binding: "chunks",
+          op: "stream_proxy",
+          from: "python",
+          to: "javascript",
+        }),
+      ]),
+    );
+  });
+
   test('cross-runtime variable crossing produces bridge ops', () => {
     // Python function with typed params called from JS
     const code = `
