@@ -161,6 +161,6 @@ export const DISPATCH_MANIFEST_SCHEMA = {
     AwaitOp: { type: "object", required: ["op", "runtime", "from"], properties: { op: { const: "await" }, runtime: { type: "string" }, from: { $ref: "#/$defs/ManifestOp" }, bind: { type: "string" } }, additionalProperties: false },
     ManifestBridgeOp: { type: "object", required: ["binding", "op"], properties: { binding: { type: "string" }, op: { type: "string" }, from: { type: "string" }, to: { type: "string" }, meta: { type: "object" } }, additionalProperties: false },
     ManifestTypeSummary: { type: "object", required: ["crossings", "safe", "coerce", "check", "errors"], properties: { crossings: { type: "number" }, safe: { type: "number" }, coerce: { type: "number" }, check: { type: "number" }, errors: { type: "number" } }, additionalProperties: false },
-    ManifestDiagnostic: { type: "object", required: ["severity", "code", "message"], properties: { severity: { enum: ["warning", "error"] }, code: { type: "string" }, message: { type: "string" }, span: { type: "object" } }, additionalProperties: false },
+    ManifestDiagnostic: { type: "object", required: ["severity", "code", "message"], properties: { severity: { enum: ["info", "warning", "error"] }, code: { type: "string" }, message: { type: "string" }, span: { type: "object" } }, additionalProperties: false },
   },
 } as const;

@@ -84,6 +84,24 @@ export class RuntimeResolver {
     return affinity?.runtime || annotatedProgram.defaultRuntime;
   }
 
+  /**
+   * Explain why a node resolved to its runtime. This is intended for compiler
+   * diagnostics and developer tooling, not for driving resolution decisions.
+   */
+  explainRuntimeForNode(
+    annotatedProgram: AnnotatedProgram,
+    node: AST.Decl | AST.Stmt | AST.Expr,
+  ): string {
+    const affinity = annotatedProgram.affinityMap.get(node);
+    if (!affinity) {
+      return `selected ${annotatedProgram.defaultRuntime} (fallback; no resolver evidence recorded)`;
+    }
+    const evidence = affinity.evidence.length > 0
+      ? affinity.evidence.map(e => `${e.type}: ${e.detail}`).join("; ")
+      : "no evidence";
+    return `selected ${affinity.runtime} (${affinity.confidence}; ${evidence})`;
+  }
+
   private buildAnnotatedTree(
     program: AST.Program,
     affinityMap: Map<AST.Decl | AST.Stmt | AST.Expr, RuntimeAffinity>,

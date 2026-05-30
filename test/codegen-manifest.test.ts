@@ -1775,6 +1775,20 @@ const joined = wait(h)`;
     const m = parseAndManifest('const outbox = make(2)\nconst rows = Array.from(outbox)');
     expect(m.diagnostics).toBeUndefined();
   });
+
+  test('cross-runtime capture emits explanatory inference diagnostic', () => {
+    const m = parseAndManifest(`
+import os
+const files = os.listdir(".")
+const loud = files.map(f => f.toUpperCase())
+`);
+    const diagnostic = m.diagnostics?.find(d => d.code === 'runtime-boundary-capture');
+    expect(diagnostic).toBeDefined();
+    expect(diagnostic?.severity).toBe('info');
+    expect(diagnostic?.message).toContain("Inserted capture boundary for 'files' from python to javascript");
+    expect(diagnostic?.message).toContain('Source binding: python');
+    expect(diagnostic?.message).toContain('Target expression: javascript');
+  });
 });
 
 // ─── Generators / Yield ───────────────────────────────────────────

@@ -652,6 +652,27 @@ describe('Global Root Propagation', () => {
       }
     }
   });
+
+  test('explains runtime inference evidence for a resolved node', () => {
+    const ast = parseCode('const loud = files.map(f => f.toUpperCase())');
+    const resolver = new RuntimeResolver();
+    const result = resolver.resolve(ast, 'const loud = files.map(f => f.toUpperCase())');
+    let mapCall: AST.Call | undefined;
+    for (const [node] of result.affinityMap) {
+      if (
+        node.kind === 'Call' &&
+        node.callee.kind === 'Member' &&
+        node.callee.property.name === 'map'
+      ) {
+        mapCall = node;
+      }
+    }
+
+    expect(mapCall).toBeDefined();
+    const explanation = resolver.explainRuntimeForNode(result, mapCall!);
+    expect(explanation).toContain('selected javascript');
+    expect(explanation).toContain('syntax: syntactic dominance');
+  });
 });
 
 // --- Syntactic Dominance Tests ---

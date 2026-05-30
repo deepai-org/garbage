@@ -72,8 +72,11 @@ export class ManifestCodeGenerator {
   private bindingTable: Map<string, OmniRuntime> = new Map();
   /** Tracks manifest-visible binding roles for semantic diagnostics. */
   private bindingKinds: Map<string, "value" | "channel" | "spawn_handle" | "function"> = new Map();
+  /** Records why a binding was assigned to its owning runtime. */
+  private bindingAffinities: Map<string, RuntimeAffinity> = new Map();
   /** Non-fatal diagnostics that help users understand runtime boundary mistakes. */
   private diagnostics: ManifestDiagnostic[] = [];
+  private boundaryDiagnosticKeys: Set<string> = new Set();
   /** Nesting depth inside func_def bodies. When > 0, captures include all external refs. */
   private funcDepth: number = 0;
   /** Type system boundary checker — validates types at cross-runtime crossings. */
@@ -95,7 +98,9 @@ export class ManifestCodeGenerator {
     this.source = annotated.source;
     this.bindingTable = new Map();
     this.bindingKinds = new Map();
+    this.bindingAffinities = new Map();
     this.diagnostics = [];
+    this.boundaryDiagnosticKeys = new Set();
     this.typeChecker = new BoundaryChecker();
     this.typeRegistry = new Map();
     this.loweredIR = lowerAnnotatedProgram(annotated);
@@ -186,10 +191,16 @@ export class ManifestCodeGenerator {
         // Type-check the crossing if it's actually cross-runtime
         if (boundIn !== targetRuntime) {
           this.checkTypeCrossing(name, targetRuntime);
+          if (this.bindingKind(name) !== "channel") {
+            this.addBoundaryDiagnostic(name, boundIn, targetRuntime, node);
+          }
         }
       } else if (boundIn !== targetRuntime) {
         // Top-level: only capture cross-runtime references.
         this.checkTypeCrossing(name, targetRuntime);
+        if (this.bindingKind(name) !== "channel") {
+          this.addBoundaryDiagnostic(name, boundIn, targetRuntime, node);
+        }
         captures[name] = name;
       }
     }
@@ -199,9 +210,22 @@ export class ManifestCodeGenerator {
   /**
    * Record a variable binding with its runtime.
    */
-  private recordBinding(name: string, runtime: OmniRuntime, kind: "value" | "channel" | "spawn_handle" | "function" = "value"): void {
+  private recordBinding(
+    name: string,
+    runtime: OmniRuntime,
+    kind: "value" | "channel" | "spawn_handle" | "function" = "value",
+    sourceNode?: AST.Program | AST.Decl | AST.Stmt | AST.Expr,
+  ): void {
     this.bindingTable.set(name, runtime);
     this.bindingKinds.set(name, kind);
+    const affinity = sourceNode && sourceNode.kind !== "Program" ? this.affinityMap.get(sourceNode) : undefined;
+    this.bindingAffinities.set(name, affinity && affinity.runtime === runtime
+      ? affinity
+      : {
+          runtime,
+          confidence: "inferred",
+          evidence: [{ type: "scope", detail: "manifest binding recorded during lowering" }],
+        });
   }
 
   private addDiagnostic(
@@ -233,6 +257,42 @@ export class ManifestCodeGenerator {
 
   private bindingKind(name: string): "value" | "channel" | "spawn_handle" | "function" | undefined {
     return this.bindingKinds.get(name);
+  }
+
+  private addBoundaryDiagnostic(
+    binding: string,
+    sourceRuntime: OmniRuntime,
+    targetRuntime: OmniRuntime,
+    node: AST.Expr | AST.Stmt | AST.Decl,
+  ): void {
+    const span = node.span;
+    const spanKey = span ? `${span.start}-${span.end}` : "unknown";
+    const key = `${binding}|${sourceRuntime}|${targetRuntime}|${spanKey}`;
+    if (this.boundaryDiagnosticKeys.has(key)) return;
+    this.boundaryDiagnosticKeys.add(key);
+
+    const sourceAffinity = this.bindingAffinities.get(binding);
+    const targetAffinity = this.affinityMap.get(node);
+    const sourceWhy = sourceAffinity
+      ? this.describeAffinity(sourceAffinity)
+      : `${sourceRuntime} (binding table; no resolver evidence recorded)`;
+    const targetWhy = targetAffinity
+      ? this.describeAffinity(targetAffinity)
+      : `${targetRuntime} (manifest lowering fallback)`;
+
+    this.addDiagnostic(
+      "info",
+      "runtime-boundary-capture",
+      `Inserted capture boundary for '${binding}' from ${sourceRuntime} to ${targetRuntime}. Source binding: ${sourceWhy}. Target expression: ${targetWhy}.`,
+      node,
+    );
+  }
+
+  private describeAffinity(affinity: RuntimeAffinity): string {
+    const evidence = affinity.evidence.length > 0
+      ? affinity.evidence.map(e => `${e.type}: ${e.detail}`).join("; ")
+      : "no evidence";
+    return `${affinity.runtime} (${affinity.confidence}; ${evidence})`;
   }
 
   private diagnoseChannelRef(channel: string, action: "send" | "recv" | "close", node?: { span?: AST.Span }): void {
@@ -1395,7 +1455,7 @@ export class ManifestCodeGenerator {
   private emitLoweredNode(node: LoweredManifestNode, mutable: boolean): ManifestOp | undefined {
     switch (node.kind) {
       case "ChannelMake":
-        if (node.bind) this.recordBinding(node.bind, node.runtime, "channel");
+        if (node.bind) this.recordBinding(node.bind, node.runtime, "channel", node.sourceNode);
         return {
           op: "chan",
           action: "make",
@@ -1406,7 +1466,7 @@ export class ManifestCodeGenerator {
 
       case "ChannelRecv":
         if (node.channel) this.diagnoseChannelRef(node.channel, "recv", node.sourceNode);
-        if (node.bind) this.recordBinding(node.bind, node.runtime);
+        if (node.bind) this.recordBinding(node.bind, node.runtime, "value", node.sourceNode);
         return {
           op: "chan",
           action: "recv",
@@ -1444,14 +1504,14 @@ export class ManifestCodeGenerator {
         } as ChanOp;
 
       case "Spawn":
-        if (node.bind) this.recordBinding(node.bind, OmniRuntime.Go, "spawn_handle");
+        if (node.bind) this.recordBinding(node.bind, OmniRuntime.Go, "spawn_handle", node.sourceNode);
         return this.emitSpawn(node.expr, node.bind);
 
       case "EvalExpr": {
         if (!node.bind) return undefined;
         if (this.isParallelPattern(node.expr) || this.isAwaitExpr(node.expr)) return undefined;
         if (this.isSimpleLiteral(node.expr)) {
-          this.recordBinding(node.bind, node.runtime);
+          this.recordBinding(node.bind, node.runtime, "value", node.sourceNode);
           return {
             op: "declare",
             bind: node.bind,
@@ -1461,7 +1521,7 @@ export class ManifestCodeGenerator {
         }
         this.diagnoseExpr(node.expr, node.runtime);
         const captures = this.computeCaptures(node.expr, node.runtime);
-        this.recordBinding(node.bind, node.runtime);
+        this.recordBinding(node.bind, node.runtime, "value", node.sourceNode);
         return {
           op: "eval",
           runtime: node.runtime,
@@ -1475,7 +1535,7 @@ export class ManifestCodeGenerator {
         if (!node.bind) return undefined;
         if (node.callee === "wait") return undefined;
         const captures = this.computeCaptures(node.sourceNode as AST.Expr | AST.Stmt | AST.Decl, node.runtime);
-        this.recordBinding(node.bind, node.runtime);
+        this.recordBinding(node.bind, node.runtime, "value", node.sourceNode);
         if (node.runtime === OmniRuntime.Go) {
           return {
             op: "eval",
@@ -1735,7 +1795,7 @@ export class ManifestCodeGenerator {
 
         if (valExpr.kind === "Go") {
           ops.push(this.emitSpawn(valExpr, name));
-          this.recordBinding(name, OmniRuntime.Go, "spawn_handle");
+          this.recordBinding(name, OmniRuntime.Go, "spawn_handle", valExpr);
           continue;
         }
 
@@ -1743,7 +1803,7 @@ export class ManifestCodeGenerator {
         const parallel = this.isParallelPattern(valExpr);
         if (parallel) {
           ops.push(this.emitParallel(parallel.exprs, name));
-          this.recordBinding(name, runtime);
+          this.recordBinding(name, runtime, "value", valExpr);
           continue;
         }
 
@@ -1751,7 +1811,7 @@ export class ManifestCodeGenerator {
         const awaitExpr = this.isAwaitExpr(valExpr);
         if (awaitExpr && !this.isParallelPattern(awaitExpr.inner)) {
           ops.push(this.emitAwait(awaitExpr.inner, runtime, name));
-          this.recordBinding(name, runtime);
+          this.recordBinding(name, runtime, "value", valExpr);
           continue;
         }
 
@@ -1765,7 +1825,7 @@ export class ManifestCodeGenerator {
             bind: name,
             size: makeCall.size,
           } as ChanOp);
-          this.recordBinding(name, runtime, "channel");
+          this.recordBinding(name, runtime, "channel", valExpr);
           continue;
         }
 
@@ -1782,7 +1842,7 @@ export class ManifestCodeGenerator {
             bind: name,
             ...(captures ? { captures } : {}),
           });
-          this.recordBinding(name, runtime);
+          this.recordBinding(name, runtime, "value", valExpr);
           continue;
         }
 
@@ -1806,7 +1866,7 @@ export class ManifestCodeGenerator {
             ...(captures ? { captures } : {}),
           });
         }
-        this.recordBinding(name, runtime);
+        this.recordBinding(name, runtime, "value", valExpr);
       } else {
         // Forward declaration (no value)
         ops.push({
@@ -1814,7 +1874,7 @@ export class ManifestCodeGenerator {
           bind: name,
           mutable: true,
         });
-        this.recordBinding(name, this.defaultRuntime);
+        this.recordBinding(name, this.defaultRuntime, "value", node);
       }
     }
     return ops;
@@ -1837,7 +1897,7 @@ export class ManifestCodeGenerator {
 
       if (valExpr.kind === "Go") {
         ops.push(this.emitSpawn(valExpr, name));
-        this.recordBinding(name, OmniRuntime.Go, "spawn_handle");
+        this.recordBinding(name, OmniRuntime.Go, "spawn_handle", valExpr);
         continue;
       }
 
@@ -1845,7 +1905,7 @@ export class ManifestCodeGenerator {
       const parallel = this.isParallelPattern(valExpr);
       if (parallel) {
         ops.push(this.emitParallel(parallel.exprs, name));
-        this.recordBinding(name, runtime);
+        this.recordBinding(name, runtime, "value", valExpr);
         continue;
       }
 
@@ -1853,7 +1913,7 @@ export class ManifestCodeGenerator {
       const awaitExpr = this.isAwaitExpr(valExpr);
       if (awaitExpr && !this.isParallelPattern(awaitExpr.inner)) {
         ops.push(this.emitAwait(awaitExpr.inner, runtime, name));
-        this.recordBinding(name, runtime);
+        this.recordBinding(name, runtime, "value", valExpr);
         continue;
       }
 
@@ -1867,7 +1927,7 @@ export class ManifestCodeGenerator {
           bind: name,
           size: makeCall.size,
         } as ChanOp);
-        this.recordBinding(name, runtime, "channel");
+        this.recordBinding(name, runtime, "channel", valExpr);
         continue;
       }
 
@@ -1884,7 +1944,7 @@ export class ManifestCodeGenerator {
           bind: name,
           ...(captures ? { captures } : {}),
         });
-        this.recordBinding(name, runtime);
+        this.recordBinding(name, runtime, "value", valExpr);
         continue;
       }
 
@@ -1908,7 +1968,7 @@ export class ManifestCodeGenerator {
           ...(captures ? { captures } : {}),
         });
       }
-      this.recordBinding(name, runtime);
+      this.recordBinding(name, runtime, "value", valExpr);
     }
     return ops;
   }

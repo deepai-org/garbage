@@ -34,7 +34,7 @@ export interface DispatchManifest {
 }
 
 export interface ManifestDiagnostic {
-  severity: "warning" | "error";
+  severity: "info" | "warning" | "error";
   code: string;
   message: string;
   span?: {
