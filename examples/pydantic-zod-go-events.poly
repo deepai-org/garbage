@@ -2,12 +2,17 @@ import pydantic
 import zod from "zod"
 
 func stable_event_id(source) {
-  return source
+  source_string := source.(string)
+  sum := sha256.Sum256([]byte(source_string))
+  prefix := fmt.Sprintf("%.6x", sum)
+  bucket := int(sum[0]) % 16
+  return fmt.Sprintf("evt_%s_b%d", prefix, bucket)
 }
 
 const raw_event = {"provider": "stripe", "amount": 42, "email": "Ada@Example.COM"}
 const validated = pydantic.TypeAdapter(dict).validate_python(raw_event)
-const event_id = stable_event_id(validated["provider"])
+event_source = validated["provider"] + ":" + validated["email"]
+const event_id = stable_event_id(event_source)
 
 function shape_client_event(event) {
   const Schema = zod.z.object({
