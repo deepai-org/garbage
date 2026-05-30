@@ -192,4 +192,79 @@ describe("Example files: end-to-end pipeline", () => {
       }
     });
   });
+
+  describe("django-go-typescript-views.poly", () => {
+    const { manifest, runtimes } = compile(
+      path.join(examplesDir, "django-go-typescript-views.poly")
+    );
+
+    it("imports Django in Python and emits Go plus JavaScript handlers", () => {
+      expect(runtimes).not.toContain("unknown");
+      expect(runtimes.slice(0, 5)).toEqual([
+        "python",
+        "python",
+        "python",
+        "python",
+        "python",
+      ]);
+      expect(runtimes).toContain("go");
+      expect(runtimes).toContain("javascript");
+    });
+
+    it("compiles framework view handlers into manifest-callable functions", () => {
+      const funcs = manifest.ops.filter((o: any) => o.op === "func_def");
+      const goView = funcs.find((o: any) => o.name === "go_view");
+      const tsView = funcs.find((o: any) => o.name === "ts_view");
+
+      expect((goView as any)?.bodyRuntime).toBe("go");
+      expect((goView as any)?.source).toContain("func GoView(path interface{}) interface{}");
+      expect((tsView as any)?.bodyRuntime).toBe("javascript");
+    });
+
+    it("keeps the Django callable native while delegating through OmniVM stubs", () => {
+      const djangoView = manifest.ops.find(
+        (o: any) => o.op === "eval" && o.bind === "django_view"
+      ) as any;
+
+      expect(djangoView?.runtime).toBe("python");
+      expect(djangoView?.code).toContain("JsonResponse");
+      expect(djangoView?.code).toContain("go_view(request.path)");
+      expect(djangoView?.code).toContain("ts_view(request.path)");
+      expect(djangoView?.code).toContain("lambda request");
+    });
+  });
+
+  describe("express-python-view.poly", () => {
+    const { manifest, runtimes } = compile(
+      path.join(examplesDir, "express-python-view.poly")
+    );
+
+    it("imports Express in JavaScript and JSON in Python", () => {
+      expect(runtimes).not.toContain("unknown");
+      expect(runtimes[0]).toBe("javascript");
+      expect(runtimes[1]).toBe("python");
+    });
+
+    it("compiles the Python view as a manifest-callable handler", () => {
+      const pyView = manifest.ops.find(
+        (o: any) => o.op === "func_def" && o.name === "py_view"
+      ) as any;
+
+      expect(pyView).toBeDefined();
+      expect(pyView.bodyRuntime).toBe("python");
+    });
+
+    it("keeps the Express route native while delegating into Python", () => {
+      const route = manifest.ops.find(
+        (o: any) => o.op === "eval" && o.bind === "express_view"
+      ) as any;
+      const registration = manifest.ops.find(
+        (o: any) => o.op === "exec" && String((o as any).code).includes("app.get")
+      ) as any;
+
+      expect(route?.runtime).toBe("javascript");
+      expect(route?.code).toContain("py_view(req.path)");
+      expect(registration?.runtime).toBe("javascript");
+    });
+  });
 });

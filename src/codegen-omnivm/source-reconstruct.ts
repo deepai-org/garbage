@@ -89,8 +89,13 @@ export function exprToCode(expr: AST.Expr, source?: string): string {
       const targets = expr.targets.map(t => t.name).join(", ");
       const filter = expr.filter ? ` if ${exprToCode(expr.filter, source)}` : "";
       return `[${exprToCode(expr.expression, source)} for ${targets} in ${exprToCode(expr.iterable, source)}${filter}]`;
-    case "RuntimeTag":
+    case "RuntimeTag": {
+      if (expr.runtime === "py" && expr.expr.kind === "Lambda") {
+        const raw = spanExtract(expr.expr, source)?.trim();
+        if (raw?.startsWith("lambda ")) return raw;
+      }
       return exprToCode(expr.expr, source);
+    }
     case "JSXElement":
       return jsxToCreateElement(expr, source);
     case "JSXFragment":
@@ -525,8 +530,12 @@ function lambdaToCode(expr: AST.Lambda, paramsCode: string, source?: string): st
     return `${asyncPrefix}(${paramsCode}) => { ${blockToCode(expr.body as AST.Block, source)} }`;
   }
 
-  // Expression body — exprToCode handles JSX, Match, etc.
+  // Expression body — exprToCode handles JSX, Match, etc. Object literal
+  // arrow bodies must be parenthesized or JavaScript parses them as blocks.
   const bodyCode = exprToCode(expr.body as AST.Expr, source);
+  if ((expr.body as AST.Expr).kind === "ObjectLiteral") {
+    return `${asyncPrefix}(${paramsCode}) => (${bodyCode})`;
+  }
   return `${asyncPrefix}(${paramsCode}) => ${bodyCode}`;
 }
 

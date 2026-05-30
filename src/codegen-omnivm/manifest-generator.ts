@@ -983,6 +983,9 @@ export class ManifestCodeGenerator {
       case "Go":
         return [this.emitSpawn(node)];
 
+      case "Echo":
+        return [this.emitEcho(node, blockRuntime)];
+
       case "Defer": {
         const deferAff = this.affinityMap.get(node);
         const deferRuntime = deferAff?.runtime || OmniRuntime.Go;
@@ -1023,6 +1026,32 @@ export class ManifestCodeGenerator {
 
   private emitExprStmt(node: AST.ExprStmt, blockRuntime: OmniRuntime): ManifestOp {
     return this.emitExprAsOp(node.expr, blockRuntime);
+  }
+
+  private emitEcho(node: AST.Echo, blockRuntime: OmniRuntime): NativeOp {
+    const aff = this.affinityMap.get(node);
+    const runtime = aff?.runtime || blockRuntime;
+    const args = node.values.map(v => exprToCode(v, this.source)).join(", ");
+
+    let code: string;
+    switch (runtime) {
+      case OmniRuntime.Python:
+        if (this.source && node.span) {
+          const original = this.source.slice(node.span.start, node.span.end);
+          code = original.trim() || `print(${args})`;
+        } else {
+          code = `print(${args})`;
+        }
+        break;
+      case OmniRuntime.Ruby:
+        code = `puts ${args}`;
+        break;
+      default:
+        code = `console.log(${args})`;
+        break;
+    }
+
+    return { op: "native", runtime, code };
   }
 
   private emitExprAsOp(expr: AST.Expr, contextRuntime: OmniRuntime): ManifestOp {

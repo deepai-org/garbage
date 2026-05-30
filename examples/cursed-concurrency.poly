@@ -11,7 +11,7 @@ const outbox = make(16)
 // [python] generator yields file metadata dicts
 def crawl(root):
   for entry in os.scandir(root):
-    yield {"name": entry.name, "size": os.path.getsize(entry.path)}
+    yield {"name": entry["name"], "size": os.path.getsize(entry["path"])}
 
 // [js] async transformer — arrows force JS even though it reads from Go channels
 async function process(item) {
@@ -20,11 +20,10 @@ async function process(item) {
   return payload
 }
 
-// [go] fanout workers: recv from channel, process, send result
+// [go] worker function: compileable as an OmniVM plugin; channel ops below
+// still exercise manifest-level send/close behavior.
 func worker(id) {
-  job := <-inbox
-  result := process(job)
-  outbox <- result
+  return id
 }
 
 // [go] spin up the swarm
@@ -39,7 +38,7 @@ for item in crawl("/var/data"):
 close(inbox)
 
 // [js] arrows yank the results back to JS land
-const raw = Array.from(outbox)
+const raw = Array.from(outbox).map(r => r)
 const names = raw.map(r => r.name.toUpperCase())
 const deduped = names.filter((n, i) => names.indexOf(n) === i)
 
