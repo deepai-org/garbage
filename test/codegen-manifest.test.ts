@@ -1741,6 +1741,30 @@ describe('SpawnOp', () => {
     expect(spawnOp).toBeDefined();
     expect(spawnOp.op).toBe('spawn');
   });
+
+  test('wait on non-handle binding emits diagnostic', () => {
+    const m = parseAndManifest('const x = 1\nconst joined = wait(x)');
+    expect(m.diagnostics?.some(d => d.code === 'wait-non-handle-binding')).toBe(true);
+  });
+
+  test('unknown channel binding emits diagnostic', () => {
+    const m = parseAndManifest('missing <- 1');
+    expect(m.diagnostics?.some(d => d.code === 'unknown-channel-binding')).toBe(true);
+  });
+
+  test('valid spawn handles and channels do not emit diagnostics', () => {
+    const code = `
+const ch = make(1)
+func worker(id) {
+  return id
+}
+const h = go worker(1)
+ch <- 1
+close(ch)
+const joined = wait(h)`;
+    const m = parseAndManifest(code);
+    expect(m.diagnostics).toBeUndefined();
+  });
 });
 
 // ─── Generators / Yield ───────────────────────────────────────────

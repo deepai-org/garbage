@@ -29,6 +29,20 @@ export interface DispatchManifest {
   bridges?: ManifestBridgeOp[];
   /** Type system summary: crossing statistics. */
   typeSummary?: ManifestTypeSummary;
+  /** Non-fatal compiler diagnostics for manifest/runtime boundary assumptions. */
+  diagnostics?: ManifestDiagnostic[];
+}
+
+export interface ManifestDiagnostic {
+  severity: "warning" | "error";
+  code: string;
+  message: string;
+  span?: {
+    start: number;
+    end: number;
+    line?: number;
+    column?: number;
+  };
 }
 
 /** A bridge operation that OmniVM must perform at a runtime boundary. */

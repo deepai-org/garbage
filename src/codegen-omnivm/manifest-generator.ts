@@ -56,6 +56,7 @@ import {
   ConditionExpr,
   CaptureMap,
   ConcatSegment,
+  ManifestDiagnostic,
 } from './manifest-types';
 import { BoundaryChecker, typeToString } from '../type-system/boundary-checker';
 import { lowerType } from '../type-system/lowering';
@@ -67,6 +68,10 @@ export class ManifestCodeGenerator {
   private source?: string;
   /** Tracks variable bindings and their defining runtime for captures analysis. */
   private bindingTable: Map<string, OmniRuntime> = new Map();
+  /** Tracks manifest-visible binding roles for semantic diagnostics. */
+  private bindingKinds: Map<string, "value" | "channel" | "spawn_handle" | "function"> = new Map();
+  /** Non-fatal diagnostics that help users understand runtime boundary mistakes. */
+  private diagnostics: ManifestDiagnostic[] = [];
   /** Nesting depth inside func_def bodies. When > 0, captures include all external refs. */
   private funcDepth: number = 0;
   /** Type system boundary checker — validates types at cross-runtime crossings. */
@@ -83,6 +88,8 @@ export class ManifestCodeGenerator {
     this.defaultRuntime = annotated.defaultRuntime;
     this.source = annotated.source;
     this.bindingTable = new Map();
+    this.bindingKinds = new Map();
+    this.diagnostics = [];
     this.typeChecker = new BoundaryChecker();
     this.typeRegistry = new Map();
 
@@ -110,6 +117,10 @@ export class ManifestCodeGenerator {
     if (summary.crossings > 0) {
       manifest.bridges = bridgeOps.map(b => this.toBridgeManifestOp(b));
       manifest.typeSummary = summary;
+    }
+
+    if (this.diagnostics.length > 0) {
+      manifest.diagnostics = this.diagnostics;
     }
 
     return manifest;
@@ -159,8 +170,96 @@ export class ManifestCodeGenerator {
   /**
    * Record a variable binding with its runtime.
    */
-  private recordBinding(name: string, runtime: OmniRuntime): void {
+  private recordBinding(name: string, runtime: OmniRuntime, kind: "value" | "channel" | "spawn_handle" | "function" = "value"): void {
     this.bindingTable.set(name, runtime);
+    this.bindingKinds.set(name, kind);
+  }
+
+  private addDiagnostic(
+    severity: ManifestDiagnostic["severity"],
+    code: string,
+    message: string,
+    node?: { span?: AST.Span },
+  ): void {
+    const span = node?.span;
+    this.diagnostics.push({
+      severity,
+      code,
+      message,
+      ...(span ? { span: this.diagnosticSpan(span) } : {}),
+    });
+  }
+
+  private diagnosticSpan(span: AST.Span): ManifestDiagnostic["span"] {
+    if (!this.source) return { start: span.start, end: span.end };
+    const prefix = this.source.slice(0, span.start);
+    const lines = prefix.split(/\r?\n/);
+    return {
+      start: span.start,
+      end: span.end,
+      line: lines.length,
+      column: lines[lines.length - 1].length + 1,
+    };
+  }
+
+  private bindingKind(name: string): "value" | "channel" | "spawn_handle" | "function" | undefined {
+    return this.bindingKinds.get(name);
+  }
+
+  private diagnoseChannelRef(channel: string, action: "send" | "recv" | "close", node?: { span?: AST.Span }): void {
+    if (!/^[A-Za-z_$][\w$]*$/.test(channel)) return;
+    const kind = this.bindingKind(channel);
+    if (!kind) {
+      this.addDiagnostic(
+        "warning",
+        "unknown-channel-binding",
+        `Channel ${action} references '${channel}', but no manifest channel with that name has been created yet. Create it with 'const ${channel} = make(size)' before using it.`,
+        node,
+      );
+      return;
+    }
+    if (kind !== "channel") {
+      this.addDiagnostic(
+        "warning",
+        "non-channel-binding",
+        `Channel ${action} references '${channel}', but '${channel}' is currently a ${kind.replace("_", " ")} binding, not a channel.`,
+        node,
+      );
+    }
+  }
+
+  private diagnoseExpr(expr: AST.Expr, runtime: OmniRuntime): void {
+    if (expr.kind !== "Call" || expr.callee.kind !== "Identifier") return;
+    if (expr.callee.name !== "wait") return;
+    if (runtime !== OmniRuntime.Go) {
+      this.addDiagnostic(
+        "warning",
+        "wait-runtime",
+        `wait(...) is a manifest/Go synchronization helper, but this expression resolved to ${runtime}. Use it in Go-owned concurrency flow or add a Go runtime tag if inference is ambiguous.`,
+        expr,
+      );
+    }
+    for (const arg of expr.args) {
+      if (arg.kind !== "Identifier") {
+        this.addDiagnostic(
+          "warning",
+          "wait-non-handle-expression",
+          `wait(...) can only selectively join spawn handles returned by 'go worker(...)'. Argument '${exprToCode(arg, this.source)}' is not a named handle.`,
+          arg,
+        );
+        continue;
+      }
+      const kind = this.bindingKind(arg.name);
+      if (kind !== "spawn_handle") {
+        const detail = kind ? `it is a ${kind.replace("_", " ")} binding` : "it has not been bound yet";
+        this.addDiagnostic(
+          "warning",
+          "wait-non-handle-binding",
+          `wait(${arg.name}) expects '${arg.name}' to be a spawn handle returned by 'const ${arg.name} = go worker(...)'; ${detail}.`,
+          arg,
+        );
+      }
+    }
   }
 
   // ─── Type System Integration ─────────────────────────────────────
@@ -1139,6 +1238,7 @@ export class ManifestCodeGenerator {
 
       // Go + Call RHS → func/args
       if (runtime === OmniRuntime.Go && expr.right.kind === "Call") {
+        this.diagnoseExpr(expr.right, runtime);
         const funcName = exprToCode((expr.right as AST.Call).callee, this.source);
         const args = (expr.right as AST.Call).args.map(a => exprToCode(a, this.source));
         this.recordBinding(bindName, runtime);
@@ -1152,6 +1252,7 @@ export class ManifestCodeGenerator {
       }
 
       // Runtime eval → bare eval with bind
+      this.diagnoseExpr(expr.right, runtime);
       const captures = this.computeCaptures(expr.right, runtime);
       this.recordBinding(bindName, runtime);
       return {
@@ -1254,6 +1355,7 @@ export class ManifestCodeGenerator {
     // Channel send: ch <- value
     const send = this.isChanSend(expr);
     if (send) {
+      this.diagnoseChannelRef(send.channel, "send", expr);
       const captures = this.computeCaptures(expr, runtime);
       const value: ManifestValue = this.isSimpleLiteral(send.value)
         ? { kind: "literal", value: this.literalValue(send.value) }
@@ -1271,6 +1373,7 @@ export class ManifestCodeGenerator {
     // Channel recv: <-ch (standalone, no bind)
     const recv = this.isChanRecv(expr);
     if (recv) {
+      this.diagnoseChannelRef(recv.channel, "recv", expr);
       const captures = this.computeCaptures(expr, runtime);
       return {
         op: "chan",
@@ -1284,6 +1387,7 @@ export class ManifestCodeGenerator {
     // Channel close: close(ch)
     const close = this.isChanClose(expr);
     if (close) {
+      this.diagnoseChannelRef(close.channel, "close", expr);
       return {
         op: "chan",
         action: "close",
@@ -1300,6 +1404,29 @@ export class ManifestCodeGenerator {
   private emitSpawn(node: AST.Go, bind?: string): SpawnOp {
     const aff = this.affinityMap.get(node);
     const runtime = aff?.runtime || OmniRuntime.Go;
+    if (runtime !== OmniRuntime.Go) {
+      this.addDiagnostic(
+        "warning",
+        "spawn-runtime",
+        `go spawn expressions should resolve to the Go runtime, but this expression resolved to ${runtime}.`,
+        node,
+      );
+    }
+    if (node.expr.kind !== "Call") {
+      this.addDiagnostic(
+        "warning",
+        "unsupported-spawn-expression",
+        `OmniVM can only join named worker calls like 'go worker(...)'; got '${exprToCode(node.expr, this.source)}'.`,
+        node,
+      );
+    } else if (node.expr.callee.kind !== "Identifier") {
+      this.addDiagnostic(
+        "warning",
+        "unsupported-spawn-callee",
+        `OmniVM spawn handles currently require a named worker function; got '${exprToCode(node.expr.callee, this.source)}'.`,
+        node.expr.callee,
+      );
+    }
     const captures = this.computeCaptures(node.expr, runtime);
     return {
       op: "spawn",
@@ -1422,7 +1549,7 @@ export class ManifestCodeGenerator {
 
         if (valExpr.kind === "Go") {
           ops.push(this.emitSpawn(valExpr, name));
-          this.recordBinding(name, OmniRuntime.Go);
+          this.recordBinding(name, OmniRuntime.Go, "spawn_handle");
           continue;
         }
 
@@ -1452,13 +1579,14 @@ export class ManifestCodeGenerator {
             bind: name,
             size: makeCall.size,
           } as ChanOp);
-          this.recordBinding(name, runtime);
+          this.recordBinding(name, runtime, "channel");
           continue;
         }
 
         // Channel recv: val = <-ch → ChanOp recv with bind
         const recv = this.isChanRecv(valExpr);
         if (recv) {
+          this.diagnoseChannelRef(recv.channel, "recv", valExpr);
           const captures = this.computeCaptures(valExpr, runtime);
           ops.push({
             op: "chan",
@@ -1482,6 +1610,7 @@ export class ManifestCodeGenerator {
           });
         } else {
           // Runtime eval → bare eval with bind
+          this.diagnoseExpr(valExpr, runtime);
           const captures = this.computeCaptures(valExpr, runtime);
           ops.push({
             op: "eval",
@@ -1516,7 +1645,7 @@ export class ManifestCodeGenerator {
 
       if (valExpr.kind === "Go") {
         ops.push(this.emitSpawn(valExpr, name));
-        this.recordBinding(name, OmniRuntime.Go);
+        this.recordBinding(name, OmniRuntime.Go, "spawn_handle");
         continue;
       }
 
@@ -1546,13 +1675,14 @@ export class ManifestCodeGenerator {
           bind: name,
           size: makeCall.size,
         } as ChanOp);
-        this.recordBinding(name, runtime);
+        this.recordBinding(name, runtime, "channel");
         continue;
       }
 
       // Channel recv: val = <-ch → ChanOp recv with bind
       const recv = this.isChanRecv(valExpr);
       if (recv) {
+        this.diagnoseChannelRef(recv.channel, "recv", valExpr);
         const captures = this.computeCaptures(valExpr, runtime);
         ops.push({
           op: "chan",
@@ -1576,6 +1706,7 @@ export class ManifestCodeGenerator {
         });
       } else {
         // Runtime eval → bare eval with bind
+        this.diagnoseExpr(valExpr, runtime);
         const captures = this.computeCaptures(valExpr, runtime);
         ops.push({
           op: "eval",
@@ -1603,7 +1734,7 @@ export class ManifestCodeGenerator {
 
         if (pair.expr.kind === "Go") {
           ops.push(this.emitSpawn(pair.expr, name));
-          this.recordBinding(name, OmniRuntime.Go);
+          this.recordBinding(name, OmniRuntime.Go, "spawn_handle");
           continue;
         }
 
@@ -1625,13 +1756,14 @@ export class ManifestCodeGenerator {
             bind: name,
             size: makeCall.size,
           } as ChanOp);
-          this.recordBinding(name, runtime);
+          this.recordBinding(name, runtime, "channel");
           continue;
         }
 
         // Channel recv: val := <-ch → ChanOp recv with bind
         const recv = this.isChanRecv(pair.expr);
         if (recv) {
+          this.diagnoseChannelRef(recv.channel, "recv", pair.expr);
           const captures = this.computeCaptures(pair.expr, runtime);
           ops.push({
             op: "chan",
@@ -1668,6 +1800,8 @@ export class ManifestCodeGenerator {
    * Emit an eval op that binds a value. For Go + Call, uses func/args format.
    */
   private emitBindingEval(bindName: string, valExpr: AST.Expr, runtime: OmniRuntime): ManifestOp {
+    this.diagnoseExpr(valExpr, runtime);
+
     // Await (non-parallel) → AwaitOp with bind
     const awaitExpr = this.isAwaitExpr(valExpr);
     if (awaitExpr && !this.isParallelPattern(awaitExpr.inner)) {
@@ -1719,7 +1853,7 @@ export class ManifestCodeGenerator {
   private emitFuncDecl(node: AST.FuncDecl): ManifestOp[] {
     const aff = this.affinityMap.get(node);
     const funcRuntime = aff?.runtime || this.defaultRuntime;
-    this.recordBinding(node.name.name, funcRuntime);
+    this.recordBinding(node.name.name, funcRuntime, "function");
 
     // Go func_def: emit raw source for OmniVM to compile, not decomposed ops.
     // The source field is a complete Go compilation unit.

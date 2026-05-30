@@ -84,6 +84,15 @@ function compileFile(inputPath: string, options: CLIOptions): string {
   const annotated = resolver.resolve(ast, source);
   const gen = new ManifestCodeGenerator();
   const manifest = gen.generate(annotated);
+  if (manifest.diagnostics?.length) {
+    console.error('Manifest diagnostics:');
+    for (const diagnostic of manifest.diagnostics) {
+      const loc = diagnostic.span?.line
+        ? `${diagnostic.span.line}:${diagnostic.span.column}: `
+        : '';
+      console.error(`  ${diagnostic.severity}: ${loc}${diagnostic.message}`);
+    }
+  }
 
   return options.compact
     ? JSON.stringify(manifest)

@@ -113,6 +113,23 @@ close(outbox)
 
 `go worker(...)` returns a manifest-visible spawn handle. `wait()` with no arguments waits for all spawned workers and returns their count; `wait(handle)` returns one worker's result; `wait(h1, h2)` waits for each handle and returns an array of results in argument order. Channels are also manifest-visible values, so JavaScript, Python, and Go fragments can consume the same channel when the manifest runner captures it into that runtime.
 
+## PolyScript Syntax Contract
+
+The platonic `.poly` model is: write normal donor-language syntax, let the compiler infer ownership, and use explicit syntax only where a boundary needs to become a manifest value.
+
+Core rules:
+
+| Rule | Contract |
+|------|----------|
+| Runtime ownership | Imports and syntax decide ownership. `os.scandir(...)` is Python; `items.map(x => x.id)` is JavaScript; `<-`, `make(...)`, `go`, and `wait(...)` are Go/manifest concurrency. |
+| Runtime tags | `@py(...)`, `@js(...)`, `@go(...)`, `@rb(...)`, and `@java(...)` are escape hatches, not normal style. Use them only when inference is ambiguous or a framework convention hides the runtime signal. |
+| Captures | Referencing a binding from another runtime emits an explicit manifest capture. The source code should not manually JSON encode/decode ordinary arrays, maps, strings, numbers, or booleans just to cross a runtime boundary. |
+| Serialization | JSON belongs in application semantics: HTTP bodies, persisted documents, APIs, or intentionally opaque payloads. It should not be required as glue between `.poly` statements. |
+| Channels | `const ch = make(size)` creates a manifest channel. `ch <- value`, `<-ch`, and `close(ch)` lower to channel ops. Non-Go runtimes receive channel captures as snapshots/adapters. |
+| Spawn handles | `const h = go worker(args)` binds a spawn handle. Prefer named handles plus `wait(h)` or `wait(h1, h2)` over bare fire-and-forget spawns when later code depends on worker completion. |
+| Worker shape | Long-term portable workers are named Go functions that return a value and use manifest helpers such as `recv("channel")` and `send("channel", value)`. Inline spawn closures may parse, but they are not the durable contract for OmniVM joins. |
+| Diagnostics | The compiler emits manifest diagnostics for likely runtime-boundary mistakes, including `wait(...)` on non-handles, channel operations on unknown/non-channel bindings, and spawn forms OmniVM cannot reliably join. |
+
 ## Runtime Resolver
 
 The runtime resolver determines which language owns each statement — fully automatically, with no annotations or pragmas required. It uses a two-pass analysis:
