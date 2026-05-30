@@ -242,6 +242,33 @@ describe("Example files: end-to-end pipeline", () => {
     });
   });
 
+  describe("Java ecosystem examples", () => {
+    const javaExamples = [
+      "java-gson-pandas-zod-express.poly",
+      "java-commons-csv-pydantic-go-batching.poly",
+      "java-jsoup-bs4-cheerio.poly",
+      "java-okhttp-httpx-go-retry.poly",
+    ];
+
+    for (const example of javaExamples) {
+      it(`${example} infers Java and JavaScript without runtime tags`, () => {
+        const { manifest, runtimes, code } = compile(path.join(examplesDir, example));
+
+        expect(code).not.toMatch(/@(java|js)\(/);
+        expect(runtimes).not.toContain("unknown");
+        expect(runtimes).toContain("java");
+        expect(manifest.ops.length).toBeGreaterThan(3);
+
+        const evalOps = manifest.ops.filter((o: any) => o.op === "eval" && o.code);
+        const javaOps = evalOps.filter((o: any) => o.runtime === "java");
+        expect(javaOps.length).toBeGreaterThan(0);
+        for (const op of evalOps) {
+          expect((op as any).code).not.toMatch(/@(java|js)\(/);
+        }
+      });
+    }
+  });
+
   describe("express-python-view.poly", () => {
     const { manifest, runtimes } = compile(
       path.join(examplesDir, "express-python-view.poly")

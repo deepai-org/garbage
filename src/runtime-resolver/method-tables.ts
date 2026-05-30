@@ -313,6 +313,76 @@ export const BUILTIN_AFFINITY: Record<string, OmniRuntime> = {
 };
 
 /**
+ * Package/global roots that are meaningful even when they are not imported.
+ *
+ * Java examples often use fully-qualified class names such as
+ * `java.util.List`, `org.jsoup.Jsoup`, or `new com.google.gson.Gson()`.
+ * Those roots should carry Java affinity before member propagation has a
+ * chance to fall back to the default runtime.
+ */
+export const GLOBAL_AFFINITY: Record<string, OmniRuntime> = {
+  // JavaScript constructor/object roots and host globals.
+  console: OmniRuntime.JavaScript,
+  Promise: OmniRuntime.JavaScript,
+  JSON: OmniRuntime.JavaScript,
+  Math: OmniRuntime.JavaScript,
+  Date: OmniRuntime.JavaScript,
+  RegExp: OmniRuntime.JavaScript,
+  Error: OmniRuntime.JavaScript,
+  Symbol: OmniRuntime.JavaScript,
+  Map: OmniRuntime.JavaScript,
+  Set: OmniRuntime.JavaScript,
+  WeakMap: OmniRuntime.JavaScript,
+  WeakSet: OmniRuntime.JavaScript,
+  Array: OmniRuntime.JavaScript,
+  Object: OmniRuntime.JavaScript,
+  Number: OmniRuntime.JavaScript,
+  String: OmniRuntime.JavaScript,
+  Boolean: OmniRuntime.JavaScript,
+  document: OmniRuntime.JavaScript,
+  window: OmniRuntime.JavaScript,
+  globalThis: OmniRuntime.JavaScript,
+  process: OmniRuntime.JavaScript,
+  Buffer: OmniRuntime.JavaScript,
+  module: OmniRuntime.JavaScript,
+  exports: OmniRuntime.JavaScript,
+
+  // Go package-like roots commonly used without an import in examples.
+  fmt: OmniRuntime.Go,
+
+  // Java package roots and common third-party package roots.
+  java: OmniRuntime.Java,
+  javax: OmniRuntime.Java,
+  jakarta: OmniRuntime.Java,
+  org: OmniRuntime.Java,
+  com: OmniRuntime.Java,
+  okhttp3: OmniRuntime.Java,
+
+  // Java classes commonly used as member roots.
+  System: OmniRuntime.Java,
+  Thread: OmniRuntime.Java,
+  Runnable: OmniRuntime.Java,
+  StringBuilder: OmniRuntime.Java,
+  ArrayList: OmniRuntime.Java,
+  HashMap: OmniRuntime.Java,
+  LinkedList: OmniRuntime.Java,
+  HashSet: OmniRuntime.Java,
+  TreeMap: OmniRuntime.Java,
+  Collections: OmniRuntime.Java,
+  Arrays: OmniRuntime.Java,
+  Optional: OmniRuntime.Java,
+  Stream: OmniRuntime.Java,
+  Collectors: OmniRuntime.Java,
+  Integer: OmniRuntime.Java,
+  Long: OmniRuntime.Java,
+  Double: OmniRuntime.Java,
+  Float: OmniRuntime.Java,
+  Byte: OmniRuntime.Java,
+  Character: OmniRuntime.Java,
+  Short: OmniRuntime.Java,
+};
+
+/**
  * Method names that are ambiguous across runtimes.
  * These should not be used as strong evidence alone.
  */
@@ -364,4 +434,11 @@ export function lookupMethodAffinity(methodName: string): OmniRuntime | undefine
  */
 export function lookupBuiltinAffinity(name: string): OmniRuntime | undefined {
   return BUILTIN_AFFINITY[name];
+}
+
+/**
+ * Look up a globally available runtime root.
+ */
+export function lookupGlobalAffinity(name: string): OmniRuntime | undefined {
+  return GLOBAL_AFFINITY[name];
 }

@@ -8,7 +8,7 @@ import {
 } from './types';
 import { SymbolTable } from './symbol-table';
 import { analyzeImportPath, analyzeBareImport } from './import-analyzer';
-import { lookupBuiltinAffinity } from './method-tables';
+import { lookupBuiltinAffinity, lookupGlobalAffinity } from './method-tables';
 
 /**
  * Pass 1: Top-down structural analysis.
@@ -386,12 +386,7 @@ export class Pass1Structural {
       }
     }
 
-    // Check for qualified calls like System.out.println
-    if (node.callee.kind === "Member") {
-      this.visitExpr(node.callee);
-    } else {
-      this.visitExpr(node.callee);
-    }
+    this.visitExpr(node.callee);
 
     for (const arg of node.args) {
       this.visitExpr(arg);
@@ -494,6 +489,12 @@ export class Pass1Structural {
         break;
       case "Member":
         this.visitExpr(expr.object);
+        this.visitMemberProperty(expr);
+
+        const memberAff = this.inferMemberAffinity(expr);
+        if (memberAff) {
+          this.assign(expr, memberAff.runtime, memberAff.confidence, ...memberAff.evidence);
+        }
         break;
       case "Index":
         this.visitExpr(expr.object);
@@ -544,6 +545,14 @@ export class Pass1Structural {
         const entry = this.symbolTable.lookup(expr.name);
         if (entry) {
           this.assign(expr, entry.affinity.runtime, entry.affinity.confidence, ...entry.affinity.evidence);
+        } else {
+          const globalRuntime = lookupGlobalAffinity(expr.name);
+          if (globalRuntime) {
+            this.assign(expr, globalRuntime, "inferred", {
+              type: "builtin",
+              detail: `global: ${expr.name}`,
+            });
+          }
         }
         break;
       case "SetLiteral":
@@ -572,6 +581,47 @@ export class Pass1Structural {
         this.visitExpr(child.expression);
       }
     }
+  }
+
+  private visitMemberProperty(expr: AST.Member): void {
+    const property = expr.property as unknown;
+    if (property && typeof property === "object" && "kind" in property && property.kind !== "Identifier") {
+      this.visitExpr(property as AST.Expr);
+    }
+  }
+
+  private inferMemberAffinity(expr: AST.Member): RuntimeAffinity | undefined {
+    const objectAff = this.getAffinity(expr.object);
+    const property = expr.property as unknown;
+    const propertyAff = property && typeof property === "object" && "kind" in property && property.kind !== "Identifier"
+      ? this.getAffinity(property as AST.Expr)
+      : undefined;
+
+    if (expr.object.kind === "Identifier" && expr.object.name === "new" &&
+        propertyAff && propertyAff.runtime === OmniRuntime.Java &&
+        propertyAff.confidence !== "fallback") {
+      return {
+        runtime: OmniRuntime.Java,
+        confidence: propertyAff.confidence,
+        evidence: [
+          { type: "syntax", detail: "Java qualified constructor" },
+          ...propertyAff.evidence,
+        ],
+      };
+    }
+
+    if (objectAff && objectAff.confidence !== "fallback") {
+      return {
+        runtime: objectAff.runtime,
+        confidence: objectAff.confidence,
+        evidence: [
+          { type: "scope", detail: `member root: ${objectAff.runtime}` },
+          ...objectAff.evidence,
+        ],
+      };
+    }
+
+    return propertyAff && propertyAff.confidence !== "fallback" ? propertyAff : undefined;
   }
 
   // --- Helpers ---

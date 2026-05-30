@@ -8,7 +8,7 @@ import {
   AnnotatedNode,
 } from './types';
 import { SymbolTable } from './symbol-table';
-import { lookupMethodAffinity } from './method-tables';
+import { lookupGlobalAffinity, lookupMethodAffinity } from './method-tables';
 import { computeBridgeCost } from './cost-model';
 
 /**
@@ -306,8 +306,15 @@ export class Pass2Propagation {
 
     // If callee has a known affinity, the call inherits it
     const existing = this.affinityMap.get(node);
-    if (!existing || existing.confidence === "fallback") {
-      this.ensureAffinity(node, calleeAff);
+    if (calleeAff.confidence !== "fallback" && (!existing || existing.confidence === "fallback" ||
+        (existing.confidence === "inferred" && existing.evidence[0]?.type === "scope"))) {
+      this.affinityMap.set(node, {
+        ...calleeAff,
+        evidence: [
+          { type: "scope", detail: `inherited from callee: ${calleeAff.runtime}` },
+          ...calleeAff.evidence,
+        ],
+      });
     }
 
     // --- Syntactic Dominance Rule ---
@@ -364,11 +371,27 @@ export class Pass2Propagation {
 
   private propagateMember(node: AST.Member): RuntimeAffinity {
     const objAff = this.propagateExpr(node.object);
+    const propertyAff = this.propagateMemberProperty(node);
 
     // Look up method name for runtime affinity evidence
-    const methodRuntime = lookupMethodAffinity(node.property.name);
+    const methodName = this.getMemberPropertyName(node);
+    const methodRuntime = methodName ? lookupMethodAffinity(methodName) : undefined;
 
     const existing = this.affinityMap.get(node);
+
+    if (node.object.kind === "Identifier" && node.object.name === "new" &&
+        propertyAff && propertyAff.runtime === OmniRuntime.Java &&
+        propertyAff.confidence !== "fallback") {
+      this.affinityMap.set(node, {
+        runtime: OmniRuntime.Java,
+        confidence: propertyAff.confidence,
+        evidence: [
+          { type: "syntax", detail: "Java qualified constructor" },
+          ...propertyAff.evidence,
+        ],
+      });
+      return this.getOrDefault(node);
+    }
 
     // Key rule: object provenance beats method name tables.
     // If `files` came from `os.listdir()` (Python), then `files.map()` should
@@ -395,10 +418,14 @@ export class Pass2Propagation {
         runtime: methodRuntime,
         confidence: "inferred",
         evidence: [
-          { type: "method", detail: `.${node.property.name}()` },
+          { type: "method", detail: `.${methodName}()` },
           ...objAff.evidence,
         ],
       });
+    } else if (propertyAff && propertyAff.confidence !== "fallback" &&
+        (!existing || existing.confidence === "fallback" ||
+        (existing.confidence === "inferred" && existing.evidence[0]?.type === "scope"))) {
+      this.affinityMap.set(node, { ...propertyAff });
     } else if (!existing) {
       // Inherit from object
       this.ensureAffinity(node, objAff);
@@ -560,8 +587,34 @@ export class Pass2Propagation {
         (!existing || existing.confidence === "fallback" ||
         (existing.confidence === "inferred" && existing.evidence[0]?.type === "scope"))) {
       this.affinityMap.set(node, { ...symbol.affinity });
+    } else if (!symbol) {
+      const globalRuntime = lookupGlobalAffinity(node.name);
+      if (globalRuntime && (!existing || existing.confidence === "fallback" ||
+          (existing.confidence === "inferred" && existing.evidence[0]?.type === "scope"))) {
+        this.affinityMap.set(node, {
+          runtime: globalRuntime,
+          confidence: "inferred",
+          evidence: [{ type: "builtin", detail: `global: ${node.name}` }],
+        });
+      }
     }
     return this.getOrDefault(node);
+  }
+
+  private propagateMemberProperty(node: AST.Member): RuntimeAffinity | undefined {
+    const property = node.property as unknown;
+    if (property && typeof property === "object" && "kind" in property && property.kind !== "Identifier") {
+      return this.propagateExpr(property as AST.Expr);
+    }
+    return undefined;
+  }
+
+  private getMemberPropertyName(node: AST.Member): string | undefined {
+    const property = node.property as unknown;
+    if (property && typeof property === "object" && "kind" in property && property.kind === "Identifier") {
+      return (property as AST.Identifier).name;
+    }
+    return undefined;
   }
 
   private defineDeclaredNames(

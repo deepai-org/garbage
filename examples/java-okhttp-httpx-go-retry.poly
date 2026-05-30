@@ -21,8 +21,8 @@ func retry_backoff(attempts) {
   return 75
 }
 
-const okhttp_host = @java(new okhttp3.Request.Builder().url("https://api.example.test/v1/items?b=2&a=1").build().url().host())
-const okhttp_path = @java(new okhttp3.Request.Builder().url("https://api.example.test/v1/items?b=2&a=1").build().url().encodedPath())
+const okhttp_host = new okhttp3.Request.Builder().url("https://api.example.test/v1/items?b=2&a=1").build().url().host()
+const okhttp_path = new okhttp3.Request.Builder().url("https://api.example.test/v1/items?b=2&a=1").build().url().encodedPath()
 status = httpx.Response(200).status_code
 const w1 = go retry_worker(1)
 const w2 = go retry_worker(2)
@@ -31,7 +31,7 @@ retry_in <- 503
 close(retry_in)
 const workers = wait(w1, w2)
 close(retry_out)
-const attempts = @js(Array.from(retry_out))
+const attempts = Array.from(retry_out)
 const backoff = retry_backoff(2)
 
 print(f"Java/OkHttp/HTTPX/Go host={okhttp_host} path={okhttp_path} attempts={len(attempts)} workers={len(workers)} backoff={backoff}ms")

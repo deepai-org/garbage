@@ -2,7 +2,7 @@ import { Lexer } from '../src/lexer';
 import { Parser } from '../src/parser';
 import * as AST from '../src/ast';
 import { RuntimeResolver, OmniRuntime, RuntimeAffinity, MarshalKind } from '../src/runtime-resolver';
-import { lookupMethodAffinity, lookupBuiltinAffinity } from '../src/runtime-resolver/method-tables';
+import { lookupMethodAffinity, lookupBuiltinAffinity, lookupGlobalAffinity } from '../src/runtime-resolver/method-tables';
 import { analyzeImportPath, analyzeBareImport } from '../src/runtime-resolver/import-analyzer';
 import { SymbolTable } from '../src/runtime-resolver/symbol-table';
 import { computeBridgeCost, majorityRuntime, totalBridgeCost } from '../src/runtime-resolver/cost-model';
@@ -207,6 +207,24 @@ describe('Builtin Tables', () => {
 
   test('System maps to Java', () => {
     expect(lookupBuiltinAffinity('System')).toBe(OmniRuntime.Java);
+  });
+
+  test('Java package roots map to Java globals', () => {
+    expect(lookupGlobalAffinity('java')).toBe(OmniRuntime.Java);
+    expect(lookupGlobalAffinity('org')).toBe(OmniRuntime.Java);
+    expect(lookupGlobalAffinity('com')).toBe(OmniRuntime.Java);
+    expect(lookupGlobalAffinity('okhttp3')).toBe(OmniRuntime.Java);
+  });
+
+  test('JavaScript globals map to JavaScript globals', () => {
+    expect(lookupGlobalAffinity('Array')).toBe(OmniRuntime.JavaScript);
+    expect(lookupGlobalAffinity('JSON')).toBe(OmniRuntime.JavaScript);
+  });
+
+  test('call-only builtins are not global roots', () => {
+    expect(lookupGlobalAffinity('list')).toBeUndefined();
+    expect(lookupGlobalAffinity('len')).toBeUndefined();
+    expect(lookupGlobalAffinity('new')).toBeUndefined();
   });
 });
 
@@ -584,6 +602,49 @@ describe('Import-to-Usage Propagation', () => {
     for (const [node, aff] of result.affinityMap) {
       if (node.kind === 'Call') {
         expect(aff.runtime).toBe(OmniRuntime.JavaScript);
+      }
+    }
+  });
+});
+
+// --- Global Root Propagation ---
+
+describe('Global Root Propagation', () => {
+  test('Java package member chains resolve to Java without tags', () => {
+    const result = resolve('const n = org.jsoup.Jsoup.parse("<a>x</a>").select("a").size()');
+    const decl = result.program.body[0] as AST.ConstDecl;
+    const aff = result.affinityMap.get(decl);
+
+    expect(aff?.runtime).toBe(OmniRuntime.Java);
+    for (const [node, nodeAff] of result.affinityMap) {
+      if (node.kind === 'Call') {
+        expect(nodeAff.runtime).toBe(OmniRuntime.Java);
+      }
+    }
+  });
+
+  test('qualified Java constructors resolve to Java without tags', () => {
+    const result = resolve('const json = new com.google.gson.Gson().toJson(java.util.List.of(1))');
+    const decl = result.program.body[0] as AST.ConstDecl;
+    const aff = result.affinityMap.get(decl);
+
+    expect(aff?.runtime).toBe(OmniRuntime.Java);
+    const callRuntimes = [...result.affinityMap]
+      .filter(([node]) => node.kind === 'Call')
+      .map(([, nodeAff]) => nodeAff.runtime);
+    expect(callRuntimes).toContain(OmniRuntime.Java);
+    expect(callRuntimes).not.toContain(OmniRuntime.Go);
+  });
+
+  test('JavaScript global callee dominates fallback arguments', () => {
+    const result = resolve('const attempts = Array.from(retry_out)');
+    const decl = result.program.body[0] as AST.ConstDecl;
+    const aff = result.affinityMap.get(decl);
+
+    expect(aff?.runtime).toBe(OmniRuntime.JavaScript);
+    for (const [node, nodeAff] of result.affinityMap) {
+      if (node.kind === 'Call') {
+        expect(nodeAff.runtime).toBe(OmniRuntime.JavaScript);
       }
     }
   });

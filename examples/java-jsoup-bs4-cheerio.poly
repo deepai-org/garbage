@@ -2,7 +2,7 @@ from bs4 import BeautifulSoup
 import cheerio from "cheerio"
 
 const html_doc = "<html><head><title>Poly Feed</title></head><body><a href='/a'>Alpha</a><a href='/b'>Beta</a></body></html>"
-const java_links = @java(org.jsoup.Jsoup.parse("<html><head><title>Poly Feed</title></head><body><a href='/a'>Alpha</a><a href='/b'>Beta</a></body></html>").select("a").size())
+const java_links = org.jsoup.Jsoup.parse("<html><head><title>Poly Feed</title></head><body><a href='/a'>Alpha</a><a href='/b'>Beta</a></body></html>").select("a").size()
 const soup = BeautifulSoup(html_doc, "html.parser")
 const py_links = [a.get_text() for a in soup.select("a")]
 const dom = cheerio.load(html_doc)
