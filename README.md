@@ -386,6 +386,8 @@ examples/                 # Polyglot example files
 
 See [`examples/`](examples/) for complete polyglot programs. All runtimes are **autodetected** — the comments in the files are just for human readers.
 
+The sibling OmniVM repo documents how these examples map onto CPython-hosted `libomnivm` and prefork deployments in `docs/example-suite.md` and `docs/passenger-django-polyscript.md`.
+
 - **cursed-polyglot.poly** — Python/JS pipeline that ping-pongs between runtimes every single line
 - **cursed-concurrency.poly** — Python generators + Go channels/spawn handles + JS async all talking to each other
 - **django-go-typescript-views.poly** — Django-style views using Go and TypeScript without annotation pragmas
