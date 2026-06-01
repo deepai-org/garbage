@@ -4,7 +4,6 @@
 
 import os
 import re
-import json
 
 // [python] seed data from a Python-owned source
 const entries = os.listdir("/var/data")
@@ -24,8 +23,8 @@ const ordered = sorted(unique)
 // [js] arrow/object mapping returns records
 const records = ordered.map((name, index) => ({name: name, rank: index}))
 
-// [python] json.dumps serializes the wire payload
-const wire = json.dumps(records)
+// [python] list comprehension crosses the JS record array without manual serialization
+const wire = [row.name for row in records]
 
 // [python] len is a Python builtin
 const survived = len(ordered)

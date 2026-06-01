@@ -46,24 +46,23 @@ describe("Example files: end-to-end pipeline", () => {
     it("starts with python imports", () => {
       expect(runtimes[0]).toBe("python");
       expect(runtimes[1]).toBe("python");
-      expect(runtimes[2]).toBe("python");
     });
 
     it("ping-pongs between python and javascript", () => {
       // entries=py, stems=js, matched=py, unique=js, ordered=py, records=js, wire=py
-      expect(runtimes[3]).toBe("python"); // entries
-      expect(runtimes[4]).toBe("javascript"); // stems (arrow)
-      expect(runtimes[5]).toBe("python"); // matched (list comp)
-      expect(runtimes[6]).toBe("javascript"); // unique (arrow + ===)
-      expect(runtimes[7]).toBe("python"); // ordered (sorted)
-      expect(runtimes[8]).toBe("javascript"); // records (arrow)
-      expect(runtimes[9]).toBe("python"); // wire (json.dumps)
-      expect(runtimes[10]).toBe("python"); // survived (len)
-      expect(runtimes[11]).toBe("javascript"); // status (arrow + template)
+      expect(runtimes[2]).toBe("python"); // entries
+      expect(runtimes[3]).toBe("javascript"); // stems (arrow)
+      expect(runtimes[4]).toBe("python"); // matched (list comp)
+      expect(runtimes[5]).toBe("javascript"); // unique (arrow + ===)
+      expect(runtimes[6]).toBe("python"); // ordered (sorted)
+      expect(runtimes[7]).toBe("javascript"); // records (arrow)
+      expect(runtimes[8]).toBe("python"); // wire (list comp over JS records)
+      expect(runtimes[9]).toBe("python"); // survived (len)
+      expect(runtimes[10]).toBe("javascript"); // status (arrow + template)
     });
 
     it("detects f-string print as python", () => {
-      expect(runtimes[12]).toBe("python"); // print(f"Pipeline complete...")
+      expect(runtimes[11]).toBe("python"); // print(f"Pipeline complete...")
     });
 
     it("manifest ops have valid code strings", () => {
@@ -177,19 +176,19 @@ describe("Example files: end-to-end pipeline", () => {
     });
 
     it("arrows override python provenance", () => {
-      expect(runtimes[2]).toBe("python"); // files = os.listdir
-      expect(runtimes[3]).toBe("javascript"); // loud = files.map(f => ...)
-      expect(runtimes[4]).toBe("javascript"); // valid = loud.filter(f => f !== ...)
+      expect(runtimes[1]).toBe("python"); // files = os.listdir
+      expect(runtimes[2]).toBe("javascript"); // loud = files.map(f => ...)
+      expect(runtimes[3]).toBe("javascript"); // valid = loud.filter(f => f !== ...)
     });
 
     it("python builtins stay python", () => {
-      expect(runtimes[5]).toBe("python"); // count = len(valid)
-      expect(runtimes[7]).toBe("python"); // ordered = sorted(logs)
-      expect(runtimes[8]).toBe("python"); // payload = json.dumps(ordered)
+      expect(runtimes[4]).toBe("python"); // count = len(valid)
+      expect(runtimes[6]).toBe("python"); // ordered = sorted(logs)
+      expect(runtimes[7]).toBe("python"); // payload = list(ordered)
     });
 
     it("regex literal signals javascript", () => {
-      expect(runtimes[6]).toBe("javascript"); // logs with /\.log$/i
+      expect(runtimes[5]).toBe("javascript"); // logs with /\.log$/i
     });
 
     it("produces valid manifest", () => {
