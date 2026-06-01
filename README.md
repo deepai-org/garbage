@@ -401,6 +401,11 @@ See [`examples/`](examples/) for complete polyglot programs. All runtimes are **
 - **go-http-cobra-observability.poly** — Go net/http, database/sql, Cobra, zap, and slog shapes in one handler/CLI flow
 - **request-analytics-ecosystem.poly** — Django request objects, Express routing, Zod validation, Java OkHttp requests, and Pandas/NumPy/Polars analytics
 - **orm-model-client-flow.poly** — SQLAlchemy metadata/query values, Prisma-shaped lookups, Zod model validation, Pandas rows, and Java HTTP client objects
+- **python-docs-popular-packages.poly** — Docs-style Pandas, NumPy, Pydantic, Jinja2, and BeautifulSoup usage that runs unchanged through OmniVM manifests
+- **javascript-docs-popular-packages.poly** — Docs-style Express, Zod, Lodash, Cheerio, and Marked usage
+- **java-docs-popular-packages.poly** — Docs-style Gson, jsoup, OkHttp, and Apache Commons CSV usage
+- **ruby-docs-popular-packages.poly** — Docs-style Nokogiri and Rack usage
+- **go-docs-popular-packages.poly** — Docs-style Go `net/http` and `encoding/json` usage
 - **true-async-stream-boundary.poly** — HTTPX async streams crossing into RxJS and Go workers through an explicit stream/materialization boundary
 - **live-middleware-opaque-handles.poly** — FastAPI, Express, Rack, and Go HTTP handler shapes where request/response objects stay opaque
 - **database-transaction-resource-boundary.poly** — SQLAlchemy, Prisma, ActiveRecord, and JDBC transaction/resource boundaries with materialized rows

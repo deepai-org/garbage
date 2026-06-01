@@ -307,6 +307,26 @@ describe("Example files: end-to-end pipeline", () => {
         file: "orm-model-client-flow.poly",
         runtimes: ["python", "javascript", "java"],
       },
+      {
+        file: "python-docs-popular-packages.poly",
+        runtimes: ["python"],
+      },
+      {
+        file: "javascript-docs-popular-packages.poly",
+        runtimes: ["javascript"],
+      },
+      {
+        file: "java-docs-popular-packages.poly",
+        runtimes: ["java", "python"],
+      },
+      {
+        file: "ruby-docs-popular-packages.poly",
+        runtimes: ["ruby", "python"],
+      },
+      {
+        file: "go-docs-popular-packages.poly",
+        runtimes: ["go", "python"],
+      },
     ];
 
     for (const { file, runtimes: expectedRuntimes } of edgeExamples) {

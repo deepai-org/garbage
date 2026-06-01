@@ -712,6 +712,21 @@ describe('Go Runtime Restrictions', () => {
     expect(funcOp.exports).toEqual(['ProcessData']);
   });
 
+  test('Go func import inference includes docs-style net/http and encoding/json usage', () => {
+    const code = [
+      'func docs_request() {',
+      '  req, _ := http.NewRequest("GET", "https://example.com/docs", nil)',
+      '  payload, _ := json.Marshal(map[string]string{"method": req.Method, "path": req.URL.Path})',
+      '  return string(payload)',
+      '}',
+    ].join('\n');
+    const m = parseAndManifest(code);
+    const funcOp = m.ops.find(op => op.op === 'func_def') as any;
+
+    expect(funcOp.source).toContain('"encoding/json"');
+    expect(funcOp.source).toContain('"net/http"');
+  });
+
   test('Go func snake_case name converts to PascalCase export', () => {
     const code = 'func my_long_name() {\n  return 1\n}';
     const m = parseAndManifest(code);

@@ -2789,6 +2789,7 @@ export class ManifestCodeGenerator {
       [/\bbase64\./, "encoding/base64"],
       [/\bjson\./, "encoding/json"],
       [/\bfmt\./, "fmt"],
+      [/\bhttp\./, "net/http"],
       [/\bstrings\./, "strings"],
       [/\btime\./, "time"],
     ];
