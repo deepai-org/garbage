@@ -27,6 +27,7 @@ function compile(filePath: string) {
 }
 
 const examplesDir = path.join(__dirname, "..", "examples");
+const runtimeContractsDir = path.join(__dirname, "fixtures", "runtime-contracts");
 
 describe("Example files: end-to-end pipeline", () => {
   describe("cursed-polyglot.poly", () => {
@@ -298,6 +299,14 @@ describe("Example files: end-to-end pipeline", () => {
         file: "go-http-cobra-observability.poly",
         runtimes: ["go"],
       },
+      {
+        file: "request-analytics-ecosystem.poly",
+        runtimes: ["python", "javascript", "java"],
+      },
+      {
+        file: "orm-model-client-flow.poly",
+        runtimes: ["python", "javascript", "java"],
+      },
     ];
 
     for (const { file, runtimes: expectedRuntimes } of edgeExamples) {
@@ -396,14 +405,6 @@ describe("Example files: end-to-end pipeline", () => {
         file: "typed-validation-error-fidelity.poly",
         runtimes: ["python", "javascript", "ruby", "java"],
       },
-      {
-        file: "runnable-resource-job-boundary.poly",
-        runtimes: ["python", "javascript", "ruby"],
-      },
-      {
-        file: "runnable-zero-copy-table-boundary.poly",
-        runtimes: ["python", "javascript"],
-      },
     ];
 
     for (const { file, runtimes: expectedRuntimes } of hardExamples) {
@@ -433,7 +434,7 @@ describe("Example files: end-to-end pipeline", () => {
     });
 
     it("lowers runnable resource/job example to first-class manifest ops", () => {
-      const { manifest } = compile(path.join(examplesDir, "runnable-resource-job-boundary.poly"));
+      const { manifest } = compile(path.join(runtimeContractsDir, "runnable-resource-job-boundary.poly"));
       const resources = manifest.ops.filter((o: any) => o.op === "resource") as any[];
       const jobs = manifest.ops.filter((o: any) => o.op === "job") as any[];
 
@@ -444,7 +445,7 @@ describe("Example files: end-to-end pipeline", () => {
     });
 
     it("lowers runnable zero-copy table example to table handle ops", () => {
-      const { manifest } = compile(path.join(examplesDir, "runnable-zero-copy-table-boundary.poly"));
+      const { manifest } = compile(path.join(runtimeContractsDir, "runnable-zero-copy-table-boundary.poly"));
       const tables = manifest.ops.filter((o: any) => o.op === "table") as any[];
 
       expect(tables.map((o: any) => o.action)).toEqual(["export"]);
@@ -465,7 +466,7 @@ describe("Example files: end-to-end pipeline", () => {
         "runnable-resource-job-boundary",
         "runnable-zero-copy-table-boundary",
       ]) {
-        const { manifest } = compile(path.join(examplesDir, `${name}.poly`));
+        const { manifest } = compile(path.join(runtimeContractsDir, `${name}.poly`));
         const fixturePath = path.join(__dirname, "fixtures", `${name}.manifest.json`);
         const expected = JSON.parse(fs.readFileSync(fixturePath, "utf8"));
         expect(manifest).toEqual(expected);

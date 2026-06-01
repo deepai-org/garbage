@@ -31,8 +31,9 @@ print(f"Found {len(filtered)} log files")
 
 ```bash
 npm install
-npm test          # Run all 1075+ tests
+npm test          # Run all tests
 npm run build     # Compile TypeScript
+node scripts/audit-manifests.js
 ```
 
 ### Compile a .poly File
@@ -52,6 +53,21 @@ docker run --rm \
   --entrypoint manifest-runner omnivm \
   /tmp/cursed-concurrency.json
 ```
+
+For the current cross-repo smoke, keep `garbage` and `omnivm` as sibling
+checkouts and run the CPython-hosted `libomnivm` path from the OmniVM repo:
+
+```bash
+cd ../omnivm
+make test-poly-libomnivm-smoke
+make test-libomnivm-manifests
+make test-libomnivm-stress
+```
+
+Set `GARBAGE_DIR=/path/to/garbage` if the repos are not siblings. This is the
+same coverage path the README expects CI to mirror: compile selected `.poly`
+examples, execute the generated manifests under Python-hosted `libomnivm`, then
+run the checked-in manifest and stress suites.
 
 ### As a Library
 
@@ -383,6 +399,8 @@ See [`examples/`](examples/) for complete polyglot programs. All runtimes are **
 - **framework-middleware-render.poly** — FastAPI-style handlers, Express middleware, React server rendering, and Rack responses
 - **java-futures-jdbc-streaming.poly** — Java CompletableFuture, JDBC, OkHttp, and Jackson values analyzed by Python
 - **go-http-cobra-observability.poly** — Go net/http, database/sql, Cobra, zap, and slog shapes in one handler/CLI flow
+- **request-analytics-ecosystem.poly** — Django request objects, Express routing, Zod validation, Java OkHttp requests, and Pandas/NumPy/Polars analytics
+- **orm-model-client-flow.poly** — SQLAlchemy metadata/query values, Prisma-shaped lookups, Zod model validation, Pandas rows, and Java HTTP client objects
 - **true-async-stream-boundary.poly** — HTTPX async streams crossing into RxJS and Go workers through an explicit stream/materialization boundary
 - **live-middleware-opaque-handles.poly** — FastAPI, Express, Rack, and Go HTTP handler shapes where request/response objects stay opaque
 - **database-transaction-resource-boundary.poly** — SQLAlchemy, Prisma, ActiveRecord, and JDBC transaction/resource boundaries with materialized rows
@@ -392,6 +410,11 @@ See [`examples/`](examples/) for complete polyglot programs. All runtimes are **
 - **template-component-rendering-boundary.poly** — Jinja2, React SSR, Rack, and Spring-style model rendering where only HTML crosses
 - **typed-validation-error-fidelity.poly** — Pydantic, Zod, dry-validation, and Java Bean Validation structured error paths
 - **syntactic-dominance.poly** — Demonstrates how arrow functions override import provenance
+
+Low-level runtime-contract fixtures that intentionally exercise explicit
+manifest primitives live under `test/fixtures/runtime-contracts/`, not top-level
+examples. Those are regression tests for `resource`, `job`, and `table` ops;
+they are not the intended shape of user-authored `.poly`.
 
 ## License
 
