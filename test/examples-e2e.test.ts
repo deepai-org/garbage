@@ -93,16 +93,17 @@ describe("Example files: end-to-end pipeline", () => {
       expect(runtimes).not.toContain("unknown");
     });
 
-    it("assigns python to imports and crawl", () => {
+    it("assigns python to imports and discovery", () => {
       expect(runtimes[0]).toBe("python"); // import os
-      expect(runtimes[3]).toBe("python"); // def crawl
+      expect(runtimes[3]).toBe("python"); // discovered list comprehension
+      expect((manifest.ops[3] as any).bind).toBe("discovered");
     });
 
     it("assigns go to channels and workers", () => {
       expect(runtimes[1]).toBe("go"); // inbox = make(16)
       expect(runtimes[2]).toBe("go"); // outbox = make(16)
       expect(runtimes[5]).toBe("go"); // func worker
-      expect(runtimes[6]).toBe("go"); // w1 = go worker(1)
+      expect(runtimes[8]).toBe("go"); // w1 = go worker(1)
     });
 
     it("assigns javascript to process function", () => {
@@ -110,7 +111,7 @@ describe("Example files: end-to-end pipeline", () => {
     });
 
     it("assigns go to close() and channel sends", () => {
-      expect(runtimes[11]).toBe("go"); // close(inbox)
+      expect(runtimes[7]).toBe("go"); // close(inbox)
       expect(runtimes[12]).toBe("go"); // joined = wait(w1, w2, w3, w4)
       expect(runtimes[14]).toBe("go"); // close(outbox)
       expect(runtimes[22]).toBe("go"); // const done = make(1)
@@ -150,10 +151,9 @@ describe("Example files: end-to-end pipeline", () => {
 
     it("emits func_def with correct bodyRuntime", () => {
       const funcs = manifest.ops.filter((o: any) => o.op === "func_def");
-      const crawl = funcs.find((o: any) => o.name === "crawl");
       const process = funcs.find((o: any) => o.name === "process");
       const worker = funcs.find((o: any) => o.name === "worker");
-      expect((crawl as any)?.bodyRuntime).toBe("python");
+      expect(funcs.map((o: any) => o.name)).toEqual(["process", "worker"]);
       expect((process as any)?.bodyRuntime).toBe("javascript");
       expect((worker as any)?.bodyRuntime).toBe("go");
     });
@@ -325,6 +325,26 @@ describe("Example files: end-to-end pipeline", () => {
       },
       {
         file: "go-docs-popular-packages.poly",
+        runtimes: ["go", "python"],
+      },
+      {
+        file: "python-fastapi-sqlalchemy-polars-docs.poly",
+        runtimes: ["python"],
+      },
+      {
+        file: "javascript-react-jsx-docs.poly",
+        runtimes: ["javascript"],
+      },
+      {
+        file: "java-jackson-reactor-docs.poly",
+        runtimes: ["java", "python"],
+      },
+      {
+        file: "ruby-activerecord-docs.poly",
+        runtimes: ["ruby", "python"],
+      },
+      {
+        file: "go-http-handler-docs.poly",
         runtimes: ["go", "python"],
       },
     ];
