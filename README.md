@@ -59,6 +59,7 @@ checkouts and run the CPython-hosted `libomnivm` path from the OmniVM repo:
 
 ```bash
 cd ../omnivm
+make test-all
 make test-poly-libomnivm-smoke
 make test-libomnivm-manifests
 make test-libomnivm-stress
@@ -67,7 +68,11 @@ make test-libomnivm-stress
 Set `GARBAGE_DIR=/path/to/garbage` if the repos are not siblings. This is the
 same coverage path the README expects CI to mirror: compile selected `.poly`
 examples, execute the generated manifests under Python-hosted `libomnivm`, then
-run the checked-in manifest and stress suites.
+run the checked-in manifest and stress suites. The current milestone is that
+CPython-hosted `libomnivm` runs the example suite with Python as the parent
+process, including Passenger/Django `.poly` imports, Go selector constants,
+Go `main()` entrypoints, nested complex return proxies, and zero JSON fallback
+counts for cached primitive movement.
 
 ### As a Library
 
