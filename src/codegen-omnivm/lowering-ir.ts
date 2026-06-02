@@ -20,6 +20,24 @@ export interface NativeDependency {
   argc: number;
 }
 
+export interface LoweredGoParam {
+  name: string;
+  type: string;
+}
+
+export interface LoweredGoFuncArtifact {
+  exportName: string;
+  params: LoweredGoParam[];
+  returnType: string;
+  signature: string;
+  bodyLines: string[];
+  imports: string[];
+  helperSources: string[];
+  dependencies: NativeDependency[];
+  varDecls: string[];
+  source: string;
+}
+
 export interface LoweredBase {
   id: number;
   runtime: OmniRuntime;
@@ -44,6 +62,7 @@ export interface LoweredDefineFunc extends LoweredBase {
   params: string[];
   bodyRuntime: OmniRuntime;
   dependencies?: NativeDependency[];
+  go?: LoweredGoFuncArtifact;
 }
 
 export interface LoweredCallRuntimeFunc extends LoweredBase {

@@ -44,6 +44,33 @@ const xs = Array.from(inbox)
     const ir = lower('import os\nconst files = os.listdir("/tmp")\nconst count = Array.from(files)');
     expect(ir.nodes.map(n => n.kind)).toContain('BridgeValue');
   });
+
+  test('carries Go function source assembly as typed lowering artifact', () => {
+    const ir = lower(`
+func helper(value int) int {
+  return value + 1
+}
+
+func main() {
+  result := helper(http.StatusAccepted)
+  println(fmt.Sprintf("%d", result))
+}
+`);
+
+    const main = ir.nodes.find((n: any) => n.kind === 'DefineFunc' && n.name === 'main') as any;
+    expect(main?.go).toBeDefined();
+    expect(main.go.exportName).toBe('Main');
+    expect(main.go.signature).toBe('func Main()');
+    expect(main.go.imports).toEqual(['fmt', 'net/http']);
+    expect(main.go.helperSources.join('\n')).toContain('func helper(value int) int');
+    expect(main.go.bodyLines).toEqual([
+      'result := helper(http.StatusAccepted)',
+      'println(fmt.Sprintf("%d", result))',
+    ]);
+    expect(main.go.source).toContain('package polyfunc');
+    expect(main.go.source).toContain('func Main() {');
+    expect(main.go.dependencies).toEqual([]);
+  });
 });
 
 describe('Runtime Evidence Facts', () => {

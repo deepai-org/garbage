@@ -2781,6 +2781,20 @@ export class ManifestCodeGenerator {
       ...(p.spread ? { spread: true } : {}),
     }));
 
+    const lowered = this.loweredDefineFuncFor(node);
+    if (lowered?.go) {
+      return [{
+        op: "func_def",
+        name,
+        params,
+        body: [],
+        bodyRuntime: OmniRuntime.Go,
+        source: lowered.go.source,
+        exports: [lowered.go.exportName],
+        ...(lowered.go.dependencies.length > 0 ? { requires: lowered.go.dependencies.map(dep => dep.name) } : {}),
+      }];
+    }
+
     // Reconstruct Go function signature with proper types
     const goParams = node.params.map(p => {
       const pName = p.name.kind === "Identifier" ? p.name.name : "_";
