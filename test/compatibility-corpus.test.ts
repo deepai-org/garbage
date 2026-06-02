@@ -62,9 +62,11 @@ describe("unchanged source compatibility corpus", () => {
 
     const main = manifest.ops.find((op: any) => op.op === "func_def" && op.name === "main") as any;
     expect(main?.bodyRuntime).toBe("go");
+    expect(main?.source).toContain("func statusLabel(code int) string");
     expect(main?.source).toContain("func Main() {");
     expect(main?.source).not.toContain("func Main() interface{}");
-    expect(main?.requires).toContain("statusLabel");
+    expect(main?.source).not.toContain("var statusLabel");
+    expect(main?.requires ?? []).not.toContain("statusLabel");
     const mainCall = manifest.ops.find((op: any) => op.op === "eval" && op.func === "main") as any;
     expect(mainCall).toMatchObject({ op: "eval", runtime: "go", func: "main", args: [] });
 

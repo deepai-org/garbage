@@ -97,6 +97,8 @@ export class ManifestCodeGenerator {
   private loweredIR?: LoweredManifestIR;
   /** Lowered nodes indexed by their source AST node for incremental IR-backed emission. */
   private loweredNodesBySource: Map<AST.Program | AST.Decl | AST.Stmt | AST.Expr, LoweredManifestNode[]> = new Map();
+  /** Go functions declared in the current source file, used to keep main() self-contained. */
+  private goFuncDecls: Map<string, AST.FuncDecl> = new Map();
 
   /**
    * Generate a dispatch manifest from an annotated program.
@@ -117,6 +119,7 @@ export class ManifestCodeGenerator {
     this.typedBindingRuntimeHints = new Map();
     this.explicitBridgeOps = [];
     this.usingCounter = 0;
+    this.goFuncDecls = this.indexGoFuncDecls(annotated.program.body);
     this.loweredIR = lowerAnnotatedProgram(annotated);
     this.loweredNodesBySource = this.indexLoweredNodes(this.loweredIR);
 
@@ -1530,6 +1533,19 @@ export class ManifestCodeGenerator {
     } as EvalOp);
   }
 
+  private indexGoFuncDecls(nodes: Array<AST.Decl | AST.Stmt>): Map<string, AST.FuncDecl> {
+    const funcs = new Map<string, AST.FuncDecl>();
+    for (const node of nodes) {
+      if (node.kind !== "FuncDecl") continue;
+      const aff = this.affinityMap.get(node);
+      const runtime = aff?.runtime || this.defaultRuntime;
+      if (runtime === OmniRuntime.Go || node.declKeyword === "func") {
+        funcs.set(node.name.name, node);
+      }
+    }
+    return funcs;
+  }
+
   private emitConsolidatedBlock(block: RuntimeBlock): ExecOp {
     const codeSegments: string[] = [];
     const allCaptures: CaptureMap = {};
@@ -2759,6 +2775,20 @@ export class ManifestCodeGenerator {
       s => this.goStmtToCode(s, paramNames, definedLocals, calledFuncs)
     );
 
+    const helperSources: string[] = [];
+    const helperImportInputs: string[] = [];
+    const sameFileHelpers = new Set<string>();
+    if (name === "main") {
+      for (const fname of calledFuncs.keys()) {
+        const helper = this.goFuncDecls.get(fname);
+        if (!helper || helper === node) continue;
+        sameFileHelpers.add(fname);
+        const helperSource = this.goHelperFuncToCode(helper);
+        helperSources.push(helperSource.source);
+        helperImportInputs.push(helperSource.body);
+      }
+    }
+
     // Detect undefined function calls → external dependencies.
     // These become var function pointers + an Init() that OmniVM calls
     // to inject real implementations (same pattern as SetBridgeCallback).
@@ -2774,6 +2804,7 @@ export class ManifestCodeGenerator {
     const varDecls: string[] = [];
     for (const [fname, argc] of calledFuncs) {
       if (paramNames.has(fname) || definedLocals.has(fname) || goBuiltins.has(fname)) continue;
+      if (sameFileHelpers.has(fname)) continue;
       requires.push(fname);
       const fParamTypes = Array.from({ length: argc }, () => "interface{}").join(", ");
       varDecls.push(`var ${fname} func(${fParamTypes}) interface{}`);
@@ -2781,13 +2812,16 @@ export class ManifestCodeGenerator {
 
     // Build complete Go compilation unit
     const lines: string[] = ["package polyfunc", ""];
-    const imports = this.inferGoImports(bodyLines.join("\n"));
+    const imports = this.inferGoImports([...helperImportInputs, bodyLines.join("\n")].join("\n"));
     if (imports.length > 0) {
       lines.push("import (");
       for (const imp of imports) {
         lines.push(`\t"${imp}"`);
       }
       lines.push(")", "");
+    }
+    if (helperSources.length > 0) {
+      lines.push(...helperSources, "");
     }
     if (varDecls.length > 0) {
       lines.push(...varDecls, "");
@@ -2822,6 +2856,34 @@ export class ManifestCodeGenerator {
     };
 
     return [funcDef];
+  }
+
+  private goHelperFuncToCode(node: AST.FuncDecl): { source: string; body: string } {
+    const name = node.name.name;
+    const params = node.params.map(p => {
+      const pName = p.name.kind === "Identifier" ? p.name.name : "_";
+      const pType = p.type ? this.typeNodeToGo(p.type) : "interface{}";
+      return `${pName} ${pType}`;
+    }).join(", ");
+    const returnType = node.returnType ? this.typeNodeToGo(node.returnType) : "";
+    const returnSuffix = returnType ? ` ${returnType}` : "";
+    const paramNames = new Set(node.params
+      .map(p => p.name.kind === "Identifier" ? p.name.name : null)
+      .filter(Boolean) as string[]);
+    const calledFuncs = new Map<string, number>();
+    const definedLocals = new Set<string>();
+    for (const stmt of node.body.statements) {
+      this.collectGoCalls(stmt, calledFuncs);
+    }
+    const bodyLines = node.body.statements.map(
+      s => this.goStmtToCode(s, paramNames, definedLocals, calledFuncs)
+    );
+    const lines = [`func ${name}(${params})${returnSuffix} {`];
+    for (const line of bodyLines) {
+      lines.push(`\t${line}`);
+    }
+    lines.push("}");
+    return { source: lines.join("\n"), body: bodyLines.join("\n") };
   }
 
   private inferGoImports(source: string): string[] {
