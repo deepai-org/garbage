@@ -129,6 +129,7 @@ export class ManifestCodeGenerator {
     for (const block of blocks) {
       ops.push(...this.emitBlock(block));
     }
+    this.appendGoMainEntrypoint(annotated.program.body, ops);
 
     // Collect bridge ops and type summary from the checker
     const bridgeOps = this.typeChecker.getBridgeOps().map(b => this.toBridgeManifestOp(b));
@@ -1498,6 +1499,35 @@ export class ManifestCodeGenerator {
       ops.push(...this.emitNode(node, block.runtime));
     }
     return ops;
+  }
+
+  private appendGoMainEntrypoint(nodes: Array<AST.Decl | AST.Stmt>, ops: ManifestOp[]): void {
+    const hasMainPackage = nodes.some(node =>
+      node.kind === "PackageDecl" && node.name.name === "main"
+    );
+    if (!hasMainPackage) return;
+
+    const hasGoMain = ops.some(op =>
+      op.op === "func_def" &&
+      (op as FuncDefOp).name === "main" &&
+      (op as FuncDefOp).bodyRuntime === OmniRuntime.Go
+    );
+    if (!hasGoMain) return;
+
+    const alreadyCallsMain = ops.some(op =>
+      op.op === "eval" &&
+      (op as EvalOp).runtime === OmniRuntime.Go &&
+      (op as EvalOp).func === "main"
+    );
+    if (alreadyCallsMain) return;
+
+    ops.push({
+      op: "eval",
+      runtime: OmniRuntime.Go,
+      func: "main",
+      args: [],
+      bind: "",
+    } as EvalOp);
   }
 
   private emitConsolidatedBlock(block: RuntimeBlock): ExecOp {
