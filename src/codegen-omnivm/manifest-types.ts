@@ -218,6 +218,14 @@ export interface CallableShape {
   acceptsKwargs?: boolean;
   acceptsOptionsObject?: boolean;
   destructuredKeys?: string[];
+  javaAdapter?: JavaCallableAdapter;
+}
+
+export interface JavaCallableAdapter {
+  kind?: "map" | "builder" | "record" | "namedParameters" | string;
+  method?: string;
+  targetType?: string;
+  keys?: string[];
 }
 
 // ─── Control Flow ─────────────────────────────────────────────────
