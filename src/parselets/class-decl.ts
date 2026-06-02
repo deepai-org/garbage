@@ -133,6 +133,14 @@ export function parseClassDecl(host: ClassHost, decorators?: AST.Expr[]): AST.Cl
   }
 
   while (!host.isAtEnd()) {
+    // Skip virtual semicolons and regular semicolons before dedent checks.
+    // Python class fields are separated by virtual semicolons; checking
+    // indentation before consuming them makes the parser leave the second
+    // and later field declarations at top level.
+    while (host.check(";") || host.peek().virtualSemi) {
+      host.advance();
+    }
+
     // For Python style, check if we've dedented out of the class
     if (isPythonStyle) {
       const currentIndent = host.peek().indentCol ?? 0;
@@ -143,10 +151,6 @@ export function parseClassDecl(host: ClassHost, decorators?: AST.Expr[]): AST.Cl
     } else if (host.check("}")) {
       // For brace style, check for closing brace
       break;
-    }
-    // Skip virtual semicolons and regular semicolons
-    while (host.check(";") || host.peek().virtualSemi) {
-      host.advance();
     }
 
     if (host.check("}")) break;

@@ -530,6 +530,12 @@ export class ManifestCodeGenerator {
           this.typeRegistry.set(node.name.name, ifaceType);
           break;
         }
+        case "TypeDecl": {
+          const aliasType = this.resolveFromRegistry(lowerType(node.definition, runtime));
+          this.typeChecker.declare(node.name.name, aliasType, runtime);
+          this.typeRegistry.set(node.name.name, aliasType);
+          break;
+        }
         case "EnumDecl": {
           const enumType = this.enumDeclToCanonical(node);
           this.typeChecker.declare(node.name.name, enumType, runtime);
@@ -1552,6 +1558,11 @@ export class ManifestCodeGenerator {
 
       case "ExportDecl":
         if (node.declaration) return this.emitNode(node.declaration, blockRuntime);
+        return [];
+
+      case "PackageDecl":
+      case "TypeDecl":
+      case "InterfaceDecl":
         return [];
 
       case "Import":

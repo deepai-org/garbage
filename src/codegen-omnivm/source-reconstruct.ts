@@ -17,7 +17,18 @@ import { OmniRuntime } from '../runtime-resolver/types';
  */
 function spanExtract(node: { span?: AST.Span }, source?: string): string | undefined {
   if (source && node.span && node.span.end > node.span.start) {
-    return source.slice(node.span.start, node.span.end);
+    const decorators = (node as { decorators?: Array<{ span?: AST.Span }> }).decorators;
+    let start = node.span.start;
+    if (decorators && decorators.length > 0) {
+      start = decorators.reduce(
+        (min, decorator) => decorator.span ? Math.min(min, decorator.span.start) : min,
+        start,
+      );
+      if (start > 0 && source[start - 1] === "@") {
+        start--;
+      }
+    }
+    return source.slice(start, node.span.end);
   }
   return undefined;
 }
