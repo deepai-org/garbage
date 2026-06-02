@@ -55,6 +55,7 @@ import {
   YieldOp,
   AwaitOp,
   ParamDef,
+  CallableShape,
   ManifestValue,
   ConditionExpr,
   CaptureMap,
@@ -2647,9 +2648,7 @@ export class ManifestCodeGenerator {
 
     const paramNames = new Set<string>();
     const params: ParamDef[] = node.params.map(p => {
-      const def: ParamDef = {
-        name: p.name.kind === "Identifier" ? p.name.name : "/* pattern */",
-      };
+      const def = this.paramDef(p);
       if (p.spread) def.spread = true;
       if (p.defaultValue) {
         def.defaultValue = { kind: "literal", value: exprToCode(p.defaultValue, this.source) };
@@ -2710,6 +2709,33 @@ export class ManifestCodeGenerator {
     };
 
     return [...hoisted, funcDef];
+  }
+
+  private paramDef(param: AST.Param): ParamDef {
+    if (param.name.kind === "Identifier") {
+      return { name: param.name.name };
+    }
+    const name = param.name.kind === "ObjectPattern" ? "__options" : "/* pattern */";
+    const callableShape = this.callableShapeForParam(param);
+    return {
+      name,
+      ...(callableShape ? { callableShape } : {}),
+    };
+  }
+
+  private callableShapeForParam(param: AST.Param): CallableShape | undefined {
+    if (param.name.kind !== "ObjectPattern") return undefined;
+    const destructuredKeys = this.objectPatternKeys(param.name);
+    return {
+      acceptsOptionsObject: true,
+      ...(destructuredKeys.length > 0 ? { destructuredKeys } : {}),
+    };
+  }
+
+  private objectPatternKeys(pattern: AST.ObjectPattern): string[] {
+    return pattern.properties
+      .map(prop => prop.key.name)
+      .filter((name, index, names) => name && names.indexOf(name) === index);
   }
 
   /**

@@ -173,6 +173,17 @@ describe('FuncDefOp', () => {
       expect(op.params[1].name).toBe('b');
     }
   });
+
+  test('object-pattern param carries callable shape metadata', () => {
+    const m = parseAndManifest('function render({limit, payload}) { return limit }');
+    const op = m.ops.find(op => op.op === 'func_def') as any;
+    expect(op).toBeDefined();
+    expect(op.params[0].name).toBe('__options');
+    expect(op.params[0].callableShape).toEqual({
+      acceptsOptionsObject: true,
+      destructuredKeys: ['limit', 'payload'],
+    });
+  });
 });
 
 // --- ExecCompiledOp: compiled targets ---

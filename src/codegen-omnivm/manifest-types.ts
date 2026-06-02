@@ -211,6 +211,13 @@ export interface ParamDef {
   name: string;
   spread?: boolean;
   defaultValue?: ManifestValue;
+  callableShape?: CallableShape;
+}
+
+export interface CallableShape {
+  acceptsKwargs?: boolean;
+  acceptsOptionsObject?: boolean;
+  destructuredKeys?: string[];
 }
 
 // ─── Control Flow ─────────────────────────────────────────────────
