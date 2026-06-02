@@ -149,6 +149,11 @@ export class OmniVMCodeGenerator {
       case "ImportDecl":
         this.emitImport(node);
         break;
+      case "GroupedImport":
+        for (const imported of node.imports) {
+          this.emitImport(imported);
+        }
+        break;
       default:
         // For other node types, emit as-is or as bridge call
         const aff = this.affinityMap.get(node);

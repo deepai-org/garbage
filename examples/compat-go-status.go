@@ -1,12 +1,19 @@
 package main
 
-import "net/http"
+import (
+    "fmt"
+    "net/http"
+)
 
 func statusLabel(code int) string {
     if code >= http.StatusBadRequest {
-        return "error"
+        return fmt.Sprintf("error:%d", code)
     }
-    return "ok"
+    return fmt.Sprintf("ok:%d", code)
 }
 
-var compatibilityStatus = statusLabel(202)
+var compatibilityStatus = statusLabel(http.StatusAccepted)
+
+func main() {
+    fmt.Println(statusLabel(http.StatusOK))
+}

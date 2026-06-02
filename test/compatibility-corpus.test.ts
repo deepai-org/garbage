@@ -43,17 +43,32 @@ describe("unchanged source compatibility corpus", () => {
   });
 
   test("runs Go helper files without executing package declarations", () => {
-    const { manifest } = compile("compat-go-status.go");
+    const { ast, manifest } = compile("compat-go-status.go");
 
+    const grouped = ast.body.find((node: any) => node.kind === "GroupedImport") as any;
+    expect(grouped?.imports.map((imp: any) => imp.path)).toEqual(["fmt", "net/http"]);
     expect(manifest.ops.some((op: any) => op.op === "native" && op.code.includes("package main"))).toBe(false);
+    expect(manifest.ops.filter((op: any) => op.op === "import" && op.runtime === "go").map((op: any) => [op.path, op.bind])).toEqual([
+      ["fmt", "fmt"],
+      ["net/http", "http"],
+    ]);
+
     const statusLabel = manifest.ops.find((op: any) => op.op === "func_def" && op.name === "statusLabel") as any;
     expect(statusLabel?.bodyRuntime).toBe("go");
+    expect(statusLabel?.source).toContain('"fmt"');
     expect(statusLabel?.source).toContain('"net/http"');
+    expect(statusLabel?.source).toContain("fmt.Sprintf");
     expect(statusLabel?.source).toContain("http.StatusBadRequest");
+
+    const main = manifest.ops.find((op: any) => op.op === "func_def" && op.name === "main") as any;
+    expect(main?.bodyRuntime).toBe("go");
+    expect(main?.source).toContain("func Main() {");
+    expect(main?.source).not.toContain("func Main() interface{}");
+    expect(main?.requires).toContain("statusLabel");
 
     const topLevelInit = manifest.ops.find((op: any) => op.op === "eval" && op.bind === "compatibilityStatus") as any;
     expect(topLevelInit?.runtime).toBe("go");
     expect(topLevelInit?.func).toBe("statusLabel");
-    expect(topLevelInit?.args).toEqual(["202"]);
+    expect(topLevelInit?.args).toEqual(["http.StatusAccepted"]);
   });
 });

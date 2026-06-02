@@ -587,6 +587,7 @@ export interface Pass {
 // Declaration nodes
 export type Decl =
   | Import
+  | GroupedImport
   | ImportDecl
   | VarDecl
   | ConstDecl
@@ -778,6 +779,12 @@ export interface EnumMember {
 export interface PackageDecl {
   kind: "PackageDecl";
   name: Identifier;
+  span: Span;
+}
+
+export interface GroupedImport {
+  kind: "GroupedImport";
+  imports: Array<Import | ImportDecl>;
   span: Span;
 }
 

@@ -327,6 +327,14 @@ export function nodeToSourceCode(node: AST.Decl | AST.Stmt | AST.Expr, source?: 
     }
     case "Import":
       return `import "${node.path}"`;
+    case "GroupedImport":
+      return `import (\n${node.imports.map(imp => {
+        if (imp.kind === "Import") {
+          const alias = imp.alias ? `${imp.alias.name} ` : "";
+          return `\t${alias}"${imp.path}"`;
+        }
+        return `\t${importSpecsToCode(imp)} from "${imp.path}"`;
+      }).join("\n")}\n)`;
     case "ImportDecl":
       return `import ${importSpecsToCode(node)} from "${node.path}"`;
     default:

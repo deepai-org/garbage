@@ -1569,6 +1569,9 @@ export class ManifestCodeGenerator {
       case "ImportDecl":
         return [this.emitImport(node)];
 
+      case "GroupedImport":
+        return node.imports.map(imported => this.emitImport(imported));
+
       case "ShortDecl":
         return this.emitShortDecl(node);
 
@@ -2709,7 +2712,7 @@ export class ManifestCodeGenerator {
 
     const returnType = node.returnType
       ? this.typeNodeToGo(node.returnType)
-      : "interface{}";
+      : (name === "main" ? "" : "interface{}");
 
     // Reconstruct body from AST with Go-specific fixups
     const paramNames = new Set(node.params
@@ -2770,7 +2773,8 @@ export class ManifestCodeGenerator {
       }
       lines.push("}", "");
     }
-    lines.push(`func ${goExportName}(${goParams}) ${returnType} {`);
+    const returnSuffix = returnType ? ` ${returnType}` : "";
+    lines.push(`func ${goExportName}(${goParams})${returnSuffix} {`);
     for (const line of bodyLines) {
       lines.push(`\t${line}`);
     }
@@ -3248,7 +3252,7 @@ export class ManifestCodeGenerator {
     if (node.kind === "Import") {
       // Record binding for the imported module — always bind the module name
       // so it enters the manifest's binding table for captures tracking.
-      const bindName = node.alias?.name || node.path;
+      const bindName = node.alias?.name || (runtime === OmniRuntime.Go ? this.goImportBindingName(node.path) : node.path);
       this.recordBinding(bindName, runtime);
       return {
         op: "import",
@@ -3281,6 +3285,12 @@ export class ManifestCodeGenerator {
     }
 
     return importOp;
+  }
+
+  private goImportBindingName(path: string): string {
+    const last = path.split("/").filter(Boolean).pop() || path;
+    const cleaned = last.replace(/[^A-Za-z0-9_]/g, "_");
+    return /^[A-Za-z_]/.test(cleaned) ? cleaned : `_${cleaned}`;
   }
 
   // ─── String Interpolation ─────────────────────────────────────

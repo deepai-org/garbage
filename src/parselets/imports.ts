@@ -28,7 +28,7 @@ export interface ImportHost {
   parseIdentifier(): AST.Identifier;
 }
 
-export function parseImport(host: ImportHost): AST.Import | AST.ImportDecl {
+export function parseImport(host: ImportHost): AST.Import | AST.ImportDecl | AST.GroupedImport {
   const start = host.current - 1;
 
   let alias: AST.Identifier | undefined;
@@ -240,7 +240,11 @@ export function parseImport(host: ImportHost): AST.Import | AST.ImportDecl {
     if (imports.length === 0) {
       return { kind: "Import", path: "", span: host.createSpan(start, host.current - 1) };
     }
-    return imports[0];
+    return {
+      kind: "GroupedImport",
+      imports,
+      span: host.createSpan(start, host.current - 1)
+    };
   } else {
     throw host.error(host.peek(), "Expected import path");
   }

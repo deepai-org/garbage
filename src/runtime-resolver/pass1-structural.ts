@@ -169,6 +169,13 @@ export class Pass1Structural {
         this.visitImport(node);
         break;
 
+      case "GroupedImport":
+        for (const imported of node.imports) {
+          if (imported.kind === "Import") this.visitImport(imported);
+          else this.visitImportDecl(imported);
+        }
+        break;
+
       case "ImportDecl":
         this.visitImportDecl(node);
         break;
