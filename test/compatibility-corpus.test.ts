@@ -4,6 +4,7 @@ import { Lexer } from "../src/lexer";
 import { Parser } from "../src/parser";
 import { RuntimeResolver } from "../src/runtime-resolver";
 import { ManifestCodeGenerator } from "../src/codegen-omnivm";
+import { lowerAnnotatedProgram } from "../src/codegen-omnivm/lowering";
 
 function compile(example: string) {
   const filePath = path.join(__dirname, "..", "examples", example);
@@ -12,8 +13,9 @@ function compile(example: string) {
   const ast = new Parser(tokens, code).parse();
   const resolver = new RuntimeResolver();
   const annotated = resolver.resolve(ast, code);
+  const ir = lowerAnnotatedProgram(annotated);
   const manifest = new ManifestCodeGenerator().generate(annotated);
-  return { ast, manifest };
+  return { ast, manifest, ir };
 }
 
 describe("unchanged source compatibility corpus", () => {
@@ -43,7 +45,7 @@ describe("unchanged source compatibility corpus", () => {
   });
 
   test("runs Go helper files without executing package declarations", () => {
-    const { ast, manifest } = compile("compat-go-status.go");
+    const { ast, manifest, ir } = compile("compat-go-status.go");
 
     const grouped = ast.body.find((node: any) => node.kind === "GroupedImport") as any;
     expect(grouped?.imports.map((imp: any) => imp.path)).toEqual(["fmt", "net/http"]);
@@ -67,6 +69,8 @@ describe("unchanged source compatibility corpus", () => {
     expect(main?.source).not.toContain("func Main() interface{}");
     expect(main?.source).not.toContain("var statusLabel");
     expect(main?.requires ?? []).not.toContain("statusLabel");
+    const loweredMain = ir.nodes.find((node: any) => node.kind === "DefineFunc" && node.name === "main") as any;
+    expect(loweredMain?.dependencies).toEqual(expect.arrayContaining([{ name: "statusLabel", argc: 1 }]));
     const mainCall = manifest.ops.find((op: any) => op.op === "eval" && op.func === "main") as any;
     expect(mainCall).toMatchObject({ op: "eval", runtime: "go", func: "main", args: [] });
 

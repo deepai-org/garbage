@@ -5,6 +5,7 @@ import {
   LoweredManifestIR,
   LoweredManifestNode,
   NativePayload,
+  NativeDependency,
 } from './lowering-ir';
 
 export function lowerAnnotatedProgram(annotated: AnnotatedProgram): LoweredManifestIR {
@@ -55,6 +56,7 @@ class ManifestLowerer {
         name: node.name.name,
         params: node.params.flatMap(p => p.name.kind === "Identifier" ? [p.name.name] : []),
         bodyRuntime: runtime,
+        dependencies: this.nativeDependencies(node),
       }];
     }
 
@@ -210,6 +212,36 @@ class ManifestLowerer {
 
   private runtimeOf(node: AST.Decl | AST.Stmt | AST.Expr): OmniRuntime {
     return this.annotated.affinityMap.get(node)?.runtime || this.annotated.defaultRuntime;
+  }
+
+  private nativeDependencies(node: AST.FuncDecl): NativeDependency[] | undefined {
+    const calls = new Map<string, number>();
+    this.collectCallDependencies(node.body.statements, calls);
+    if (calls.size === 0) return undefined;
+    return Array.from(calls.entries())
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([name, argc]) => ({ name, argc }));
+  }
+
+  private collectCallDependencies(node: unknown, calls: Map<string, number>): void {
+    if (!node || typeof node !== "object") return;
+    if (Array.isArray(node)) {
+      for (const item of node) this.collectCallDependencies(item, calls);
+      return;
+    }
+
+    const candidate = node as { kind?: string; callee?: unknown; args?: unknown[] };
+    if (candidate.kind === "Call") {
+      const callee = candidate.callee as { kind?: string; name?: string } | undefined;
+      if (callee?.kind === "Identifier" && callee.name) {
+        calls.set(callee.name, Math.max(calls.get(callee.name) ?? 0, candidate.args?.length ?? 0));
+      }
+    }
+
+    for (const [key, value] of Object.entries(node)) {
+      if (key === "span") continue;
+      this.collectCallDependencies(value, calls);
+    }
   }
 
   private allocId(): number {

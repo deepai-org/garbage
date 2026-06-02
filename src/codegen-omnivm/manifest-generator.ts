@@ -65,7 +65,7 @@ import { BoundaryChecker, typeToString } from '../type-system/boundary-checker';
 import { lowerType } from '../type-system/lowering';
 import * as C from '../type-system/canonical';
 import { lowerAnnotatedProgram } from './lowering';
-import { LoweredManifestIR, LoweredManifestNode } from './lowering-ir';
+import { LoweredDefineFunc, LoweredManifestIR, LoweredManifestNode } from './lowering-ir';
 
 type BindingKind = "value" | "channel" | "stream" | "resource" | "table" | "job_handle" | "spawn_handle" | "function";
 
@@ -186,6 +186,12 @@ export class ManifestCodeGenerator {
     bind: string | undefined,
   ): LoweredManifestNode | undefined {
     return this.loweredNodesFor(source).find(node => "bind" in node && node.bind === bind);
+  }
+
+  private loweredDefineFuncFor(source: AST.FuncDecl): LoweredDefineFunc | undefined {
+    return this.loweredNodesFor(source).find(
+      (node): node is LoweredDefineFunc => node.kind === "DefineFunc" && node.name === source.name.name,
+    );
   }
 
   // ─── Captures Analysis ──────────────────────────────────────────
@@ -2765,11 +2771,8 @@ export class ManifestCodeGenerator {
       .map(p => p.name.kind === "Identifier" ? p.name.name : null)
       .filter(Boolean) as string[]);
 
-    const calledFuncs = new Map<string, number>(); // name → arg count
+    const calledFuncs = this.goDependencyCalls(node); // name → arg count
     const definedLocals = new Set<string>();
-    for (const stmt of node.body.statements) {
-      this.collectGoCalls(stmt, calledFuncs);
-    }
 
     const bodyLines = node.body.statements.map(
       s => this.goStmtToCode(s, paramNames, definedLocals, calledFuncs)
@@ -2870,11 +2873,8 @@ export class ManifestCodeGenerator {
     const paramNames = new Set(node.params
       .map(p => p.name.kind === "Identifier" ? p.name.name : null)
       .filter(Boolean) as string[]);
-    const calledFuncs = new Map<string, number>();
+    const calledFuncs = this.goDependencyCalls(node);
     const definedLocals = new Set<string>();
-    for (const stmt of node.body.statements) {
-      this.collectGoCalls(stmt, calledFuncs);
-    }
     const bodyLines = node.body.statements.map(
       s => this.goStmtToCode(s, paramNames, definedLocals, calledFuncs)
     );
@@ -2935,6 +2935,22 @@ export class ManifestCodeGenerator {
       if (key === "span") continue;
       this.collectGoCalls(value, calledFuncs);
     }
+  }
+
+  private goDependencyCalls(node: AST.FuncDecl): Map<string, number> {
+    const calls = new Map<string, number>();
+    const lowered = this.loweredDefineFuncFor(node);
+    if (lowered?.dependencies) {
+      for (const dep of lowered.dependencies) {
+        calls.set(dep.name, Math.max(calls.get(dep.name) ?? 0, dep.argc));
+      }
+      return calls;
+    }
+
+    for (const stmt of node.body.statements) {
+      this.collectGoCalls(stmt, calls);
+    }
+    return calls;
   }
 
   private goBlockToCode(
@@ -3036,13 +3052,6 @@ export class ManifestCodeGenerator {
         // make() fixup: make(N) → make(chan interface{}, N)
         if (callee === "make" && args.length === 1 && /^\d+$/.test(args[0])) {
           return `make(chan interface{}, ${args[0]})`;
-        }
-
-        // Track called function names for forward declaration
-        if (expr.callee.kind === "Identifier") {
-          calledFuncs.set(expr.callee.name, Math.max(
-            calledFuncs.get(expr.callee.name) ?? 0, expr.args.length
-          ));
         }
 
         return `${callee}(${args.join(", ")})`;

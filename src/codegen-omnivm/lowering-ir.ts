@@ -15,6 +15,11 @@ export interface NativePayload {
   span: AST.Span;
 }
 
+export interface NativeDependency {
+  name: string;
+  argc: number;
+}
+
 export interface LoweredBase {
   id: number;
   runtime: OmniRuntime;
@@ -38,6 +43,7 @@ export interface LoweredDefineFunc extends LoweredBase {
   name: string;
   params: string[];
   bodyRuntime: OmniRuntime;
+  dependencies?: NativeDependency[];
 }
 
 export interface LoweredCallRuntimeFunc extends LoweredBase {
