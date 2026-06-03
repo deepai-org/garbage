@@ -4,6 +4,7 @@ import { BridgeDescriptor, OmniRuntime } from '../runtime-resolver/types';
 export type LoweredManifestNode =
   | LoweredEvalExpr
   | LoweredExecStmt
+  | LoweredImport
   | LoweredDefineFunc
   | LoweredCallRuntimeFunc
   | LoweredSpawn
@@ -38,6 +39,21 @@ export interface LoweredGoFuncArtifact {
   source: string;
 }
 
+export interface LoweredFuncSourceArtifact {
+  paramsSource: string[];
+  bodySource: string;
+  functionSource: string;
+}
+
+export interface LoweredImportArtifact {
+  path: string;
+  bind?: string;
+  defaultImport?: string;
+  namespaceImport?: string;
+  specifiers?: Array<{ imported: string; local: string }>;
+  source: string;
+}
+
 export interface LoweredBase {
   id: number;
   runtime: OmniRuntime;
@@ -56,11 +72,17 @@ export interface LoweredExecStmt extends LoweredBase {
   node: AST.Decl | AST.Stmt | AST.Expr;
 }
 
+export interface LoweredImport extends LoweredBase {
+  kind: "Import";
+  artifact: LoweredImportArtifact;
+}
+
 export interface LoweredDefineFunc extends LoweredBase {
   kind: "DefineFunc";
   name: string;
   params: string[];
   bodyRuntime: OmniRuntime;
+  sourceArtifact?: LoweredFuncSourceArtifact;
   dependencies?: NativeDependency[];
   go?: LoweredGoFuncArtifact;
 }

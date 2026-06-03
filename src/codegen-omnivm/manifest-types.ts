@@ -199,12 +199,20 @@ export interface FuncDefOp {
   async?: boolean;
   /** If set, entire body runs in this single runtime. */
   bodyRuntime?: string;
+  /** Source-derived JS/Python function fragments carried by lowering IR. */
+  sourceArtifact?: FuncSourceArtifact;
   /** Complete source compilation unit (Go). OmniVM compiles at load time. */
   source?: string;
   /** Exported symbol names for plugin.Lookup (Go visibility rules). */
   exports?: string[];
   /** External symbols the plugin needs injected (package-level vars set by OmniVM). */
   requires?: string[];
+}
+
+export interface FuncSourceArtifact {
+  paramsSource: string[];
+  bodySource: string;
+  functionSource: string;
 }
 
 export interface ParamDef {
@@ -218,6 +226,8 @@ export interface CallableShape {
   acceptsKwargs?: boolean;
   acceptsOptionsObject?: boolean;
   destructuredKeys?: string[];
+  parameterNames?: string[];
+  arity?: number;
   javaAdapter?: JavaCallableAdapter;
 }
 
@@ -331,6 +341,7 @@ export interface ImportOp {
   specifiers?: ImportSpecifier[];
   defaultImport?: string;
   namespaceImport?: string;
+  sourceArtifact?: string;
 }
 
 export interface ImportSpecifier {

@@ -71,6 +71,38 @@ func main() {
     expect(main.go.source).toContain('func Main() {');
     expect(main.go.dependencies).toEqual([]);
   });
+
+  test('carries JS/Python function source and import artifacts', () => {
+    const ir = lower(`
+import os
+import { readFile as read } from "fs"
+
+function render({limit, payload}) {
+  return payload.slice(0, limit)
+}
+
+def rank(request, **kwargs):
+  return kwargs.get("limit", 0)
+`);
+
+    const imports = ir.nodes.filter((n: any) => n.kind === 'Import') as any[];
+    expect(imports).toHaveLength(2);
+    expect(imports[0].artifact).toMatchObject({
+      path: 'os',
+      bind: 'os',
+    });
+    expect(imports[0].artifact.source).toBe('import os');
+    expect(imports[1].artifact.specifiers).toEqual([{ imported: 'readFile', local: 'read' }]);
+
+    const render = ir.nodes.find((n: any) => n.kind === 'DefineFunc' && n.name === 'render') as any;
+    expect(render.sourceArtifact.paramsSource).toEqual(['{limit, payload}']);
+    expect(render.sourceArtifact.bodySource).toContain('return payload.slice(0, limit)');
+    expect(render.sourceArtifact.functionSource).toContain('function render');
+
+    const rank = ir.nodes.find((n: any) => n.kind === 'DefineFunc' && n.name === 'rank') as any;
+    expect(rank.sourceArtifact.paramsSource.join(',')).toContain('**kwargs');
+    expect(rank.sourceArtifact.bodySource).toContain('kwargs.get("limit", 0)');
+  });
 });
 
 describe('Runtime Evidence Facts', () => {

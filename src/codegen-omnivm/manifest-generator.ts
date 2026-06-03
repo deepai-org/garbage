@@ -2704,6 +2704,7 @@ export class ManifestCodeGenerator {
       params,
       body: bodyOps,
       ...(singleRuntime ? { bodyRuntime: singleRuntime } : {}),
+      ...(this.loweredDefineFuncFor(node)?.sourceArtifact ? { sourceArtifact: this.loweredDefineFuncFor(node)?.sourceArtifact } : {}),
       ...(node.async ? { async: true } : {}),
       ...(node.generator ? { generator: true } : {}),
     };
@@ -3389,37 +3390,46 @@ export class ManifestCodeGenerator {
   private emitImport(node: AST.Import | AST.ImportDecl): ImportOp {
     const aff = this.affinityMap.get(node);
     const runtime = aff?.runtime || this.defaultRuntime;
+    const lowered = this.loweredNodesFor(node).find(
+      (item): item is Extract<LoweredManifestNode, { kind: "Import" }> => item.kind === "Import",
+    );
+    const artifact = lowered?.artifact;
 
     if (node.kind === "Import") {
       // Record binding for the imported module — always bind the module name
       // so it enters the manifest's binding table for captures tracking.
-      const bindName = node.alias?.name || (runtime === OmniRuntime.Go ? this.goImportBindingName(node.path) : node.path);
+      const bindName = artifact?.bind || node.alias?.name || (runtime === OmniRuntime.Go ? this.goImportBindingName(node.path) : node.path);
       this.recordBinding(bindName, runtime);
       return {
         op: "import",
-        path: node.path,
+        path: artifact?.path || node.path,
         runtime,
         bind: bindName,
+        ...(artifact?.source ? { sourceArtifact: artifact.source } : {}),
       };
     }
 
     // ImportDecl (ES-style)
     const importOp: ImportOp = {
       op: "import",
-      path: node.path,
+      path: artifact?.path || node.path,
       runtime,
+      ...(artifact?.source ? { sourceArtifact: artifact.source } : {}),
     };
 
-    if (node.defaultImport) {
-      importOp.defaultImport = node.defaultImport.name;
-      this.recordBinding(node.defaultImport.name, runtime);
+    const defaultImport = artifact?.defaultImport || node.defaultImport?.name;
+    if (defaultImport) {
+      importOp.defaultImport = defaultImport;
+      this.recordBinding(defaultImport, runtime);
     }
-    if (node.namespaceImport) {
-      importOp.namespaceImport = node.namespaceImport.name;
-      this.recordBinding(node.namespaceImport.name, runtime);
+    const namespaceImport = artifact?.namespaceImport || node.namespaceImport?.name;
+    if (namespaceImport) {
+      importOp.namespaceImport = namespaceImport;
+      this.recordBinding(namespaceImport, runtime);
     }
-    if (node.specifiers && node.specifiers.length > 0) {
-      importOp.specifiers = node.specifiers.map(s => {
+    const specifiers = artifact?.specifiers || node.specifiers;
+    if (specifiers && specifiers.length > 0) {
+      importOp.specifiers = specifiers.map(s => {
         this.recordBinding(s.local, runtime);
         return { imported: s.imported, local: s.local };
       });

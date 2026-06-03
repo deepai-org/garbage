@@ -61,8 +61,20 @@ class ManifestLowerer {
         name: node.name.name,
         params: node.params.flatMap(p => p.name.kind === "Identifier" ? [p.name.name] : []),
         bodyRuntime: runtime,
+        ...(!go ? { sourceArtifact: this.funcSourceArtifact(node) } : {}),
         dependencies: this.nativeDependencies(node),
         ...(go ? { go } : {}),
+      }];
+    }
+
+    if (node.kind === "Import" || node.kind === "ImportDecl") {
+      return [{
+        id: this.allocId(),
+        kind: "Import",
+        runtime,
+        sourceNode: node,
+        native,
+        artifact: this.importArtifact(node, runtime),
       }];
     }
 
@@ -213,6 +225,35 @@ class ManifestLowerer {
     return {
       source: this.annotated.source.slice(node.span.start, node.span.end),
       span: node.span,
+    };
+  }
+
+  private funcSourceArtifact(node: AST.FuncDecl) {
+    const source = this.annotated.source || "";
+    const slice = (span: AST.Span | undefined) =>
+      source && span && span.end > span.start ? source.slice(span.start, span.end) : "";
+    return {
+      paramsSource: node.params.map(param => slice(param.span)),
+      bodySource: slice(node.body.span),
+      functionSource: slice(node.span),
+    };
+  }
+
+  private importArtifact(node: AST.Import | AST.ImportDecl, runtime: OmniRuntime) {
+    const source = this.nativePayload(node)?.source || "";
+    if (node.kind === "Import") {
+      return {
+        path: node.path,
+        bind: node.alias?.name || (runtime === OmniRuntime.Go ? this.goImportBindingName(node.path) : node.path),
+        source,
+      };
+    }
+    return {
+      path: node.path,
+      ...(node.defaultImport ? { defaultImport: node.defaultImport.name } : {}),
+      ...(node.namespaceImport ? { namespaceImport: node.namespaceImport.name } : {}),
+      ...(node.specifiers && node.specifiers.length > 0 ? { specifiers: node.specifiers.map(s => ({ imported: s.imported, local: s.local })) } : {}),
+      source,
     };
   }
 
@@ -374,6 +415,12 @@ class ManifestLowerer {
       if (pattern.test(source)) selected.add(path);
     }
     return Array.from(selected).sort();
+  }
+
+  private goImportBindingName(path: string): string {
+    const last = path.split("/").filter(Boolean).pop() || path;
+    const cleaned = last.replace(/[^A-Za-z0-9_]/g, "_");
+    return /^[A-Za-z_]/.test(cleaned) ? cleaned : `_${cleaned}`;
   }
 
   private toPascalCase(name: string): string {

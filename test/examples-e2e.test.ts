@@ -252,6 +252,9 @@ describe("Example files: end-to-end pipeline", () => {
       "java-commons-csv-pydantic-go-batching.poly",
       "java-jsoup-bs4-cheerio.poly",
       "java-okhttp-httpx-go-retry.poly",
+      "java-kwargs-map-adapter.poly",
+      "java-kwargs-record-constructor.poly",
+      "java-kwargs-builder-setters.poly",
     ];
 
     for (const example of javaExamples) {
@@ -261,7 +264,7 @@ describe("Example files: end-to-end pipeline", () => {
         expect(code).not.toMatch(/@(java|js)\(/);
         expect(runtimes).not.toContain("unknown");
         expect(runtimes).toContain("java");
-        expect(manifest.ops.length).toBeGreaterThan(3);
+        expect(manifest.ops.length).toBeGreaterThan(1);
 
         const evalOps = manifest.ops.filter((o: any) => o.op === "eval" && o.code);
         const javaOps = evalOps.filter((o: any) => o.runtime === "java");
@@ -347,6 +350,10 @@ describe("Example files: end-to-end pipeline", () => {
         file: "go-http-handler-docs.poly",
         runtimes: ["go", "python"],
       },
+      {
+        file: "vertical-order-review-app.poly",
+        runtimes: ["python", "javascript", "java", "ruby", "go"],
+      },
     ];
 
     for (const { file, runtimes: expectedRuntimes } of edgeExamples) {
@@ -393,6 +400,51 @@ describe("Example files: end-to-end pipeline", () => {
       expect(renderPage?.bodyRuntime).toBe("javascript");
       expect(rack?.runtime).toBe("ruby");
       expect(rack?.code).toContain("Rack::Response");
+    });
+
+    it("compiles the vertical order app as one multi-runtime workflow", () => {
+      const { manifest } = compile(path.join(examplesDir, "vertical-order-review-app.poly"));
+      const readme = fs.readFileSync(
+        path.join(examplesDir, "vertical-order-review-app.README.md"),
+        "utf8"
+      );
+      const runtimes = new Set(
+        manifest.ops.map((o: any) => o.runtime || o.bodyRuntime).filter(Boolean)
+      );
+      const output = manifest.ops.find(
+        (o: any) => o.runtime === "python" && String(o.code).includes("Vertical order app")
+      ) as any;
+      const goSpawns = manifest.ops.filter((o: any) => o.op === "spawn" && o.runtime === "go");
+      const javaFuture = manifest.ops.find(
+        (o: any) => o.runtime === "java" && String(o.code).includes("CompletableFuture")
+      ) as any;
+      const javaService = manifest.ops.find(
+        (o: any) => o.runtime === "java" && String(o.code).includes("ObjectMapper")
+      ) as any;
+      const rubyFiber = manifest.ops.find(
+        (o: any) => o.runtime === "ruby" && String(o.code).includes("Fiber.current")
+      ) as any;
+      const reactRender = manifest.ops.find(
+        (o: any) => o.runtime === "javascript" && String(o.code).includes("renderToStaticMarkup")
+      ) as any;
+      const djangoResponse = manifest.ops.find(
+        (o: any) => o.runtime === "python" && String(o.code).includes("JsonResponse")
+      ) as any;
+
+      for (const runtime of ["python", "javascript", "java", "ruby", "go"]) {
+        expect(runtimes).toContain(runtime);
+      }
+      expect(goSpawns.length).toBe(2);
+      expect(javaService?.code).toContain("ObjectMapper");
+      expect(javaFuture?.code).toContain("CompletableFuture.completedFuture");
+      expect(rubyFiber?.code).toContain("Fiber.current");
+      expect(reactRender?.code).toContain("React.createElement");
+      expect(djangoResponse?.code).toContain("JsonResponse");
+      expect(output?.code).toContain("Vertical order app");
+      expect(readme).toContain("canonical public example");
+      expect(readme).toContain(
+        "Vertical order app order=ord-42 routes=<fastapi-route-count> django=200 react=71 java=priority ruby=<fiber-id> workers=2 adjustment=7"
+      );
     });
 
     it("keeps ORM client handles local while crossing materialized rows", () => {

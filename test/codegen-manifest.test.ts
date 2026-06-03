@@ -184,6 +184,16 @@ describe('FuncDefOp', () => {
       destructuredKeys: ['limit', 'payload'],
     });
   });
+
+  test('JS and Python func_def carry lowering source artifacts', () => {
+    const m = parseAndManifest('function render({limit, payload}) { return payload.slice(0, limit) }\ndef rank(request, **kwargs):\n  return kwargs.get("limit", 0)');
+    const render = m.ops.find((op: any) => op.op === 'func_def' && op.name === 'render') as any;
+    const rank = m.ops.find((op: any) => op.op === 'func_def' && op.name === 'rank') as any;
+    expect(render.sourceArtifact.paramsSource).toEqual(['{limit, payload}']);
+    expect(render.sourceArtifact.bodySource).toContain('return payload.slice(0, limit)');
+    expect(rank.sourceArtifact.paramsSource.join(',')).toContain('**kwargs');
+    expect(rank.sourceArtifact.bodySource).toContain('kwargs.get("limit", 0)');
+  });
 });
 
 // --- ExecCompiledOp: compiled targets ---
@@ -257,7 +267,16 @@ describe('ImportOp', () => {
       expect(importOp.runtime).toBe('python');
       expect(importOp.path).toBe('os');
       expect(importOp.bind).toBe('os');
+      expect(importOp.sourceArtifact).toBe('import os');
     }
+  });
+
+  test('imports carry lowering source artifacts and specifiers', () => {
+    const m = parseAndManifest('import os\nimport { readFile as read } from "fs"');
+    const imports = m.ops.filter((op: any) => op.op === 'import') as any[];
+    expect(imports[0].sourceArtifact).toBe('import os');
+    expect(imports[1].sourceArtifact).toContain('readFile as read');
+    expect(imports[1].specifiers).toEqual([{ imported: 'readFile', local: 'read' }]);
   });
 
   test('JS import generates import op with javascript runtime', () => {
