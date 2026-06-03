@@ -101,15 +101,28 @@ This is deferred to P2 as the OmniVM team recommends.
 
 ---
 
-## 4. Marshalling Beyond Strings
+## 4. Boundary Values Beyond Strings
 
-Today everything is strings. The manifest needs JSON-compatible round-tripping.
+The manifest boundary is no longer a string-only or JSON-only channel.
+Primitive values can still copy directly, but library objects, lazy data,
+streams, callbacks, and native memory must lower to the first-class boundary
+forms OmniVM executes today: `copy`, `ref`, `stream`, `table`/Arrow,
+`resource`, `job`, and `proxy_callable`.
 
 ### On `eval` (runtime → binding table)
 
-Convert the runtime's native value to `interface{}`:
-- **80/20 approach**: `json.Unmarshal` on the string representation
-- More precise: use cgo accessors (e.g., `PyLong_AsLong`, `v8::Value::Int32Value`)
+Convert the runtime's native value to `interface{}` or a retained handle:
+- primitives use runtime-native accessors, not string parsing;
+- JSON-compatible literals copy only when small and ownership-free;
+- framework, ORM, request, session, and transaction objects stay live resource
+  proxies;
+- iterators, result sets, response bodies, and readers stay lazy stream proxies
+  with explicit EOF/cancel release;
+- Arrow-compatible dataframes, buffers, typed arrays, and ByteBuffers export as
+  table/Arrow descriptors when layout, ownership, and CPU addressability are
+  proven;
+- functions and closures retain as callable proxies with captured shape
+  metadata when needed.
 
 ### On inject (binding table → runtime)
 
@@ -131,7 +144,9 @@ Convert `interface{}` to the runtime's native type:
 | array | `list` | `Array` | `Array` | `List<?>` |
 | object | `dict` | `Object` | `Hash` | `Map<?,?>` |
 
-The Arrow buffer infrastructure could skip JSON marshalling for large data, but for manifest purposes, JSON-ish marshalling is sufficient.
+JSON fallback is a diagnostic, not the main design. Garbage should emit bridge
+metadata that lets OmniVM choose the most natural boundary automatically rather
+than forcing users to annotate common framework and library values.
 
 ---
 
@@ -254,11 +269,12 @@ If implemented, the path is: `rustc`/`gcc` → `.so` → `dlopen` → `dlsym`, w
 
 ---
 
-## 11. Callback Marshalling — Explicit Bridge Only
+## 11. Callable Boundaries
 
-**Per OmniVM team pushback**: Making foreign functions look native (a Python function "just works" as a JS callable) is a deep rabbit hole involving cross-GC reference counting, lifetime management, and re-entrant bridge calls.
-
-**Decision**: Callbacks stay explicit. Cross-runtime function calls use the manifest's `exec`/`eval` ops with captures — not transparent function wrapping.
+OmniVM supports callable proxies, but Garbage should still be explicit about
+shape. A Python function or JavaScript closure can cross as a callable handle;
+keyword arguments, Java record/builders, and JavaScript options objects need
+shape metadata so OmniVM can adapt calls without guessing.
 
 ```json
 [
@@ -267,7 +283,10 @@ If implemented, the path is: `rustc`/`gcc` → `.so` → `dlopen` → `dlsym`, w
 ]
 ```
 
-The second op would need OmniVM to recognize that `py_double` is a Python callable and bridge the invocation. But this is simpler than transparent wrapping — it's still an explicit bridge call within the manifest.
+The second op crosses `py_double` as a callable proxy. Garbage should attach
+callable-shape metadata when it knows argument names, destructured keys, keyword
+support, or Java adapter forms. If the shape is unknown, OmniVM should reject
+ambiguous keyword/options calls with a diagnostic instead of guessing.
 
 ---
 
@@ -278,7 +297,7 @@ The second op would need OmniVM to recognize that `py_double` is a Python callab
 | `exec` / `eval` ops | P0 | Have primitives | ~200 LOC (binding table) |
 | Variable binding table | P0 | New | ~200 LOC |
 | Captures injection (per-runtime) | P0 | New | Touches each cgo layer |
-| JSON-ish marshalling | P0 | New | ~300 LOC |
+| Boundary value marshalling | P0 | Implemented in OmniVM; compiler emits hints | Keep bridge metadata aligned |
 | Error propagation | P0 | Already works | — |
 | Runtime state persistence | P0 | Already works | — |
 | Multi-statement code strings | P0 | Already works | — |
@@ -289,4 +308,4 @@ The second op would need OmniVM to recognize that `py_double` is a Python callab
 | Scope isolation for captures | P2 | New | Per-runtime scoping |
 | Go as dispatch target | P2 | Limited | Pre-compiled functions only |
 | Compiled targets (Rust/C) | P3 | Aspirational | Major security surface |
-| Transparent callback marshalling | Dropped | — | Too complex, keep explicit |
+| Callable proxy marshalling | P1 | Supported with shape metadata | Avoid ambiguous shapes |
