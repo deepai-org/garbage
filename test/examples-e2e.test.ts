@@ -408,6 +408,10 @@ describe("Example files: end-to-end pipeline", () => {
         path.join(examplesDir, "vertical-order-review-app.README.md"),
         "utf8"
       );
+      const expectedOutput = fs.readFileSync(
+        path.join(__dirname, "fixtures", "vertical-order-review-app.output.txt"),
+        "utf8"
+      ).trim();
       const runtimes = new Set(
         manifest.ops.map((o: any) => o.runtime || o.bodyRuntime).filter(Boolean)
       );
@@ -442,9 +446,7 @@ describe("Example files: end-to-end pipeline", () => {
       expect(djangoResponse?.code).toContain("JsonResponse");
       expect(output?.code).toContain("Vertical order app");
       expect(readme).toContain("canonical public example");
-      expect(readme).toContain(
-        "Vertical order app order=ord-42 routes=<fastapi-route-count> django=200 react=71 java=priority ruby=<fiber-id> workers=2 adjustment=7"
-      );
+      expect(readme).toContain(expectedOutput);
     });
 
     it("keeps ORM client handles local while crossing materialized rows", () => {

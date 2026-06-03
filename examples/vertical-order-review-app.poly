@@ -57,9 +57,10 @@ express_app.post("/orders/review", (req, res) => res.json({
 const enrichment_service = new com.fasterxml.jackson.databind.ObjectMapper()
 const enrichment_json = enrichment_service.writeValueAsString(java.util.concurrent.CompletableFuture.completedFuture(java.util.Map.of("order_id", "ord-42", "sla", "priority", "adjustment", 7)).join())
 const enrichment = json.loads(enrichment_json)
+const adjustment_value = enrichment["adjustment"]
 
-const cast_adjustment = ActiveRecord::Type::Integer.new.cast(enrichment["adjustment"].to_s)
-const lifecycle_stage = ActiveRecord::Type::String.new.cast(Fiber.current.object_id)
+const cast_adjustment = ActiveRecord::Type::Integer.new.cast(adjustment_value.to_s)
+const lifecycle_stage = ActiveRecord::Type::String.new.cast(Fiber.current.object_id && "fiber-active")
 
 func score_worker(label) {
   return label
@@ -75,10 +76,10 @@ const response = {
   "order_id": order_id,
   "route_count": route_count,
   "django_status": django_status,
-  "react_html": card_html.length,
+  "react_html": len(card_html),
   "java_sla": enrichment["sla"],
   "ruby_stage": lifecycle_stage,
-  "workers": worker_results.length,
+  "workers": len(worker_results),
   "adjustment": cast_adjustment
 }
 

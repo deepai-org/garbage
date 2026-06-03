@@ -54,6 +54,23 @@ docker run --rm \
   /tmp/cursed-concurrency.json
 ```
 
+The public vertical example exercises the full stack across Python, JavaScript,
+Java, Ruby, and Go and has a checked-in output golden:
+
+```bash
+npm run polyc -- examples/vertical-order-review-app.poly -o /tmp/vertical-order-review-app.json
+docker run --rm \
+  -v /tmp/vertical-order-review-app.json:/tmp/vertical-order-review-app.json:ro \
+  --entrypoint manifest-runner omnivm \
+  /tmp/vertical-order-review-app.json
+```
+
+Expected app output:
+
+```text
+Vertical order app order=ord-42 routes=5 django=200 react=71 java=priority ruby=fiber-active workers=2 adjustment=7
+```
+
 For the current cross-repo smoke, keep `garbage` and `omnivm` as sibling
 checkouts and run the CPython-hosted `libomnivm` path from the OmniVM repo:
 
