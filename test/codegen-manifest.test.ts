@@ -2315,6 +2315,7 @@ const payload = { user: "ada", task: "receipt" }
 const receipt = job.enqueue("ruby", "sidekiq", payload)
 job.complete(receipt, "ok")
 const result = job.wait(receipt)
+job.cancel(receipt, "client-abort", "cleanup_log.append('cancel')")
 resource.close(tx, "cleanup_log.append('rollback')")
 `;
     const m = parseAndManifest(code);
@@ -2332,7 +2333,7 @@ resource.close(tx, "cleanup_log.append('rollback')")
       target: "tx",
       code: "cleanup_log.append('rollback')",
     });
-    expect(jobs.map(op => op.action)).toEqual(["enqueue", "complete", "wait"]);
+    expect(jobs.map(op => op.action)).toEqual(["enqueue", "complete", "wait", "cancel"]);
     expect(jobs[0]).toMatchObject({
       runtime: "ruby",
       bind: "receipt",
@@ -2340,6 +2341,11 @@ resource.close(tx, "cleanup_log.append('rollback')")
       payload: { kind: "ref", name: "payload" },
     });
     expect(jobs[2]).toMatchObject({ bind: "result", target: "receipt" });
+    expect(jobs[3]).toMatchObject({
+      target: "receipt",
+      value: { kind: "literal", value: "client-abort" },
+      code: "cleanup_log.append('cancel')",
+    });
   });
 
   test('typed table declarations lower to zero-copy table manifest ops automatically', () => {

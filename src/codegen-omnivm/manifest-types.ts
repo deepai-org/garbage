@@ -445,13 +445,14 @@ export interface TableOp {
 /** Delayed/background job handle. */
 export interface JobOp {
   op: "job";
-  action: "enqueue" | "complete" | "wait";
+  action: "enqueue" | "complete" | "wait" | "cancel";
   runtime?: string;
   bind?: string;
   target?: string;
   kind?: string;
   payload?: ManifestValue;
   value?: ManifestValue;
+  code?: string;
 }
 
 // ─── Yield (generator) ───────────────────────────────────────────

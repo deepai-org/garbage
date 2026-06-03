@@ -1315,6 +1315,26 @@ export class ManifestCodeGenerator {
       };
     }
 
+    if (action === "cancel") {
+      const target = this.manifestTargetName(call.args[0]);
+      if (!target) return undefined;
+      const tailArgs = call.args.slice(2);
+      const runtimeArg = tailArgs.find(arg => this.isRuntimeStringValue(arg));
+      const runtime = runtimeArg ? this.manifestRuntimeFromValue(runtimeArg, runtimeFallback) : undefined;
+      const reason = call.args[1];
+      const code = tailArgs
+        .map(arg => this.manifestStringFromValue(arg))
+        .find(value => value && !this.isRuntimeString(value));
+      return {
+        op: "job",
+        action: "cancel",
+        target,
+        ...(runtime ? { runtime } : {}),
+        ...(reason ? { value: this.manifestValue(reason) } : {}),
+        ...(code ? { code } : {}),
+      };
+    }
+
     return undefined;
   }
 

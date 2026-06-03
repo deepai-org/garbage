@@ -56,4 +56,10 @@ describe('Dispatch Manifest Schema', () => {
     }
     expect(Array.isArray(manifest.ops)).toBe(true);
   });
+
+  test('job schema includes cancellation action and cleanup code', () => {
+    const defs = DISPATCH_MANIFEST_SCHEMA.$defs as any;
+    expect(defs.JobOp.properties.action.enum).toEqual(['enqueue', 'complete', 'wait', 'cancel']);
+    expect(defs.JobOp.properties.code.type).toBe('string');
+  });
 });
