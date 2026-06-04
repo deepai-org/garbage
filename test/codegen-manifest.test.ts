@@ -2316,6 +2316,7 @@ const receipt = job.enqueue("ruby", "sidekiq", payload)
 job.complete(receipt, "ok")
 const result = job.wait(receipt)
 job.cancel(receipt, "client-abort", "cleanup_log.append('cancel')")
+console.log(tx)
 resource.close(tx, "cleanup_log.append('rollback')")
 `;
     const m = parseAndManifest(code);
@@ -2346,6 +2347,15 @@ resource.close(tx, "cleanup_log.append('rollback')")
       value: { kind: "literal", value: "client-abort" },
       code: "cleanup_log.append('cancel')",
     });
+    expect(m.bridges).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        binding: "tx",
+        op: "proxy_with_finalizer",
+        from: "python",
+        to: "javascript",
+        meta: { disposer: "rollback" },
+      }),
+    ]));
   });
 
   test('typed table declarations lower to zero-copy table manifest ops automatically', () => {

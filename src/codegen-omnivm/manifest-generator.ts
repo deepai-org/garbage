@@ -78,6 +78,8 @@ export class ManifestCodeGenerator {
   private bindingTable: Map<string, OmniRuntime> = new Map();
   /** Tracks manifest-visible binding roles for semantic diagnostics. */
   private bindingKinds: Map<string, BindingKind> = new Map();
+  /** Tracks owner-side cleanup semantics for manifest resource handles. */
+  private resourceDisposers: Map<string, string> = new Map();
   /** Records why a binding was assigned to its owning runtime. */
   private bindingAffinities: Map<string, RuntimeAffinity> = new Map();
   /** Non-fatal diagnostics that help users understand runtime boundary mistakes. */
@@ -111,6 +113,7 @@ export class ManifestCodeGenerator {
     this.source = annotated.source;
     this.bindingTable = new Map();
     this.bindingKinds = new Map();
+    this.resourceDisposers = new Map();
     this.bindingAffinities = new Map();
     this.diagnostics = [];
     this.boundaryDiagnosticKeys = new Set();
@@ -258,6 +261,18 @@ export class ManifestCodeGenerator {
         });
   }
 
+  private recordResourceBinding(
+    name: string,
+    runtime: OmniRuntime,
+    sourceNode: AST.Program | AST.Decl | AST.Stmt | AST.Expr,
+    op: ResourceOp,
+  ): void {
+    this.recordBinding(name, runtime, "resource", sourceNode);
+    if (op.disposer) {
+      this.resourceDisposers.set(name, op.disposer);
+    }
+  }
+
   private addDiagnostic(
     severity: ManifestDiagnostic["severity"],
     code: string,
@@ -307,7 +322,7 @@ export class ManifestCodeGenerator {
       return { op: "stream_proxy", meta: { backpressure: true } };
     }
     if (kind === "resource") {
-      return { op: "proxy_with_finalizer", meta: { disposer: "close" } };
+      return { op: "proxy_with_finalizer", meta: { disposer: this.resourceDisposers.get(binding) || "close" } };
     }
     if (kind === "table") {
       return { op: "share_memory", meta: { format: "arrow_c_data", ownership: "borrowed" } };
@@ -1727,7 +1742,7 @@ export class ManifestCodeGenerator {
       const open = this.resourceOpFromCall(resourceExpr, resourceName, runtime);
       if (open) {
         resourceOps.push(open);
-        this.recordBinding(resourceName, (open.runtime as OmniRuntime) || runtime, "resource", resourceExpr);
+        this.recordResourceBinding(resourceName, (open.runtime as OmniRuntime) || runtime, resourceExpr, open);
       } else {
         const captures = this.computeCaptures(resourceExpr, runtime);
         resourceOps.push({
@@ -2300,7 +2315,7 @@ export class ManifestCodeGenerator {
         const resourceOp = this.resourceOpFromCall(valExpr, name, runtime);
         if (resourceOp) {
           ops.push(resourceOp);
-          this.recordBinding(name, (resourceOp.runtime as OmniRuntime) || runtime, "resource", valExpr);
+          this.recordResourceBinding(name, (resourceOp.runtime as OmniRuntime) || runtime, valExpr, resourceOp);
           continue;
         }
 
@@ -2423,7 +2438,7 @@ export class ManifestCodeGenerator {
       const resourceOp = this.resourceOpFromCall(valExpr, name, runtime);
       if (resourceOp) {
         ops.push(resourceOp);
-        this.recordBinding(name, (resourceOp.runtime as OmniRuntime) || runtime, "resource", valExpr);
+        this.recordResourceBinding(name, (resourceOp.runtime as OmniRuntime) || runtime, valExpr, resourceOp);
         continue;
       }
 
