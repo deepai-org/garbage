@@ -387,6 +387,12 @@ export const GLOBAL_AFFINITY: Record<string, OmniRuntime> = {
  * These should not be used as strong evidence alone.
  */
 export const AMBIGUOUS_METHODS = new Set([
+  // Common ecosystem model/row field names. These are valid methods in some
+  // runtimes, but should not create runtime affinity without object provenance.
+  "then",
+  "items",
+  "keys",
+  "count",
   "split",
   "join",
   "replace",
