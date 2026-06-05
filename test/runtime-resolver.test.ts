@@ -326,6 +326,7 @@ describe('Import Analysis', () => {
     expect(analyzeImportPath('botocore.stub')!.runtime).toBe(OmniRuntime.Python);
     expect(analyzeImportPath('pymongo.cursor')!.runtime).toBe(OmniRuntime.Python);
     expect(analyzeImportPath('google.api_core.page_iterator')!.runtime).toBe(OmniRuntime.Python);
+    expect(analyzeImportPath('google.protobuf.descriptor_pb2')!.runtime).toBe(OmniRuntime.Python);
     expect(analyzeImportPath('jax.numpy')!.runtime).toBe(OmniRuntime.Python);
     expect(analyzeImportPath('cupy')!.runtime).toBe(OmniRuntime.Python);
     expect(analyzeImportPath('node:stream')!.runtime).toBe(OmniRuntime.JavaScript);
@@ -342,6 +343,7 @@ describe('Import Analysis', () => {
     expect(analyzeImportPath('action_dispatch')!.runtime).toBe(OmniRuntime.Ruby);
     expect(analyzeImportPath('reactor.core.publisher.Flux')!.runtime).toBe(OmniRuntime.Java);
     expect(analyzeImportPath('io.reactivex.rxjava3.core.Flowable')!.runtime).toBe(OmniRuntime.Java);
+    expect(analyzeImportPath('com.google.common.util.concurrent.ListenableFuture')!.runtime).toBe(OmniRuntime.Java);
     expect(analyzeImportPath('io.unknown')?.runtime).not.toBe(OmniRuntime.Java);
     expect(analyzeImportPath('kotlinx.coroutines.Job')!.runtime).toBe(OmniRuntime.Java);
   });
@@ -858,6 +860,38 @@ describe('Import-to-Usage Propagation', () => {
       OmniRuntime.Ruby,
       OmniRuntime.Ruby,
     ]);
+  });
+
+  test('Protobuf imports propagate Python runtime in collision-heavy model files', () => {
+    const result = resolve([
+      'from google.protobuf import descriptor_pb2',
+      'from google.protobuf import message_factory',
+      'const proto = descriptor_pb2.FileDescriptorProto()',
+      'const message = message_factory.GetMessageClass(descriptor)()',
+    ].join('\n'));
+    const callRuntimes = [...result.affinityMap]
+      .filter(([node]) => node.kind === 'Call')
+      .map(([, aff]) => aff.runtime);
+
+    expect(callRuntimes).toEqual([
+      OmniRuntime.Python,
+      OmniRuntime.Python,
+      OmniRuntime.Python,
+    ]);
+  });
+
+  test('Guava future imports bind Java class names in mixed files', () => {
+    const result = resolve([
+      'import com.google.common.util.concurrent.ListenableFuture',
+      'import com.google.common.util.concurrent.SettableFuture',
+      'const future = SettableFuture.create()',
+      'const done = future instanceof ListenableFuture',
+    ].join('\n'));
+    const callRuntimes = [...result.affinityMap]
+      .filter(([node]) => node.kind === 'Call')
+      .map(([, aff]) => aff.runtime);
+
+    expect(callRuntimes).toEqual([OmniRuntime.Java]);
   });
 
   test('quoted Go stdlib imports can beat Python bare import defaults', () => {
