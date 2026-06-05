@@ -2524,6 +2524,8 @@ console.log(Array.from(s3Pages), Array.from(dynamoRows), Array.from(googlePages)
 
   test('typed Java future and disposable handles infer resource runtime hints', () => {
     const code = `
+import java.util.concurrent.Future
+const plainFuture: Future = make_plain_future()
 const future: java.util.concurrent.CompletableFuture = make_future()
 const scheduled: java.util.concurrent.ScheduledFuture = make_scheduled()
 const guava: com.google.common.util.concurrent.ListenableFuture = make_guava()
@@ -2531,15 +2533,16 @@ const reactor: reactor.core.Disposable = subscribe_reactor()
 const rx: io.reactivex.rxjava3.disposables.Disposable = subscribe_rx()
 const job: kotlinx.coroutines.Job = make_job()
 const executor: java.util.concurrent.ExecutorService = make_executor()
-console.log(future, scheduled, guava, reactor, rx, job, executor)
+console.log(plainFuture, future, scheduled, guava, reactor, rx, job, executor)
 `;
     const m = parseAndManifest(code);
     const evals = findAllOps(m, "eval") as any[];
 
-    for (const binding of ["future", "scheduled", "guava", "reactor", "rx", "job", "executor"]) {
+    for (const binding of ["plainFuture", "future", "scheduled", "guava", "reactor", "rx", "job", "executor"]) {
       expect(evals.find(op => op.bind === binding)).toMatchObject({ runtime: "java" });
     }
     expect(m.bridges).toEqual(expect.arrayContaining([
+      expect.objectContaining({ binding: "plainFuture", op: "proxy_with_finalizer", from: "java", to: "javascript", meta: { disposer: "cancel" } }),
       expect.objectContaining({ binding: "future", op: "proxy_with_finalizer", from: "java", to: "javascript", meta: { disposer: "cancel" } }),
       expect.objectContaining({ binding: "scheduled", op: "proxy_with_finalizer", from: "java", to: "javascript", meta: { disposer: "cancel" } }),
       expect.objectContaining({ binding: "guava", op: "proxy_with_finalizer", from: "java", to: "javascript", meta: { disposer: "cancel" } }),

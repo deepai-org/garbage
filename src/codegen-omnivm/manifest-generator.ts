@@ -1561,7 +1561,7 @@ export class ManifestCodeGenerator {
       "completablefuture", "java.util.concurrent.completablefuture",
       "futuretask", "java.util.concurrent.futuretask",
       "scheduledfuture", "java.util.concurrent.scheduledfuture",
-      "java.util.concurrent.future",
+      "future", "java.util.concurrent.future",
       "executorservice", "java.util.concurrent.executorservice",
       "listenablefuture", "com.google.common.util.concurrent.listenablefuture",
       "reactor.core.disposable",
@@ -1590,7 +1590,7 @@ export class ManifestCodeGenerator {
       "completablefuture", "java.util.concurrent.completablefuture",
       "futuretask", "java.util.concurrent.futuretask",
       "scheduledfuture", "java.util.concurrent.scheduledfuture",
-      "java.util.concurrent.future",
+      "future", "java.util.concurrent.future",
       "listenablefuture", "com.google.common.util.concurrent.listenablefuture",
       "kotlinx.coroutines.job",
     ])) return "cancel";
