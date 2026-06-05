@@ -316,8 +316,15 @@ describe('Import Analysis', () => {
   test('real-world compatibility package imports infer their owning runtimes', () => {
     expect(analyzeImportPath('starlette.requests')!.runtime).toBe(OmniRuntime.Python);
     expect(analyzeImportPath('asyncpg')!.runtime).toBe(OmniRuntime.Python);
+    expect(analyzeImportPath('psycopg.rows')!.runtime).toBe(OmniRuntime.Python);
     expect(analyzeImportPath('marshmallow')!.runtime).toBe(OmniRuntime.Python);
     expect(analyzeImportPath('jsonschema.validators')!.runtime).toBe(OmniRuntime.Python);
+    expect(analyzeImportPath('boto3')!.runtime).toBe(OmniRuntime.Python);
+    expect(analyzeImportPath('botocore.stub')!.runtime).toBe(OmniRuntime.Python);
+    expect(analyzeImportPath('pymongo.cursor')!.runtime).toBe(OmniRuntime.Python);
+    expect(analyzeImportPath('google.api_core.page_iterator')!.runtime).toBe(OmniRuntime.Python);
+    expect(analyzeImportPath('jax.numpy')!.runtime).toBe(OmniRuntime.Python);
+    expect(analyzeImportPath('cupy')!.runtime).toBe(OmniRuntime.Python);
     expect(analyzeImportPath('node:stream')!.runtime).toBe(OmniRuntime.JavaScript);
     expect(analyzeImportPath('node:stream/web')!.runtime).toBe(OmniRuntime.JavaScript);
     expect(analyzeImportPath('undici')!.runtime).toBe(OmniRuntime.JavaScript);
@@ -745,6 +752,43 @@ describe('Import-to-Usage Propagation', () => {
 
     expect(callRuntimes).toEqual([
       OmniRuntime.JavaScript,
+      OmniRuntime.Python,
+    ]);
+  });
+
+  test('ambiguous Redis imports use source syntax in mixed files', () => {
+    const result = resolve([
+      'import redis from "redis"',
+      'import redis as pyredis',
+      'const jsClient = redis.createClient()',
+      'const pyClient = pyredis.Redis()',
+    ].join('\n'));
+    const callRuntimes = [...result.affinityMap]
+      .filter(([node]) => node.kind === 'Call')
+      .map(([, aff]) => aff.runtime);
+
+    expect(callRuntimes).toEqual([
+      OmniRuntime.JavaScript,
+      OmniRuntime.Python,
+    ]);
+  });
+
+  test('tensor and SDK pager imports propagate Python runtime', () => {
+    const result = resolve([
+      'import jax.numpy as jnp',
+      'import boto3',
+      'import pymongo',
+      'const tensor = jnp.array([1, 2, 3])',
+      'const s3 = boto3.client("s3")',
+      'const mongo = pymongo.MongoClient("mongodb://example.test")',
+    ].join('\n'));
+    const callRuntimes = [...result.affinityMap]
+      .filter(([node]) => node.kind === 'Call')
+      .map(([, aff]) => aff.runtime);
+
+    expect(callRuntimes).toEqual([
+      OmniRuntime.Python,
+      OmniRuntime.Python,
       OmniRuntime.Python,
     ]);
   });
