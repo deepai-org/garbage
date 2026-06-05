@@ -1575,6 +1575,19 @@ export class ManifestCodeGenerator {
       "autocloseable", "java.lang.autocloseable",
       "closeable", "java.io.closeable",
     ])) return OmniRuntime.Java;
+    if (this.matchesTypeName(name, [
+      "sqlalchemy.orm.session.session",
+      "sqlalchemy.ext.asyncio.asyncsession",
+      "sqlalchemy.engine.connection",
+      "sqlalchemy.ext.asyncio.asyncconnection",
+      "asyncpg.connection",
+    ])) return OmniRuntime.Python;
+    if (this.matchesTypeName(name, [
+      "sqlalchemy.engine.transaction",
+      "sqlalchemy.engine.roottransaction",
+      "sqlalchemy.engine.nestedtransaction",
+      "sqlalchemy.ext.asyncio.asyncsessiontransaction",
+    ])) return OmniRuntime.Python;
     return undefined;
   }
 
@@ -1590,6 +1603,19 @@ export class ManifestCodeGenerator {
     if (this.matchesTypeName(name, [
       "autocloseable", "java.lang.autocloseable",
       "closeable", "java.io.closeable",
+    ])) return "close";
+    if (this.matchesTypeName(name, [
+      "sqlalchemy.engine.transaction",
+      "sqlalchemy.engine.roottransaction",
+      "sqlalchemy.engine.nestedtransaction",
+      "sqlalchemy.ext.asyncio.asyncsessiontransaction",
+    ])) return "rollback";
+    if (this.matchesTypeName(name, [
+      "sqlalchemy.orm.session.session",
+      "sqlalchemy.ext.asyncio.asyncsession",
+      "sqlalchemy.engine.connection",
+      "sqlalchemy.ext.asyncio.asyncconnection",
+      "asyncpg.connection",
     ])) return "close";
     if (this.matchesTypeName(name, [
       "completablefuture", "java.util.concurrent.completablefuture",

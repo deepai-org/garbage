@@ -2377,6 +2377,56 @@ resource.close(tx, "cleanup_log.append('rollback')")
     ]));
   });
 
+  test('typed Python ORM lifecycle handles infer resource runtime hints', () => {
+    const code = `
+const session: sqlalchemy.orm.session.Session = make_session()
+const asyncSession: sqlalchemy.ext.asyncio.AsyncSession = make_async_session()
+const connection: sqlalchemy.engine.Connection = make_connection()
+const asyncConnection: sqlalchemy.ext.asyncio.AsyncConnection = make_async_connection()
+const asyncpgConnection: asyncpg.Connection = make_asyncpg_connection()
+const transaction: sqlalchemy.engine.Transaction = make_transaction()
+const nestedTransaction: sqlalchemy.engine.NestedTransaction = make_nested_transaction()
+const asyncTransaction: sqlalchemy.ext.asyncio.AsyncSessionTransaction = make_async_transaction()
+console.log(session, asyncSession, connection, asyncConnection, asyncpgConnection, transaction, nestedTransaction, asyncTransaction)
+`;
+    const m = parseAndManifest(code);
+    const evals = findAllOps(m, "eval") as any[];
+
+    for (const binding of ["session", "asyncSession", "connection", "asyncConnection", "asyncpgConnection", "transaction", "nestedTransaction", "asyncTransaction"]) {
+      expect(evals.find(op => op.bind === binding)).toMatchObject({ runtime: "python" });
+    }
+    expect(m.bridges).toEqual(expect.arrayContaining([
+      expect.objectContaining({ binding: "session", op: "proxy_with_finalizer", from: "python", to: "javascript", meta: { disposer: "close" } }),
+      expect.objectContaining({ binding: "asyncSession", op: "proxy_with_finalizer", from: "python", to: "javascript", meta: { disposer: "close" } }),
+      expect.objectContaining({ binding: "connection", op: "proxy_with_finalizer", from: "python", to: "javascript", meta: { disposer: "close" } }),
+      expect.objectContaining({ binding: "asyncConnection", op: "proxy_with_finalizer", from: "python", to: "javascript", meta: { disposer: "close" } }),
+      expect.objectContaining({ binding: "asyncpgConnection", op: "proxy_with_finalizer", from: "python", to: "javascript", meta: { disposer: "close" } }),
+      expect.objectContaining({ binding: "transaction", op: "proxy_with_finalizer", from: "python", to: "javascript", meta: { disposer: "rollback" } }),
+      expect.objectContaining({ binding: "nestedTransaction", op: "proxy_with_finalizer", from: "python", to: "javascript", meta: { disposer: "rollback" } }),
+      expect.objectContaining({ binding: "asyncTransaction", op: "proxy_with_finalizer", from: "python", to: "javascript", meta: { disposer: "rollback" } }),
+    ]));
+  });
+
+  test('typed resource lifecycle hints avoid broad database-ish matches', () => {
+    const code = `
+const sessionInfo: SessionInfo = load_session_info()
+const connectionOptions: ConnectionOptions = load_connection_options()
+const transactionRecord: TransactionRecord = load_transaction_record()
+console.log(sessionInfo, connectionOptions, transactionRecord)
+`;
+    const m = parseAndManifest(code);
+    const evals = findAllOps(m, "eval") as any[];
+
+    expect(evals.find(op => op.bind === "sessionInfo")).toMatchObject({ runtime: "javascript" });
+    expect(evals.find(op => op.bind === "connectionOptions")).toMatchObject({ runtime: "javascript" });
+    expect(evals.find(op => op.bind === "transactionRecord")).toMatchObject({ runtime: "javascript" });
+    expect(m.bridges).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ binding: "sessionInfo", op: "proxy_with_finalizer" }),
+      expect.objectContaining({ binding: "connectionOptions", op: "proxy_with_finalizer" }),
+      expect.objectContaining({ binding: "transactionRecord", op: "proxy_with_finalizer" }),
+    ]));
+  });
+
   test('typed table declarations lower to zero-copy table manifest ops automatically', () => {
     const code = `
 const orders: PandasDataFrame = "arrow-buffer"
