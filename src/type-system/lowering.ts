@@ -208,9 +208,13 @@ function lowerSimpleType(
       return C.bufferView(C.UINT8, name === "SharedArrayBuffer" ? "shared" : "owned");
 
     // === Disposable ===
-    case "Disposable": case "Closer": case "AutoCloseable":
-      if (args && args.length === 1) return C.disposable(args[0], name === "Closer" ? "close" : "dispose");
-      return C.disposable(C.ANY, name === "Closer" ? "close" : "dispose");
+    case "Disposable":
+      if (args && args.length === 1) return C.disposable(args[0], "dispose");
+      return C.disposable(C.ANY, "dispose");
+    case "Closer": case "Closeable": case "AutoCloseable":
+    case "java.io.Closeable": case "java.lang.AutoCloseable":
+      if (args && args.length === 1) return C.disposable(args[0], "close");
+      return C.disposable(C.ANY, "close");
 
     // === Generic with type args ===
     default:

@@ -833,6 +833,22 @@ describe('Advanced: Cross-Boundary Resource Management (Disposable)', () => {
     expect((lowered as DisposableType).disposer).toBe('close');
   });
 
+  test('lowering: Java closeable resources use close disposer', () => {
+    for (const name of ['Closeable', 'AutoCloseable', 'java.io.Closeable', 'java.lang.AutoCloseable']) {
+      const node: AST.TypeNode = { kind: 'SimpleType', id: { kind: 'Identifier', name, span: { start: 0, end: 0, line: 0, column: 0 } }, span: { start: 0, end: 0, line: 0, column: 0 } };
+      const lowered = lowerType(node, 'java');
+      expect(lowered.kind).toBe('disposable');
+      expect((lowered as DisposableType).disposer).toBe('close');
+    }
+  });
+
+  test('lowering: Disposable keeps dispose disposer', () => {
+    const node: AST.TypeNode = { kind: 'SimpleType', id: { kind: 'Identifier', name: 'Disposable', span: { start: 0, end: 0, line: 0, column: 0 } }, span: { start: 0, end: 0, line: 0, column: 0 } };
+    const lowered = lowerType(node, 'java');
+    expect(lowered.kind).toBe('disposable');
+    expect((lowered as DisposableType).disposer).toBe('dispose');
+  });
+
   test('lowering: AsyncIterable → Stream', () => {
     const node: AST.TypeNode = {
       kind: 'GenericType',
