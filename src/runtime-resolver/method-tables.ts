@@ -350,16 +350,12 @@ export const GLOBAL_AFFINITY: Record<string, OmniRuntime> = {
   // Go package-like roots commonly used without an import in examples.
   fmt: OmniRuntime.Go,
 
-  // Java package roots and common third-party package roots.
+  // Java package roots.
   java: OmniRuntime.Java,
   javax: OmniRuntime.Java,
   jakarta: OmniRuntime.Java,
   org: OmniRuntime.Java,
   com: OmniRuntime.Java,
-  okhttp3: OmniRuntime.Java,
-  reactor: OmniRuntime.Java,
-  kotlin: OmniRuntime.Java,
-  kotlinx: OmniRuntime.Java,
 
   // Java classes commonly used as member roots.
   System: OmniRuntime.Java,

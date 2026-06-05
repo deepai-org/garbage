@@ -1,18 +1,12 @@
 import { OmniRuntime, RuntimeAffinity, AffinityEvidence } from './types';
 
 /**
- * Known module → runtime mappings for common imports.
+ * Known standard/platform module → runtime mappings.
  */
 const PYTHON_MODULES = new Set([
   "os", "sys", "math", "json", "re", "datetime", "collections", "itertools",
   "functools", "pathlib", "typing", "dataclasses", "abc", "enum", "io",
-  "logging", "unittest", "pytest", "asyncio", "anyio", "aiohttp", "requests",
-  "flask", "werkzeug", "django", "fastapi", "starlette", "uvicorn", "numpy", "pandas", "polars", "pyarrow", "scipy", "matplotlib",
-  "tensorflow", "torch", "jax", "cupy", "sklearn", "sqlalchemy", "celery", "pydantic",
-  "asyncpg", "psycopg", "psycopg2", "marshmallow", "jsonschema",
-  "boto3", "botocore", "pymongo", "redis", "google", "google.api_core",
-  "beautifulsoup4", "bs4", "jinja2", "httpx", "markdown",
-  "selenium", "scrapy", "PIL", "cv2", "pickle",
+  "logging", "unittest", "asyncio", "pickle",
   "subprocess", "threading", "multiprocessing", "socket", "http",
   "urllib", "email", "csv", "xml", "html", "hashlib", "hmac",
   "secrets", "random", "statistics", "decimal", "fractions",
@@ -23,6 +17,13 @@ const PYTHON_MODULES = new Set([
   "array", "weakref", "types", "importlib", "pkgutil", "zipimport",
   "compileall", "dis", "ast", "symtable", "token", "keyword",
   "linecache", "tokenize", "tabnanny", "pyclbr",
+]);
+
+const PYTHON_PACKAGE_ROOTS = new Set([
+  "collections", "concurrent", "ctypes", "distutils", "email", "encodings",
+  "html", "http", "importlib", "json", "lib2to3", "logging", "multiprocessing",
+  "os", "pydoc_data", "site-packages", "sqlite3", "test", "tkinter",
+  "unittest", "urllib", "venv", "wsgiref", "xml", "xmlrpc",
 ]);
 
 const GO_MODULES = new Set([
@@ -47,45 +48,16 @@ const GO_MODULES = new Set([
 ]);
 
 const JS_MODULES = new Set([
-  "react", "react-dom", "react-dom/server", "vue", "angular", "svelte", "next", "nuxt",
-  "express", "koa", "fastify", "hapi", "nest", "nestjs",
-  "lodash", "underscore", "ramda", "rxjs", "immutable",
-  "zod", "cheerio", "marked", "d3-shape",
-  "busboy", "multer", "body-parser", "koa-bodyparser", "@koa/bodyparser",
-  "axios", "node-fetch", "got", "superagent", "undici",
-  "moment", "dayjs", "date-fns", "luxon",
-  "webpack", "rollup", "vite", "parcel", "esbuild",
-  "babel", "typescript", "ts-node",
-  "jest", "mocha", "chai", "jasmine", "vitest",
-  "mongoose", "sequelize", "typeorm", "prisma", "@prisma/client", "knex",
-  "socket.io", "ws", "redis", "bull", "bullmq", "duckdb", "amqplib",
-  "passport", "jsonwebtoken", "bcrypt", "helmet",
-  "chalk", "commander", "inquirer", "yargs", "ora",
   "fs", "path", "http", "https", "crypto", "stream", "events",
   "child_process", "cluster", "os", "url", "querystring",
   "util", "assert", "buffer", "zlib", "tls", "net", "dns",
   "readline", "repl", "vm", "worker_threads", "perf_hooks",
-  "styled-components", "emotion", "tailwindcss",
-  "graphql", "apollo", "relay",
-  "three", "d3", "chart.js", "pixi.js",
-  "electron", "puppeteer", "playwright",
 ]);
 
 const RUBY_MODULES = new Set([
-  "rails", "sinatra", "rack", "rackup", "webrick", "puma", "unicorn", "thin",
-  "activerecord", "active_record", "activesupport", "actionpack", "actionview", "action_dispatch", "action_controller",
-  "nokogiri", "httparty", "faraday", "rest-client",
-  "rspec", "minitest", "capybara", "factory_bot",
-  "devise", "cancancan", "pundit", "omniauth",
-  "sidekiq", "resque", "delayed_job", "good_job",
-  "dry-validation", "dry/validation",
-  "rubocop", "bundler", "rake", "thor",
   "json", "yaml", "csv", "erb", "haml", "slim",
-  "redis", "pg", "mysql2", "sqlite3", "mongoid",
-  "aws-sdk", "fog", "carrierwave", "paperclip",
-  "kaminari", "will_paginate", "ransack",
-  "stripe", "braintree", "twilio-ruby",
-  "cocoapods", "fastlane",
+  "webrick", "net/http", "uri", "set", "time", "date", "pathname",
+  "stringio", "tempfile", "fileutils", "securerandom", "digest",
 ]);
 
 const JAVA_MODULES = new Set([
@@ -93,16 +65,6 @@ const JAVA_MODULES = new Set([
   "java.math", "java.time", "java.text", "java.sql", "java.security",
   "java.util.concurrent", "java.util.stream", "java.util.function",
   "java.util.regex", "java.util.logging",
-  "javax.servlet", "javax.persistence", "javax.annotation",
-  "javax.inject", "javax.validation", "javax.ws.rs",
-  "org.springframework", "org.hibernate", "org.junit",
-  "org.apache", "org.slf4j", "org.mockito",
-  "com.google", "com.fasterxml.jackson", "com.squareup",
-  "okhttp3",
-  "io.netty", "io.grpc", "io.reactivex", "io.reactivex.rxjava3", "reactor", "reactor.core",
-  "kotlin", "kotlinx.coroutines",
-  "jakarta.servlet", "jakarta.persistence", "jakarta.validation",
-  "lombok",
 ]);
 
 /**
@@ -119,7 +81,7 @@ export function analyzeImportPath(
     return { runtime: OmniRuntime.JavaScript, confidence: "inferred", evidence: [evidence] };
   }
   if (options?.preferredRuntime === OmniRuntime.Python &&
-      (PYTHON_MODULES.has(path) || [...PYTHON_MODULES].some(mod => path.startsWith(`${mod}.`)))) {
+      (PYTHON_MODULES.has(path) || [...PYTHON_PACKAGE_ROOTS].some(mod => path.startsWith(`${mod}.`)))) {
     return { runtime: OmniRuntime.Python, confidence: "inferred", evidence: [evidence] };
   }
   if (options?.preferredRuntime === OmniRuntime.Go &&
@@ -153,7 +115,7 @@ export function analyzeImportPath(
   if (PYTHON_MODULES.has(path)) {
     return { runtime: OmniRuntime.Python, confidence: "inferred", evidence: [evidence] };
   }
-  if ([...PYTHON_MODULES].some(mod => path.startsWith(`${mod}.`))) {
+  if ([...PYTHON_PACKAGE_ROOTS].some(mod => path.startsWith(`${mod}.`))) {
     return { runtime: OmniRuntime.Python, confidence: "inferred", evidence: [evidence] };
   }
 

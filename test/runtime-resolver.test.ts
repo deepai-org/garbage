@@ -229,10 +229,9 @@ describe('Builtin Tables', () => {
     expect(lookupGlobalAffinity('java')).toBe(OmniRuntime.Java);
     expect(lookupGlobalAffinity('org')).toBe(OmniRuntime.Java);
     expect(lookupGlobalAffinity('com')).toBe(OmniRuntime.Java);
-    expect(lookupGlobalAffinity('okhttp3')).toBe(OmniRuntime.Java);
-    expect(lookupGlobalAffinity('reactor')).toBe(OmniRuntime.Java);
-    expect(lookupGlobalAffinity('kotlin')).toBe(OmniRuntime.Java);
-    expect(lookupGlobalAffinity('kotlinx')).toBe(OmniRuntime.Java);
+    expect(lookupGlobalAffinity('okhttp3')).toBeUndefined();
+    expect(lookupGlobalAffinity('reactor')).toBeUndefined();
+    expect(lookupGlobalAffinity('kotlinx')).toBeUndefined();
     expect(lookupGlobalAffinity('io')).toBeUndefined();
   });
 
@@ -257,8 +256,8 @@ describe('Import Analysis', () => {
     expect(result!.runtime).toBe(OmniRuntime.Go);
   });
 
-  test('"react" infers JavaScript', () => {
-    const result = analyzeImportPath('react');
+  test('"node:stream" infers JavaScript', () => {
+    const result = analyzeImportPath('node:stream');
     expect(result).toBeDefined();
     expect(result!.runtime).toBe(OmniRuntime.JavaScript);
   });
@@ -299,55 +298,59 @@ describe('Import Analysis', () => {
     expect(result!.runtime).toBe(OmniRuntime.JavaScript);
   });
 
-  test('edge ecosystem package aliases infer their owning runtimes', () => {
-    expect(analyzeImportPath('react-dom/server')!.runtime).toBe(OmniRuntime.JavaScript);
+  test('third-party ecosystem package aliases do not infer owning runtimes', () => {
+    expect(analyzeImportPath('react-dom/server')).toBeUndefined();
+    expect(analyzeImportPath('active_record')).toBeUndefined();
+    expect(analyzeImportPath('dry/validation')).toBeUndefined();
+    expect(analyzeImportPath('pyarrow')).toBeUndefined();
+    expect(analyzeImportPath('polars')).toBeUndefined();
+    expect(analyzeImportPath('bullmq')).toBeUndefined();
+    expect(analyzeImportPath('duckdb')).toBeUndefined();
+    expect(analyzeImportPath('reactor.core')).toBeUndefined();
     expect(analyzeImportPath('@prisma/client')!.runtime).toBe(OmniRuntime.JavaScript);
-    expect(analyzeImportPath('active_record')!.runtime).toBe(OmniRuntime.Ruby);
-    expect(analyzeImportPath('dry/validation')!.runtime).toBe(OmniRuntime.Ruby);
     expect(analyzeImportPath('go.uber.org/zap')!.runtime).toBe(OmniRuntime.Go);
     expect(analyzeImportPath('log/slog')!.runtime).toBe(OmniRuntime.Go);
-    expect(analyzeImportPath('pyarrow')!.runtime).toBe(OmniRuntime.Python);
-    expect(analyzeImportPath('polars')!.runtime).toBe(OmniRuntime.Python);
-    expect(analyzeImportPath('bullmq')!.runtime).toBe(OmniRuntime.JavaScript);
-    expect(analyzeImportPath('duckdb')!.runtime).toBe(OmniRuntime.JavaScript);
-    expect(analyzeImportPath('reactor.core')!.runtime).toBe(OmniRuntime.Java);
   });
 
-  test('real-world compatibility package imports infer their owning runtimes', () => {
-    expect(analyzeImportPath('starlette.requests')!.runtime).toBe(OmniRuntime.Python);
-    expect(analyzeImportPath('uvicorn')!.runtime).toBe(OmniRuntime.Python);
-    expect(analyzeImportPath('werkzeug.serving')!.runtime).toBe(OmniRuntime.Python);
-    expect(analyzeImportPath('anyio')!.runtime).toBe(OmniRuntime.Python);
-    expect(analyzeImportPath('asyncpg')!.runtime).toBe(OmniRuntime.Python);
-    expect(analyzeImportPath('psycopg.rows')!.runtime).toBe(OmniRuntime.Python);
-    expect(analyzeImportPath('marshmallow')!.runtime).toBe(OmniRuntime.Python);
-    expect(analyzeImportPath('jsonschema.validators')!.runtime).toBe(OmniRuntime.Python);
-    expect(analyzeImportPath('boto3')!.runtime).toBe(OmniRuntime.Python);
-    expect(analyzeImportPath('botocore.stub')!.runtime).toBe(OmniRuntime.Python);
-    expect(analyzeImportPath('pymongo.cursor')!.runtime).toBe(OmniRuntime.Python);
-    expect(analyzeImportPath('google.api_core.page_iterator')!.runtime).toBe(OmniRuntime.Python);
-    expect(analyzeImportPath('google.protobuf.descriptor_pb2')!.runtime).toBe(OmniRuntime.Python);
-    expect(analyzeImportPath('jax.numpy')!.runtime).toBe(OmniRuntime.Python);
-    expect(analyzeImportPath('cupy')!.runtime).toBe(OmniRuntime.Python);
+  test('real-world compatibility package imports require explicit runtime evidence', () => {
+    for (const importPath of [
+      'starlette.requests',
+      'uvicorn',
+      'werkzeug.serving',
+      'anyio',
+      'asyncpg',
+      'psycopg.rows',
+      'marshmallow',
+      'jsonschema.validators',
+      'boto3',
+      'botocore.stub',
+      'pymongo.cursor',
+      'google.api_core.page_iterator',
+      'google.protobuf.descriptor_pb2',
+      'jax.numpy',
+      'cupy',
+      'undici',
+      'undici/types',
+      'busboy',
+      'multer',
+      'body-parser',
+      'koa-bodyparser',
+      'rack/mock',
+      'rackup/handler/webrick',
+      'active_record/relation',
+      'action_dispatch',
+      'reactor.core.publisher.Flux',
+      'io.reactivex.rxjava3.core.Flowable',
+      'kotlinx.coroutines.Job',
+    ]) {
+      expect(analyzeImportPath(importPath)).toBeUndefined();
+    }
     expect(analyzeImportPath('node:stream')!.runtime).toBe(OmniRuntime.JavaScript);
     expect(analyzeImportPath('node:stream/web')!.runtime).toBe(OmniRuntime.JavaScript);
-    expect(analyzeImportPath('undici')!.runtime).toBe(OmniRuntime.JavaScript);
-    expect(analyzeImportPath('undici/types')!.runtime).toBe(OmniRuntime.JavaScript);
-    expect(analyzeImportPath('busboy')!.runtime).toBe(OmniRuntime.JavaScript);
-    expect(analyzeImportPath('multer')!.runtime).toBe(OmniRuntime.JavaScript);
-    expect(analyzeImportPath('body-parser')!.runtime).toBe(OmniRuntime.JavaScript);
-    expect(analyzeImportPath('koa-bodyparser')!.runtime).toBe(OmniRuntime.JavaScript);
-    expect(analyzeImportPath('rack/mock')!.runtime).toBe(OmniRuntime.Ruby);
-    expect(analyzeImportPath('rackup/handler/webrick')!.runtime).toBe(OmniRuntime.Ruby);
-    expect(analyzeImportPath('active_record/relation')!.runtime).toBe(OmniRuntime.Ruby);
-    expect(analyzeImportPath('action_dispatch')!.runtime).toBe(OmniRuntime.Ruby);
-    expect(analyzeImportPath('reactor.core.publisher.Flux')!.runtime).toBe(OmniRuntime.Java);
-    expect(analyzeImportPath('io.reactivex.rxjava3.core.Flowable')!.runtime).toBe(OmniRuntime.Java);
     expect(analyzeImportPath('com.google.common.util.concurrent.ListenableFuture')!.runtime).toBe(OmniRuntime.Java);
     expect(analyzeImportPath('jakarta.validation')!.runtime).toBe(OmniRuntime.Java);
     expect(analyzeImportPath('jakarta.validation.ConstraintViolationException')!.runtime).toBe(OmniRuntime.Java);
     expect(analyzeImportPath('io.unknown')?.runtime).not.toBe(OmniRuntime.Java);
-    expect(analyzeImportPath('kotlinx.coroutines.Job')!.runtime).toBe(OmniRuntime.Java);
   });
 
   test('unknown module returns undefined', () => {
@@ -615,25 +618,25 @@ describe('Import-to-Usage Propagation', () => {
     }
   });
 
-  test('import numpy → numpy.array() resolves to Python', () => {
+  test('third-party imports do not resolve by package name alone', () => {
     const result = resolve('import numpy\nnumpy.array([1, 2, 3])');
     for (const [node, aff] of result.affinityMap) {
       if (node.kind === 'Call') {
-        expect(aff.runtime).toBe(OmniRuntime.Python);
+        expect(aff.runtime).toBe(OmniRuntime.JavaScript);
       }
     }
   });
 
-  test('import react (bare) resolves to JavaScript', () => {
+  test('unknown bare imports remain unresolved by package name alone', () => {
     const result = resolve('import react');
     const node = result.program.body[0];
     const aff = result.affinityMap.get(node);
-    expect(aff).toBeDefined();
-    expect(aff!.runtime).toBe(OmniRuntime.JavaScript);
+    expect(aff?.runtime).toBe(OmniRuntime.JavaScript);
+    expect(aff?.confidence).toBe("fallback");
   });
 
   test('assigned variable inherits import runtime through chain', () => {
-    const result = resolve('import pandas\ndf = pandas.DataFrame(data)\ndf.head(5)');
+    const result = resolve('import os\npath = os.path\npath.join("/tmp", "file")');
     // All calls should be Python
     for (const [node, aff] of result.affinityMap) {
       if (node.kind === 'Call') {
@@ -682,8 +685,8 @@ describe('Import-to-Usage Propagation', () => {
     expect(seen).toEqual(new Set(['then', 'count', 'keys', 'values', 'entries', 'close']));
   });
 
-  test('aliased import propagates: import numpy as np', () => {
-    const result = resolve('import numpy as np\nnp.array([1])');
+  test('aliased stdlib import propagates: import os as pyos', () => {
+    const result = resolve('import os as pyos\npyos.getcwd()');
     for (const [node, aff] of result.affinityMap) {
       if (node.kind === 'Call') {
         expect(aff.runtime).toBe(OmniRuntime.Python);
@@ -693,35 +696,30 @@ describe('Import-to-Usage Propagation', () => {
 
   test('Java dotted class imports bind simple class names in mixed files', () => {
     const result = resolve([
-      'import react',
       'import java.util.concurrent.CompletableFuture',
-      'import reactor.core.publisher.Flux',
-      'import io.reactivex.rxjava3.core.Flowable',
-      'import kotlinx.coroutines.Job',
+      'import java.util.ArrayList',
+      'import java.util.HashMap',
       'const future = CompletableFuture.completedFuture("ok")',
-      'const flux = Flux.just("a")',
-      'const flowable = Flowable.just("b")',
-      'const job = Job()',
+      'const list = new ArrayList()',
+      'const map = new HashMap()',
     ].join('\n'));
     const callRuntimes = [...result.affinityMap]
-      .filter(([node]) => node.kind === 'Call')
+      .filter(([node]) => node.kind === 'Call' || node.kind === 'NewExpr')
       .map(([, aff]) => aff.runtime);
 
     expect(callRuntimes).toEqual([
       OmniRuntime.Java,
       OmniRuntime.Java,
       OmniRuntime.Java,
-      OmniRuntime.Java,
     ]);
   });
 
-  test('Python dotted imports bind package roots in mixed files', () => {
+  test('Python dotted stdlib imports bind package roots in mixed files', () => {
     const result = resolve([
-      'import react',
-      'import starlette.requests',
-      'import django.http',
-      'const req = starlette.requests.Request(scope)',
-      'const response = django.http.HttpResponse("ok")',
+      'import http.client',
+      'import email.message',
+      'const connection = http.client.HTTPConnection("example.test")',
+      'const message = email.message.EmailMessage()',
     ].join('\n'));
     const callRuntimes = [...result.affinityMap]
       .filter(([node]) => node.kind === 'Call')
@@ -743,7 +741,7 @@ describe('Import-to-Usage Propagation', () => {
   });
 
   test('Node node: builtin imports resolve to JavaScript in mixed files', () => {
-    const result = resolve('import django\nimport { Readable } from "node:stream"\nconst stream = Readable.from(["chunk"])');
+    const result = resolve('import os\nimport { Readable } from "node:stream"\nconst stream = Readable.from(["chunk"])');
     const callRuntimes = [...result.affinityMap]
       .filter(([node]) => node.kind === 'Call')
       .map(([, aff]) => aff.runtime);
@@ -782,11 +780,11 @@ describe('Import-to-Usage Propagation', () => {
 
     expect(callRuntimes).toEqual([
       OmniRuntime.JavaScript,
-      OmniRuntime.Python,
+      OmniRuntime.JavaScript,
     ]);
   });
 
-  test('tensor and SDK pager imports propagate Python runtime', () => {
+  test('tensor and SDK pager imports do not propagate without explicit runtime evidence', () => {
     const result = resolve([
       'import jax.numpy as jnp',
       'import boto3',
@@ -800,13 +798,13 @@ describe('Import-to-Usage Propagation', () => {
       .map(([, aff]) => aff.runtime);
 
     expect(callRuntimes).toEqual([
-      OmniRuntime.Python,
-      OmniRuntime.Python,
-      OmniRuntime.Python,
+      OmniRuntime.JavaScript,
+      OmniRuntime.JavaScript,
+      OmniRuntime.JavaScript,
     ]);
   });
 
-  test('ASGI server support imports propagate Python runtime', () => {
+  test('ASGI server support imports do not propagate without explicit runtime evidence', () => {
     const result = resolve([
       'import uvicorn',
       'from werkzeug.serving import make_server',
@@ -820,9 +818,9 @@ describe('Import-to-Usage Propagation', () => {
       .map(([, aff]) => aff.runtime);
 
     expect(callRuntimes).toEqual([
-      OmniRuntime.Python,
-      OmniRuntime.Python,
-      OmniRuntime.Python,
+      OmniRuntime.JavaScript,
+      OmniRuntime.JavaScript,
+      OmniRuntime.JavaScript,
     ]);
   });
 
@@ -847,7 +845,7 @@ describe('Import-to-Usage Propagation', () => {
     ]);
   });
 
-  test('Rackup and ActionDispatch imports propagate Ruby runtime', () => {
+  test('Rackup and ActionDispatch imports do not propagate without explicit runtime evidence', () => {
     const result = resolve([
       'import Rackup from "rackup/handler/webrick"',
       'import ActionDispatch from "action_dispatch"',
@@ -859,12 +857,12 @@ describe('Import-to-Usage Propagation', () => {
       .map(([, aff]) => aff.runtime);
 
     expect(callRuntimes).toEqual([
-      OmniRuntime.Ruby,
-      OmniRuntime.Ruby,
+      OmniRuntime.JavaScript,
+      OmniRuntime.JavaScript,
     ]);
   });
 
-  test('Protobuf imports propagate Python runtime in collision-heavy model files', () => {
+  test('Protobuf imports do not propagate without explicit runtime evidence', () => {
     const result = resolve([
       'from google.protobuf import descriptor_pb2',
       'from google.protobuf import message_factory',
@@ -876,9 +874,9 @@ describe('Import-to-Usage Propagation', () => {
       .map(([, aff]) => aff.runtime);
 
     expect(callRuntimes).toEqual([
-      OmniRuntime.Python,
-      OmniRuntime.Python,
-      OmniRuntime.Python,
+      OmniRuntime.JavaScript,
+      OmniRuntime.JavaScript,
+      OmniRuntime.JavaScript,
     ]);
   });
 
@@ -939,13 +937,13 @@ describe('Global Root Propagation', () => {
     expect(callRuntimes).not.toContain(OmniRuntime.Go);
   });
 
-  test('reactive Java package roots resolve to Java without tags', () => {
+  test('reactive Java package roots do not resolve without tags', () => {
     const result = resolve('const flux = reactor.core.publisher.Flux.just("alpha")\nconst job = kotlinx.coroutines.Job()');
     const callRuntimes = [...result.affinityMap]
       .filter(([node]) => node.kind === 'Call')
       .map(([, nodeAff]) => nodeAff.runtime);
 
-    expect(callRuntimes).toEqual([OmniRuntime.Java, OmniRuntime.Java]);
+    expect(callRuntimes).toEqual([OmniRuntime.JavaScript, OmniRuntime.JavaScript]);
   });
 
   test('qualified io Java package prefixes resolve without making io global', () => {

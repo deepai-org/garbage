@@ -2329,9 +2329,9 @@ result = sorted(names)`;
 describe('Type System Bridge Integration', () => {
   test('resource and job helper calls lower to manifest ops', () => {
     const code = `
-const tx = resource.open("python", "sqlalchemy.transaction", "rollback")
+const tx = resource.open("python", "db.transaction", "rollback")
 const payload = { user: "ada", task: "receipt" }
-const receipt = job.enqueue("ruby", "sidekiq", payload)
+const receipt = job.enqueue("ruby", "background", payload)
 job.complete(receipt, "ok")
 const result = job.wait(receipt)
 job.cancel(receipt, "client-abort", "cleanup_log.append('cancel')")
@@ -2346,7 +2346,7 @@ resource.close(tx, "cleanup_log.append('rollback')")
     expect(resources[0]).toMatchObject({
       runtime: "python",
       bind: "tx",
-      kind: "sqlalchemy.transaction",
+      kind: "db.transaction",
       disposer: "rollback",
     });
     expect(resources[1]).toMatchObject({
@@ -2357,7 +2357,7 @@ resource.close(tx, "cleanup_log.append('rollback')")
     expect(jobs[0]).toMatchObject({
       runtime: "ruby",
       bind: "receipt",
-      kind: "sidekiq",
+      kind: "background",
       payload: { kind: "ref", name: "payload" },
     });
     expect(jobs[2]).toMatchObject({ bind: "result", target: "receipt" });
@@ -2377,41 +2377,13 @@ resource.close(tx, "cleanup_log.append('rollback')")
     ]));
   });
 
-  test('typed Python ORM lifecycle handles infer resource runtime hints', () => {
-    const code = `
-const session: sqlalchemy.orm.session.Session = make_session()
-const asyncSession: sqlalchemy.ext.asyncio.AsyncSession = make_async_session()
-const connection: sqlalchemy.engine.Connection = make_connection()
-const asyncConnection: sqlalchemy.ext.asyncio.AsyncConnection = make_async_connection()
-const asyncpgConnection: asyncpg.Connection = make_asyncpg_connection()
-const transaction: sqlalchemy.engine.Transaction = make_transaction()
-const nestedTransaction: sqlalchemy.engine.NestedTransaction = make_nested_transaction()
-const asyncTransaction: sqlalchemy.ext.asyncio.AsyncSessionTransaction = make_async_transaction()
-console.log(session, asyncSession, connection, asyncConnection, asyncpgConnection, transaction, nestedTransaction, asyncTransaction)
-`;
-    const m = parseAndManifest(code);
-    const evals = findAllOps(m, "eval") as any[];
-
-    for (const binding of ["session", "asyncSession", "connection", "asyncConnection", "asyncpgConnection", "transaction", "nestedTransaction", "asyncTransaction"]) {
-      expect(evals.find(op => op.bind === binding)).toMatchObject({ runtime: "python" });
-    }
-    expect(m.bridges).toEqual(expect.arrayContaining([
-      expect.objectContaining({ binding: "session", op: "proxy_with_finalizer", from: "python", to: "javascript", meta: { disposer: "close" } }),
-      expect.objectContaining({ binding: "asyncSession", op: "proxy_with_finalizer", from: "python", to: "javascript", meta: { disposer: "close" } }),
-      expect.objectContaining({ binding: "connection", op: "proxy_with_finalizer", from: "python", to: "javascript", meta: { disposer: "close" } }),
-      expect.objectContaining({ binding: "asyncConnection", op: "proxy_with_finalizer", from: "python", to: "javascript", meta: { disposer: "close" } }),
-      expect.objectContaining({ binding: "asyncpgConnection", op: "proxy_with_finalizer", from: "python", to: "javascript", meta: { disposer: "close" } }),
-      expect.objectContaining({ binding: "transaction", op: "proxy_with_finalizer", from: "python", to: "javascript", meta: { disposer: "rollback" } }),
-      expect.objectContaining({ binding: "nestedTransaction", op: "proxy_with_finalizer", from: "python", to: "javascript", meta: { disposer: "rollback" } }),
-      expect.objectContaining({ binding: "asyncTransaction", op: "proxy_with_finalizer", from: "python", to: "javascript", meta: { disposer: "rollback" } }),
-    ]));
-  });
-
-  test('typed resource lifecycle hints avoid broad database-ish matches', () => {
+  test('typed resource lifecycle hints avoid database-ish framework name matches', () => {
     const code = `
 const sessionInfo: SessionInfo = load_session_info()
 const connectionOptions: ConnectionOptions = load_connection_options()
 const transactionRecord: TransactionRecord = load_transaction_record()
+const dbSession: sqlalchemy.orm.session.Session = load_db_session()
+const dbConnection: asyncpg.Connection = load_db_connection()
 console.log(sessionInfo, connectionOptions, transactionRecord)
 `;
     const m = parseAndManifest(code);
@@ -2420,61 +2392,14 @@ console.log(sessionInfo, connectionOptions, transactionRecord)
     expect(evals.find(op => op.bind === "sessionInfo")).toMatchObject({ runtime: "javascript" });
     expect(evals.find(op => op.bind === "connectionOptions")).toMatchObject({ runtime: "javascript" });
     expect(evals.find(op => op.bind === "transactionRecord")).toMatchObject({ runtime: "javascript" });
+    expect(evals.find(op => op.bind === "dbSession")).toMatchObject({ runtime: "javascript" });
+    expect(evals.find(op => op.bind === "dbConnection")).toMatchObject({ runtime: "javascript" });
     expect(m.bridges).not.toEqual(expect.arrayContaining([
       expect.objectContaining({ binding: "sessionInfo", op: "proxy_with_finalizer" }),
       expect.objectContaining({ binding: "connectionOptions", op: "proxy_with_finalizer" }),
       expect.objectContaining({ binding: "transactionRecord", op: "proxy_with_finalizer" }),
-    ]));
-  });
-
-  test('typed Node server lifecycle handles infer borrowed proxy runtime hints', () => {
-    const code = `
-import os
-const expressReq: express.Request = make_express_req()
-const expressRes: express.Response = make_express_res()
-const fastifyReq: FastifyRequest = make_fastify_req()
-const fastifyReply: FastifyReply = make_fastify_reply()
-const koaCtx: Koa.Context = make_koa_context()
-const nodeReq: http.IncomingMessage = make_node_req()
-const nodeRes: http.ServerResponse = make_node_res()
-os.path.join(expressReq.path, expressRes.statusCode, fastifyReq.id, fastifyReply.statusCode, koaCtx.path, nodeReq.url, nodeRes.statusCode)
-`;
-    const m = parseAndManifest(code);
-    const evals = findAllOps(m, "eval") as any[];
-
-    for (const binding of ["expressReq", "expressRes", "fastifyReq", "fastifyReply", "koaCtx", "nodeReq", "nodeRes"]) {
-      expect(evals.find(op => op.bind === binding)).toMatchObject({ runtime: "javascript" });
-    }
-    expect(m.bridges).toEqual(expect.arrayContaining([
-      expect.objectContaining({ binding: "expressReq", op: "proxy_with_finalizer", from: "javascript", to: "python", meta: expect.objectContaining({ ownership: "borrowed" }) }),
-      expect.objectContaining({ binding: "expressRes", op: "proxy_with_finalizer", from: "javascript", to: "python", meta: expect.objectContaining({ ownership: "borrowed" }) }),
-      expect.objectContaining({ binding: "fastifyReq", op: "proxy_with_finalizer", from: "javascript", to: "python", meta: expect.objectContaining({ ownership: "borrowed" }) }),
-      expect.objectContaining({ binding: "fastifyReply", op: "proxy_with_finalizer", from: "javascript", to: "python", meta: expect.objectContaining({ ownership: "borrowed" }) }),
-      expect.objectContaining({ binding: "koaCtx", op: "proxy_with_finalizer", from: "javascript", to: "python", meta: expect.objectContaining({ ownership: "borrowed" }) }),
-      expect.objectContaining({ binding: "nodeReq", op: "proxy_with_finalizer", from: "javascript", to: "python", meta: expect.objectContaining({ ownership: "borrowed" }) }),
-      expect.objectContaining({ binding: "nodeRes", op: "proxy_with_finalizer", from: "javascript", to: "python", meta: expect.objectContaining({ ownership: "borrowed" }) }),
-    ]));
-    for (const binding of ["expressReq", "expressRes", "fastifyReq", "fastifyReply", "koaCtx", "nodeReq", "nodeRes"]) {
-      const bridge = m.bridges?.find(op => op.binding === binding && op.op === "proxy_with_finalizer");
-      expect(bridge?.meta?.disposer).toBeUndefined();
-    }
-  });
-
-  test('typed Node lifecycle hints avoid broad request response DTO matches', () => {
-    const code = `
-import os
-const requestInfo: RequestInfo = load_request_info()
-const responseInit: ResponseInit = load_response_init()
-os.path.join(requestInfo.url, responseInit.statusText)
-`;
-    const m = parseAndManifest(code);
-    const evals = findAllOps(m, "eval") as any[];
-
-    expect(evals.find(op => op.bind === "requestInfo")).toMatchObject({ runtime: "javascript" });
-    expect(evals.find(op => op.bind === "responseInit")).toMatchObject({ runtime: "javascript" });
-    expect(m.bridges).not.toEqual(expect.arrayContaining([
-      expect.objectContaining({ binding: "requestInfo", op: "proxy_with_finalizer", meta: { disposer: "destroy" } }),
-      expect.objectContaining({ binding: "responseInit", op: "proxy_with_finalizer", meta: { disposer: "end" } }),
+      expect.objectContaining({ binding: "dbSession", op: "proxy_with_finalizer" }),
+      expect.objectContaining({ binding: "dbConnection", op: "proxy_with_finalizer" }),
     ]));
   });
 
@@ -2543,22 +2468,22 @@ console.log(Array.from(chunks))
     );
   });
 
-  test('typed lazy and reactive ecosystem declarations infer stream runtime hints', () => {
+  test('typed generic lazy declarations infer stream runtime hints', () => {
     const code = `
 const rows: QuerySet = load_rows()
-const flux: Flux = load_flux()
+const events: Publisher = load_events()
 const upload: ReadableStream = load_upload()
-console.log(Array.from(rows), Array.from(flux), Array.from(upload))
+console.log(Array.from(rows), Array.from(events), Array.from(upload))
 `;
     const m = parseAndManifest(code);
     const evals = findAllOps(m, "eval") as any[];
 
     expect(evals.find(op => op.bind === "rows")).toMatchObject({ runtime: "python" });
-    expect(evals.find(op => op.bind === "flux")).toMatchObject({ runtime: "java" });
+    expect(evals.find(op => op.bind === "events")).toMatchObject({ runtime: "java" });
     expect(evals.find(op => op.bind === "upload")).toMatchObject({ runtime: "javascript" });
     expect(m.bridges).toEqual(expect.arrayContaining([
       expect.objectContaining({ binding: "rows", op: "stream_proxy", from: "python", to: "javascript" }),
-      expect.objectContaining({ binding: "flux", op: "stream_proxy", from: "java", to: "javascript" }),
+      expect.objectContaining({ binding: "events", op: "stream_proxy", from: "java", to: "javascript" }),
     ]));
     expect(m.bridges).not.toEqual(expect.arrayContaining([
       expect.objectContaining({ binding: "upload", op: "stream_proxy" }),
@@ -2567,15 +2492,14 @@ console.log(Array.from(rows), Array.from(flux), Array.from(upload))
     expect(m.diagnostics?.some(d => d.code === "non-stream-materialization")).not.toBe(true);
   });
 
-  test('qualified lazy and stream ecosystem type annotations infer runtime hints', () => {
+  test('qualified generic stream type annotations infer runtime hints by shape name', () => {
     const code = `
-const rows: django.db.models.QuerySet = load_rows()
-const result: sqlalchemy.engine.Result = load_result()
-const asyncResult: sqlalchemy.ext.asyncio.AsyncResult = load_async_result()
-const relation: ActiveRecord.Relation = load_relation()
+const rows: app.data.QuerySet = load_rows()
+const result: app.data.Result = load_result()
+const asyncResult: app.data.AsyncResult = load_async_result()
 const reader: java.io.Reader = load_reader()
 const readable: node.stream.Readable = load_readable()
-console.log(Array.from(rows), Array.from(result), Array.from(asyncResult), Array.from(relation), Array.from(reader), Array.from(readable))
+console.log(Array.from(rows), Array.from(result), Array.from(asyncResult), Array.from(reader), Array.from(readable))
 `;
     const m = parseAndManifest(code);
     const evals = findAllOps(m, "eval") as any[];
@@ -2583,12 +2507,10 @@ console.log(Array.from(rows), Array.from(result), Array.from(asyncResult), Array
     expect(evals.find(op => op.bind === "rows")).toMatchObject({ runtime: "python" });
     expect(evals.find(op => op.bind === "result")).toMatchObject({ runtime: "python" });
     expect(evals.find(op => op.bind === "asyncResult")).toMatchObject({ runtime: "python" });
-    expect(evals.find(op => op.bind === "relation")).toMatchObject({ runtime: "ruby" });
     expect(evals.find(op => op.bind === "reader")).toMatchObject({ runtime: "java" });
     expect(evals.find(op => op.bind === "readable")).toMatchObject({ runtime: "javascript" });
     expect(m.bridges).toEqual(expect.arrayContaining([
       expect.objectContaining({ binding: "result", op: "stream_proxy", from: "python", to: "javascript" }),
-      expect.objectContaining({ binding: "relation", op: "stream_proxy", from: "ruby", to: "javascript" }),
       expect.objectContaining({ binding: "reader", op: "stream_proxy", from: "java", to: "javascript" }),
     ]));
     expect(m.bridges).not.toEqual(expect.arrayContaining([
@@ -2598,7 +2520,7 @@ console.log(Array.from(rows), Array.from(result), Array.from(asyncResult), Array
     expect(m.diagnostics?.some(d => d.code === "non-stream-materialization")).not.toBe(true);
   });
 
-  test('qualified ORM relationship and async result annotations infer Python stream hints', () => {
+  test('qualified framework stream annotations only use generic final-segment names', () => {
     const code = `
 const query: sqlalchemy.orm.Query = load_query()
 const dynamicRelation: sqlalchemy.orm.dynamic.AppenderQuery = load_dynamic_relation()
@@ -2607,97 +2529,106 @@ const related: django.db.models.manager.RelatedManager = load_related()
 const asyncScalars: sqlalchemy.ext.asyncio.AsyncScalarResult = load_async_scalars()
 const asyncMappings: sqlalchemy.ext.asyncio.AsyncMappingResult = load_async_mappings()
 const cursorFactory: asyncpg.cursor.CursorFactory = load_cursor_factory()
-console.log(Array.from(query), Array.from(dynamicRelation), Array.from(relationshipRows), Array.from(related), Array.from(asyncScalars), Array.from(asyncMappings), Array.from(cursorFactory))
+console.log(query, dynamicRelation, relationshipRows, related, asyncScalars, asyncMappings, cursorFactory)
 `;
     const m = parseAndManifest(code);
     const evals = findAllOps(m, "eval") as any[];
 
-    for (const binding of ["query", "dynamicRelation", "relationshipRows", "related", "asyncScalars", "asyncMappings", "cursorFactory"]) {
-      expect(evals.find(op => op.bind === binding)).toMatchObject({ runtime: "python" });
-    }
+    expect(evals.find(op => op.bind === "query")).toMatchObject({ runtime: "python" });
+    expect(evals.find(op => op.bind === "asyncScalars")).toMatchObject({ runtime: "python" });
+    expect(evals.find(op => op.bind === "asyncMappings")).toMatchObject({ runtime: "python" });
+    expect(evals.find(op => op.bind === "dynamicRelation")).toMatchObject({ runtime: "javascript" });
+    expect(evals.find(op => op.bind === "relationshipRows")).toMatchObject({ runtime: "javascript" });
+    expect(evals.find(op => op.bind === "related")).toMatchObject({ runtime: "javascript" });
+    expect(evals.find(op => op.bind === "cursorFactory")).toMatchObject({ runtime: "javascript" });
     expect(m.bridges).toEqual(expect.arrayContaining([
       expect.objectContaining({ binding: "query", op: "stream_proxy", from: "python", to: "javascript" }),
-      expect.objectContaining({ binding: "dynamicRelation", op: "stream_proxy", from: "python", to: "javascript" }),
-      expect.objectContaining({ binding: "relationshipRows", op: "stream_proxy", from: "python", to: "javascript" }),
-      expect.objectContaining({ binding: "related", op: "stream_proxy", from: "python", to: "javascript" }),
       expect.objectContaining({ binding: "asyncScalars", op: "stream_proxy", from: "python", to: "javascript" }),
       expect.objectContaining({ binding: "asyncMappings", op: "stream_proxy", from: "python", to: "javascript" }),
-      expect.objectContaining({ binding: "cursorFactory", op: "stream_proxy", from: "python", to: "javascript" }),
+    ]));
+    expect(m.bridges).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ binding: "dynamicRelation", op: "stream_proxy" }),
+      expect.objectContaining({ binding: "relationshipRows", op: "stream_proxy" }),
+      expect.objectContaining({ binding: "related", op: "stream_proxy" }),
+      expect.objectContaining({ binding: "cursorFactory", op: "stream_proxy" }),
     ]));
     expect(m.diagnostics?.some(d => d.code === "unknown-stream-materialization")).not.toBe(true);
     expect(m.diagnostics?.some(d => d.code === "non-stream-materialization")).not.toBe(true);
   });
 
-  test('qualified SDK pager and cursor type annotations infer Python stream hints', () => {
+  test('qualified generic pager and cursor type annotations infer Python stream hints', () => {
     const code = `
-const s3Pages: botocore.paginate.PageIterator = list_s3_pages()
-const dynamoRows: boto3.resources.collection.ResourceCollection = scan_dynamo_rows()
-const googlePages: google.api_core.page_iterator.HTTPIterator = list_google_pages()
-const mongoCursor: pymongo.command_cursor.CommandCursor = aggregate_mongo_rows()
-console.log(Array.from(s3Pages), Array.from(dynamoRows), Array.from(googlePages), Array.from(mongoCursor))
+const filePages: app.pagination.PageIterator = list_file_pages()
+const rows: app.collections.ResourceCollection = scan_rows()
+const httpPages: app.pagination.HTTPIterator = list_http_pages()
+const commandCursor: app.cursor.CommandCursor = aggregate_rows()
+console.log(Array.from(filePages), Array.from(rows), Array.from(httpPages), Array.from(commandCursor))
 `;
     const m = parseAndManifest(code);
     const evals = findAllOps(m, "eval") as any[];
 
-    expect(evals.find(op => op.bind === "s3Pages")).toMatchObject({ runtime: "python" });
-    expect(evals.find(op => op.bind === "dynamoRows")).toMatchObject({ runtime: "python" });
-    expect(evals.find(op => op.bind === "googlePages")).toMatchObject({ runtime: "python" });
-    expect(evals.find(op => op.bind === "mongoCursor")).toMatchObject({ runtime: "python" });
+    expect(evals.find(op => op.bind === "filePages")).toMatchObject({ runtime: "python" });
+    expect(evals.find(op => op.bind === "rows")).toMatchObject({ runtime: "python" });
+    expect(evals.find(op => op.bind === "httpPages")).toMatchObject({ runtime: "python" });
+    expect(evals.find(op => op.bind === "commandCursor")).toMatchObject({ runtime: "python" });
     expect(m.bridges).toEqual(expect.arrayContaining([
-      expect.objectContaining({ binding: "s3Pages", op: "stream_proxy", from: "python", to: "javascript" }),
-      expect.objectContaining({ binding: "dynamoRows", op: "stream_proxy", from: "python", to: "javascript" }),
-      expect.objectContaining({ binding: "googlePages", op: "stream_proxy", from: "python", to: "javascript" }),
-      expect.objectContaining({ binding: "mongoCursor", op: "stream_proxy", from: "python", to: "javascript" }),
+      expect.objectContaining({ binding: "filePages", op: "stream_proxy", from: "python", to: "javascript" }),
+      expect.objectContaining({ binding: "rows", op: "stream_proxy", from: "python", to: "javascript" }),
+      expect.objectContaining({ binding: "httpPages", op: "stream_proxy", from: "python", to: "javascript" }),
+      expect.objectContaining({ binding: "commandCursor", op: "stream_proxy", from: "python", to: "javascript" }),
     ]));
     expect(m.diagnostics?.some(d => d.code === "unknown-stream-materialization")).not.toBe(true);
     expect(m.diagnostics?.some(d => d.code === "non-stream-materialization")).not.toBe(true);
   });
 
-  test('typed Java future and disposable handles infer resource runtime hints', () => {
+  test('typed Java standard future and closeable handles infer resource runtime hints', () => {
     const code = `
 import java.util.concurrent.Future
 const plainFuture: Future = make_plain_future()
 const future: java.util.concurrent.CompletableFuture = make_future()
 const scheduled: java.util.concurrent.ScheduledFuture = make_scheduled()
-const guava: com.google.common.util.concurrent.ListenableFuture = make_guava()
-const reactor: reactor.core.Disposable = subscribe_reactor()
-const rx: io.reactivex.rxjava3.disposables.Disposable = subscribe_rx()
-const job: kotlinx.coroutines.Job = make_job()
 const executor: java.util.concurrent.ExecutorService = make_executor()
-console.log(plainFuture, future, scheduled, guava, reactor, rx, job, executor)
+const closeable: java.io.Closeable = make_closeable()
+console.log(plainFuture, future, scheduled, executor, closeable)
 `;
     const m = parseAndManifest(code);
     const evals = findAllOps(m, "eval") as any[];
 
-    for (const binding of ["plainFuture", "future", "scheduled", "guava", "reactor", "rx", "job", "executor"]) {
+    for (const binding of ["plainFuture", "future", "scheduled", "executor", "closeable"]) {
       expect(evals.find(op => op.bind === binding)).toMatchObject({ runtime: "java" });
     }
     expect(m.bridges).toEqual(expect.arrayContaining([
       expect.objectContaining({ binding: "plainFuture", op: "proxy_with_finalizer", from: "java", to: "javascript", meta: { disposer: "cancel" } }),
       expect.objectContaining({ binding: "future", op: "proxy_with_finalizer", from: "java", to: "javascript", meta: { disposer: "cancel" } }),
       expect.objectContaining({ binding: "scheduled", op: "proxy_with_finalizer", from: "java", to: "javascript", meta: { disposer: "cancel" } }),
-      expect.objectContaining({ binding: "guava", op: "proxy_with_finalizer", from: "java", to: "javascript", meta: { disposer: "cancel" } }),
-      expect.objectContaining({ binding: "reactor", op: "proxy_with_finalizer", from: "java", to: "javascript", meta: { disposer: "dispose" } }),
-      expect.objectContaining({ binding: "rx", op: "proxy_with_finalizer", from: "java", to: "javascript", meta: { disposer: "dispose" } }),
-      expect.objectContaining({ binding: "job", op: "proxy_with_finalizer", from: "java", to: "javascript", meta: { disposer: "cancel" } }),
       expect.objectContaining({ binding: "executor", op: "proxy_with_finalizer", from: "java", to: "javascript", meta: { disposer: "shutdown" } }),
+      expect.objectContaining({ binding: "closeable", op: "proxy_with_finalizer", from: "java", to: "javascript", meta: { disposer: "close" } }),
     ]));
   });
 
-  test('typed resource ecosystem hints avoid broad async handle matches', () => {
+  test('typed resource hints avoid broad and third-party async handle matches', () => {
     const code = `
 const futureValue: FutureValue = load_future_value()
 const disposableBag: DisposableBag = load_disposable_bag()
-console.log(futureValue, disposableBag)
+const guava: com.google.common.util.concurrent.ListenableFuture = make_guava()
+const reactor: reactor.core.Disposable = subscribe_reactor()
+const job: kotlinx.coroutines.Job = make_job()
+console.log(futureValue, disposableBag, guava, reactor, job)
 `;
     const m = parseAndManifest(code);
     const evals = findAllOps(m, "eval") as any[];
 
     expect(evals.find(op => op.bind === "futureValue")).toMatchObject({ runtime: "javascript" });
     expect(evals.find(op => op.bind === "disposableBag")).toMatchObject({ runtime: "javascript" });
+    expect(evals.find(op => op.bind === "guava")).toMatchObject({ runtime: "javascript" });
+    expect(evals.find(op => op.bind === "reactor")).toMatchObject({ runtime: "javascript" });
+    expect(evals.find(op => op.bind === "job")).toMatchObject({ runtime: "javascript" });
     expect(m.bridges).not.toEqual(expect.arrayContaining([
       expect.objectContaining({ binding: "futureValue", op: "proxy_with_finalizer" }),
       expect.objectContaining({ binding: "disposableBag", op: "proxy_with_finalizer" }),
+      expect.objectContaining({ binding: "guava", op: "proxy_with_finalizer" }),
+      expect.objectContaining({ binding: "reactor", op: "proxy_with_finalizer" }),
+      expect.objectContaining({ binding: "job", op: "proxy_with_finalizer" }),
     ]));
   });
 

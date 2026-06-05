@@ -371,7 +371,7 @@ export class Pass1Structural {
       // Register imported names. Java dotted imports bind the simple class name
       // (`import java.util.concurrent.CompletableFuture` -> `CompletableFuture`);
       // Python dotted imports bind the package root
-      // (`import starlette.requests` -> `starlette`).
+      // (`import package.module` -> `package`).
       const names = this.importBindingNames(node.path, affinity.runtime, node.alias?.name);
       for (const name of names) {
         this.symbolTable.define(name, {

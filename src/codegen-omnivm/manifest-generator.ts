@@ -68,7 +68,7 @@ import * as C from '../type-system/canonical';
 import { lowerAnnotatedProgram } from './lowering';
 import { LoweredDefineFunc, LoweredManifestIR, LoweredManifestNode } from './lowering-ir';
 
-type BindingKind = "value" | "channel" | "stream" | "resource" | "lifecycle_proxy" | "table" | "job_handle" | "spawn_handle" | "function";
+type BindingKind = "value" | "channel" | "stream" | "resource" | "table" | "job_handle" | "spawn_handle" | "function";
 
 export class ManifestCodeGenerator {
   private affinityMap: Map<AST.Decl | AST.Stmt | AST.Expr, RuntimeAffinity> = new Map();
@@ -80,8 +80,6 @@ export class ManifestCodeGenerator {
   private bindingKinds: Map<string, BindingKind> = new Map();
   /** Tracks owner-side cleanup semantics for manifest resource handles. */
   private resourceDisposers: Map<string, string> = new Map();
-  /** Tracks framework/server-owned objects that should proxy without owner cleanup. */
-  private lifecycleProxyTypes: Map<string, string> = new Map();
   /** Records why a binding was assigned to its owning runtime. */
   private bindingAffinities: Map<string, RuntimeAffinity> = new Map();
   /** Non-fatal diagnostics that help users understand runtime boundary mistakes. */
@@ -116,7 +114,6 @@ export class ManifestCodeGenerator {
     this.bindingTable = new Map();
     this.bindingKinds = new Map();
     this.resourceDisposers = new Map();
-    this.lifecycleProxyTypes = new Map();
     this.bindingAffinities = new Map();
     this.diagnostics = [];
     this.boundaryDiagnosticKeys = new Set();
@@ -326,9 +323,6 @@ export class ManifestCodeGenerator {
     }
     if (kind === "resource") {
       return { op: "proxy_with_finalizer", meta: { disposer: this.resourceDisposers.get(binding) || "close" } };
-    }
-    if (kind === "lifecycle_proxy") {
-      return { op: "proxy_with_finalizer", meta: { type: this.lifecycleProxyTypes.get(binding) || binding, ownership: "borrowed" } };
     }
     if (kind === "table") {
       return { op: "share_memory", meta: { format: "arrow_c_data", ownership: "borrowed" } };
@@ -1494,10 +1488,6 @@ export class ManifestCodeGenerator {
       if (disposer) {
         this.resourceDisposers.set(name, disposer);
       }
-    } else if (this.isBorrowedLifecycleProxyType(type)) {
-      this.typedBindingKinds.set(name, "lifecycle_proxy");
-      this.typedBindingRuntimeHints.set(name, this.borrowedLifecycleProxyRuntimeHint(type));
-      this.lifecycleProxyTypes.set(name, this.typeName(type));
     }
   }
 
@@ -1505,14 +1495,14 @@ export class ManifestCodeGenerator {
     const name = this.typeName(type).toLowerCase();
     if (/(bytebuffer|directbytebuffer|intbuffer|floatbuffer|doublebuffer|longbuffer|shortbuffer|charbuffer)/.test(name)) return OmniRuntime.Java;
     if (/(arraybuffer|dataview|typedarray|uint8array|uint8clampedarray|uint16array|uint32array|int8array|int16array|int32array|float32array|float64array|bigint64array|biguint64array)/.test(name)) return OmniRuntime.JavaScript;
-    if (/(pandas|pyarrow|dataframe|recordbatch|numpy|ndarray|tensor|jax|torch|cupy|dlpack)/.test(name)) return OmniRuntime.Python;
-    if (/(arrowtable|datatable|polars)/.test(name) || this.matchesTypeName(name, ["table"])) return OmniRuntime.Python;
+    if (/(dataframe|recordbatch|ndarray|tensor|dlpack)/.test(name)) return OmniRuntime.Python;
+    if (/(arrowtable|datatable)/.test(name) || this.matchesTypeName(name, ["table"])) return OmniRuntime.Python;
     return this.defaultRuntime;
   }
 
   private isTableType(type: AST.TypeNode): boolean {
     const name = this.typeName(type).toLowerCase();
-    return /(dataframe|arrowtable|datatable|recordbatch|polars|pandas|pyarrow|numpy|ndarray|tensor|jax|torch|cupy|dlpack|bytebuffer|directbytebuffer|intbuffer|floatbuffer|doublebuffer|longbuffer|shortbuffer|charbuffer|arraybuffer|dataview|typedarray|uint8array|uint8clampedarray|uint16array|uint32array|int8array|int16array|int32array|float32array|float64array|bigint64array|biguint64array)/.test(name)
+    return /(dataframe|arrowtable|datatable|recordbatch|ndarray|tensor|dlpack|bytebuffer|directbytebuffer|intbuffer|floatbuffer|doublebuffer|longbuffer|shortbuffer|charbuffer|arraybuffer|dataview|typedarray|uint8array|uint8clampedarray|uint16array|uint32array|int8array|int16array|int32array|float32array|float64array|bigint64array|biguint64array)/.test(name)
       || this.matchesTypeName(name, ["table"]);
   }
 
@@ -1528,35 +1518,23 @@ export class ManifestCodeGenerator {
 
   private streamRuntimeForTypeName(name: string): OmniRuntime | undefined {
     if (this.matchesStreamType(name, [
-      "flux", "mono", "flowable", "observable", "publisher", "basestream",
+      "publisher", "basestream",
       "inputstream", "java.io.inputstream", "java.io.reader",
       "readablebytechannel", "java.nio.channels.readablebytechannel",
       "resultset", "java.sql.resultset",
     ])) return OmniRuntime.Java;
     if (this.matchesStreamType(name, [
-      "readablestream", "nodereadable", "readable", "webstream", "undicibody",
+      "readablestream", "nodereadable", "readable", "webstream",
       "stream.readable", "node.stream.readable",
     ])) return OmniRuntime.JavaScript;
     if (this.matchesStreamType(name, [
-      "activerecord.relation", "rack.body", "rails.stream",
-    ])) return OmniRuntime.Ruby;
-    if (this.matchesStreamType(name, [
-      "queryset", "asyncresult", "scalarresult", "sqlalchemy.result",
-      "sqlalchemy.engine.result", "sqlalchemy.engine.cursorresult",
-      "sqlalchemy.engine.mappingresult", "sqlalchemy.engine.chunkediteratorresult",
-      "sqlalchemy.orm.query", "appenderquery", "sqlalchemy.orm.dynamic.appenderquery",
-      "instrumentedlist", "sqlalchemy.orm.collections.instrumentedlist",
-      "sqlalchemy.asyncresult", "sqlalchemy.ext.asyncio.asyncresult",
-      "asyncscalarresult", "sqlalchemy.ext.asyncio.asyncscalarresult",
-      "asyncmappingresult", "sqlalchemy.ext.asyncio.asyncmappingresult",
-      "relatedmanager", "django.db.models.manager.relatedmanager",
+      "queryset", "asyncresult", "scalarresult", "result", "cursorresult",
+      "mappingresult", "chunkediteratorresult", "query",
+      "asyncscalarresult", "asyncmappingresult",
       "cursor", "asynccursor", "dbcursor",
-      "databasecursor", "servercursor", "asyncpg.cursor", "asyncpg.cursor.cursorfactory", "psycopg.cursor",
+      "databasecursor", "servercursor",
       "paginator", "pager", "pageiterator", "scaniterator", "scaniter",
-      "botocore.paginate.pageiterator", "boto3.resources.collection.resourcecollection",
-      "google.api_core.page_iterator.iterator", "google.api_core.page_iterator.httpiterator",
-      "google.api_core.page_iterator.grpciterator",
-      "pymongo.cursor.cursor", "pymongo.command_cursor.commandcursor",
+      "iterator", "httpiterator", "grpciterator", "commandcursor", "resourcecollection",
     ])) return OmniRuntime.Python;
     return undefined;
   }
@@ -1571,28 +1549,6 @@ export class ManifestCodeGenerator {
     return this.resourceRuntimeForTypeName(name) !== undefined;
   }
 
-  private borrowedLifecycleProxyRuntimeHint(type: AST.TypeNode): OmniRuntime {
-    const name = this.typeName(type).toLowerCase();
-    return this.borrowedLifecycleProxyRuntimeForTypeName(name) || this.defaultRuntime;
-  }
-
-  private isBorrowedLifecycleProxyType(type: AST.TypeNode): boolean {
-    const name = this.typeName(type).toLowerCase();
-    return this.borrowedLifecycleProxyRuntimeForTypeName(name) !== undefined;
-  }
-
-  private borrowedLifecycleProxyRuntimeForTypeName(name: string): OmniRuntime | undefined {
-    if (this.matchesTypeName(name, [
-      "express.request", "express.response",
-      "fastifyrequest", "fastify.fastifyrequest",
-      "fastifyreply", "fastify.fastifyreply",
-      "koa.request", "koa.response", "koa.context",
-      "http.incomingmessage", "node.http.incomingmessage",
-      "http.serverresponse", "node.http.serverresponse",
-    ])) return OmniRuntime.JavaScript;
-    return undefined;
-  }
-
   private resourceRuntimeForTypeName(name: string): OmniRuntime | undefined {
     if (this.matchesTypeName(name, [
       "completablefuture", "java.util.concurrent.completablefuture",
@@ -1600,26 +1556,9 @@ export class ManifestCodeGenerator {
       "scheduledfuture", "java.util.concurrent.scheduledfuture",
       "future", "java.util.concurrent.future",
       "executorservice", "java.util.concurrent.executorservice",
-      "listenablefuture", "com.google.common.util.concurrent.listenablefuture",
-      "reactor.core.disposable",
-      "io.reactivex.rxjava3.disposables.disposable",
-      "kotlinx.coroutines.job",
       "autocloseable", "java.lang.autocloseable",
       "closeable", "java.io.closeable",
     ])) return OmniRuntime.Java;
-    if (this.matchesTypeName(name, [
-      "sqlalchemy.orm.session.session",
-      "sqlalchemy.ext.asyncio.asyncsession",
-      "sqlalchemy.engine.connection",
-      "sqlalchemy.ext.asyncio.asyncconnection",
-      "asyncpg.connection",
-    ])) return OmniRuntime.Python;
-    if (this.matchesTypeName(name, [
-      "sqlalchemy.engine.transaction",
-      "sqlalchemy.engine.roottransaction",
-      "sqlalchemy.engine.nestedtransaction",
-      "sqlalchemy.ext.asyncio.asyncsessiontransaction",
-    ])) return OmniRuntime.Python;
     return undefined;
   }
 
@@ -1629,33 +1568,14 @@ export class ManifestCodeGenerator {
       "executorservice", "java.util.concurrent.executorservice",
     ])) return "shutdown";
     if (this.matchesTypeName(name, [
-      "reactor.core.disposable",
-      "io.reactivex.rxjava3.disposables.disposable",
-    ])) return "dispose";
-    if (this.matchesTypeName(name, [
       "autocloseable", "java.lang.autocloseable",
       "closeable", "java.io.closeable",
-    ])) return "close";
-    if (this.matchesTypeName(name, [
-      "sqlalchemy.engine.transaction",
-      "sqlalchemy.engine.roottransaction",
-      "sqlalchemy.engine.nestedtransaction",
-      "sqlalchemy.ext.asyncio.asyncsessiontransaction",
-    ])) return "rollback";
-    if (this.matchesTypeName(name, [
-      "sqlalchemy.orm.session.session",
-      "sqlalchemy.ext.asyncio.asyncsession",
-      "sqlalchemy.engine.connection",
-      "sqlalchemy.ext.asyncio.asyncconnection",
-      "asyncpg.connection",
     ])) return "close";
     if (this.matchesTypeName(name, [
       "completablefuture", "java.util.concurrent.completablefuture",
       "futuretask", "java.util.concurrent.futuretask",
       "scheduledfuture", "java.util.concurrent.scheduledfuture",
       "future", "java.util.concurrent.future",
-      "listenablefuture", "com.google.common.util.concurrent.listenablefuture",
-      "kotlinx.coroutines.job",
     ])) return "cancel";
     return undefined;
   }
