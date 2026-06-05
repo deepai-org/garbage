@@ -1478,6 +1478,9 @@ export class ManifestCodeGenerator {
     if (this.isTableType(type)) {
       this.typedBindingKinds.set(name, "table");
       this.typedBindingRuntimeHints.set(name, this.tableRuntimeHint(type));
+    } else if (this.isStreamLikeType(type)) {
+      this.typedBindingKinds.set(name, "stream");
+      this.typedBindingRuntimeHints.set(name, this.streamRuntimeHint(type));
     }
   }
 
@@ -1493,6 +1496,51 @@ export class ManifestCodeGenerator {
   private isTableType(type: AST.TypeNode): boolean {
     const name = this.typeName(type).toLowerCase();
     return /(dataframe|arrowtable|recordbatch|table|polars|pandas|pyarrow|numpy|ndarray|tensor|jax|torch|cupy|dlpack|bytebuffer|directbytebuffer|intbuffer|floatbuffer|doublebuffer|longbuffer|shortbuffer|charbuffer|arraybuffer|dataview|typedarray|uint8array|uint8clampedarray|uint16array|uint32array|int8array|int16array|int32array|float32array|float64array|bigint64array|biguint64array)/.test(name);
+  }
+
+  private streamRuntimeHint(type: AST.TypeNode): OmniRuntime {
+    const name = this.typeName(type).toLowerCase();
+    return this.streamRuntimeForTypeName(name) || this.defaultRuntime;
+  }
+
+  private isStreamLikeType(type: AST.TypeNode): boolean {
+    const name = this.typeName(type).toLowerCase();
+    return this.streamRuntimeForTypeName(name) !== undefined;
+  }
+
+  private streamRuntimeForTypeName(name: string): OmniRuntime | undefined {
+    if (this.matchesStreamType(name, [
+      "flux", "mono", "flowable", "observable", "publisher", "basestream",
+      "inputstream", "java.io.inputstream", "java.io.reader",
+      "readablebytechannel", "java.nio.channels.readablebytechannel",
+      "resultset", "java.sql.resultset",
+    ])) return OmniRuntime.Java;
+    if (this.matchesStreamType(name, [
+      "readablestream", "nodereadable", "readable", "webstream", "undicibody",
+      "stream.readable", "node.stream.readable",
+    ])) return OmniRuntime.JavaScript;
+    if (this.matchesStreamType(name, [
+      "activerecord.relation", "rack.body", "rails.stream",
+    ])) return OmniRuntime.Ruby;
+    if (this.matchesStreamType(name, [
+      "queryset", "asyncresult", "scalarresult", "sqlalchemy.result",
+      "sqlalchemy.asyncresult", "cursor", "asynccursor", "dbcursor",
+      "databasecursor", "servercursor", "asyncpg.cursor", "psycopg.cursor",
+      "paginator", "pager", "pageiterator", "scaniterator", "scaniter",
+    ])) return OmniRuntime.Python;
+    return undefined;
+  }
+
+  private matchesStreamType(name: string, candidates: string[]): boolean {
+    const normalized = name.replace(/\s+/g, "");
+    return candidates.some(candidate => {
+      const suffix = candidate.replace(/\s+/g, "").toLowerCase();
+      return normalized === suffix || normalized.endsWith(`.${suffix}`);
+    });
+  }
+
+  private typedRuntimeHint(name: string, fallback: OmniRuntime): OmniRuntime {
+    return this.typedBindingRuntimeHints.get(name) || fallback;
   }
 
   private typeName(type: AST.TypeNode): string {
@@ -2313,7 +2361,7 @@ export class ManifestCodeGenerator {
       if (node.values && node.values[i]) {
         const valExpr = node.values[i];
         const aff = this.affinityMap.get(valExpr);
-        const runtime = aff?.runtime || this.defaultRuntime;
+        const runtime = this.typedRuntimeHint(name, aff?.runtime || this.defaultRuntime);
         const resourceOp = this.resourceOpFromCall(valExpr, name, runtime);
         if (resourceOp) {
           ops.push(resourceOp);
@@ -2338,6 +2386,12 @@ export class ManifestCodeGenerator {
         const lowered = this.loweredNodeForBinding(node, name);
         const loweredOp = lowered ? this.emitLoweredNode(lowered, true) : undefined;
         if (loweredOp) {
+          if (this.typedBindingRuntimeHints.has(name)) {
+            if ("runtime" in loweredOp) {
+              (loweredOp as ManifestOp & { runtime?: OmniRuntime }).runtime = runtime;
+            }
+            this.recordBinding(name, runtime, this.declaredBindingKind(name), valExpr);
+          }
           ops.push(loweredOp);
           continue;
         }
@@ -2436,7 +2490,7 @@ export class ManifestCodeGenerator {
       const valExpr = node.values[i];
       if (!valExpr) continue;
       const aff = this.affinityMap.get(valExpr);
-      const runtime = aff?.runtime || this.defaultRuntime;
+      const runtime = this.typedRuntimeHint(name, aff?.runtime || this.defaultRuntime);
       const resourceOp = this.resourceOpFromCall(valExpr, name, runtime);
       if (resourceOp) {
         ops.push(resourceOp);
@@ -2461,6 +2515,12 @@ export class ManifestCodeGenerator {
       const lowered = this.loweredNodeForBinding(node, name);
       const loweredOp = lowered ? this.emitLoweredNode(lowered, false) : undefined;
       if (loweredOp) {
+        if (this.typedBindingRuntimeHints.has(name)) {
+          if ("runtime" in loweredOp) {
+            (loweredOp as ManifestOp & { runtime?: OmniRuntime }).runtime = runtime;
+          }
+          this.recordBinding(name, runtime, this.declaredBindingKind(name), valExpr);
+        }
         ops.push(loweredOp);
         continue;
       }

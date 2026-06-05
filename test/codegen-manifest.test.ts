@@ -2442,6 +2442,47 @@ console.log(Array.from(chunks))
     );
   });
 
+  test('typed lazy and reactive ecosystem declarations infer stream runtime hints', () => {
+    const code = `
+const rows: QuerySet = load_rows()
+const flux: Flux = load_flux()
+const upload: ReadableStream = load_upload()
+console.log(Array.from(rows), Array.from(flux), Array.from(upload))
+`;
+    const m = parseAndManifest(code);
+    const evals = findAllOps(m, "eval") as any[];
+
+    expect(evals.find(op => op.bind === "rows")).toMatchObject({ runtime: "python" });
+    expect(evals.find(op => op.bind === "flux")).toMatchObject({ runtime: "java" });
+    expect(evals.find(op => op.bind === "upload")).toMatchObject({ runtime: "javascript" });
+    expect(m.bridges).toEqual(expect.arrayContaining([
+      expect.objectContaining({ binding: "rows", op: "stream_proxy", from: "python", to: "javascript" }),
+      expect.objectContaining({ binding: "flux", op: "stream_proxy", from: "java", to: "javascript" }),
+    ]));
+    expect(m.bridges).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ binding: "upload", op: "stream_proxy" }),
+    ]));
+    expect(m.diagnostics?.some(d => d.code === "unknown-stream-materialization")).not.toBe(true);
+    expect(m.diagnostics?.some(d => d.code === "non-stream-materialization")).not.toBe(true);
+  });
+
+  test('typed stream ecosystem hints avoid broad domain type matches', () => {
+    const code = `
+const cursorPosition: CursorPosition = load_cursor_position()
+const pdfReader: PdfReader = load_pdf_reader()
+const cursorArray = Array.from(cursorPosition)
+const readerArray = Array.from(pdfReader)
+`;
+    const m = parseAndManifest(code);
+    const diagnostics = m.diagnostics?.filter(d => d.code === "non-stream-materialization") || [];
+
+    expect(diagnostics).toHaveLength(2);
+    expect(diagnostics.map(d => d.message)).toEqual(expect.arrayContaining([
+      expect.stringContaining("cursorPosition"),
+      expect.stringContaining("pdfReader"),
+    ]));
+  });
+
   test('cross-runtime variable crossing produces bridge ops', () => {
     // Python function with typed params called from JS
     const code = `
