@@ -2497,6 +2497,31 @@ console.log(Array.from(rows), Array.from(result), Array.from(asyncResult), Array
     expect(m.diagnostics?.some(d => d.code === "non-stream-materialization")).not.toBe(true);
   });
 
+  test('qualified SDK pager and cursor type annotations infer Python stream hints', () => {
+    const code = `
+const s3Pages: botocore.paginate.PageIterator = list_s3_pages()
+const dynamoRows: boto3.resources.collection.ResourceCollection = scan_dynamo_rows()
+const googlePages: google.api_core.page_iterator.HTTPIterator = list_google_pages()
+const mongoCursor: pymongo.command_cursor.CommandCursor = aggregate_mongo_rows()
+console.log(Array.from(s3Pages), Array.from(dynamoRows), Array.from(googlePages), Array.from(mongoCursor))
+`;
+    const m = parseAndManifest(code);
+    const evals = findAllOps(m, "eval") as any[];
+
+    expect(evals.find(op => op.bind === "s3Pages")).toMatchObject({ runtime: "python" });
+    expect(evals.find(op => op.bind === "dynamoRows")).toMatchObject({ runtime: "python" });
+    expect(evals.find(op => op.bind === "googlePages")).toMatchObject({ runtime: "python" });
+    expect(evals.find(op => op.bind === "mongoCursor")).toMatchObject({ runtime: "python" });
+    expect(m.bridges).toEqual(expect.arrayContaining([
+      expect.objectContaining({ binding: "s3Pages", op: "stream_proxy", from: "python", to: "javascript" }),
+      expect.objectContaining({ binding: "dynamoRows", op: "stream_proxy", from: "python", to: "javascript" }),
+      expect.objectContaining({ binding: "googlePages", op: "stream_proxy", from: "python", to: "javascript" }),
+      expect.objectContaining({ binding: "mongoCursor", op: "stream_proxy", from: "python", to: "javascript" }),
+    ]));
+    expect(m.diagnostics?.some(d => d.code === "unknown-stream-materialization")).not.toBe(true);
+    expect(m.diagnostics?.some(d => d.code === "non-stream-materialization")).not.toBe(true);
+  });
+
   test('typed stream ecosystem hints avoid broad domain type matches', () => {
     const code = `
 const cursorPosition: CursorPosition = load_cursor_position()

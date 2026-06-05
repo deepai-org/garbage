@@ -1530,6 +1530,10 @@ export class ManifestCodeGenerator {
       "cursor", "asynccursor", "dbcursor",
       "databasecursor", "servercursor", "asyncpg.cursor", "psycopg.cursor",
       "paginator", "pager", "pageiterator", "scaniterator", "scaniter",
+      "botocore.paginate.pageiterator", "boto3.resources.collection.resourcecollection",
+      "google.api_core.page_iterator.iterator", "google.api_core.page_iterator.httpiterator",
+      "google.api_core.page_iterator.grpciterator",
+      "pymongo.cursor.cursor", "pymongo.command_cursor.commandcursor",
     ])) return OmniRuntime.Python;
     return undefined;
   }
