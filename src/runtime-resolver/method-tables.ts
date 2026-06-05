@@ -393,6 +393,7 @@ export const AMBIGUOUS_METHODS = new Set([
   "items",
   "keys",
   "values",
+  "entries",
   "count",
   "split",
   "join",
