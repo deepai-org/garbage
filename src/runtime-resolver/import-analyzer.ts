@@ -6,8 +6,8 @@ import { OmniRuntime, RuntimeAffinity, AffinityEvidence } from './types';
 const PYTHON_MODULES = new Set([
   "os", "sys", "math", "json", "re", "datetime", "collections", "itertools",
   "functools", "pathlib", "typing", "dataclasses", "abc", "enum", "io",
-  "logging", "unittest", "pytest", "asyncio", "aiohttp", "requests",
-  "flask", "django", "fastapi", "starlette", "numpy", "pandas", "polars", "pyarrow", "scipy", "matplotlib",
+  "logging", "unittest", "pytest", "asyncio", "anyio", "aiohttp", "requests",
+  "flask", "werkzeug", "django", "fastapi", "starlette", "uvicorn", "numpy", "pandas", "polars", "pyarrow", "scipy", "matplotlib",
   "tensorflow", "torch", "jax", "cupy", "sklearn", "sqlalchemy", "celery", "pydantic",
   "asyncpg", "psycopg", "psycopg2", "marshmallow", "jsonschema",
   "boto3", "botocore", "pymongo", "redis", "google", "google.api_core",
@@ -51,6 +51,7 @@ const JS_MODULES = new Set([
   "express", "koa", "fastify", "hapi", "nest", "nestjs",
   "lodash", "underscore", "ramda", "rxjs", "immutable",
   "zod", "cheerio", "marked", "d3-shape",
+  "busboy", "multer", "body-parser", "koa-bodyparser", "@koa/bodyparser",
   "axios", "node-fetch", "got", "superagent", "undici",
   "moment", "dayjs", "date-fns", "luxon",
   "webpack", "rollup", "vite", "parcel", "esbuild",
@@ -71,8 +72,8 @@ const JS_MODULES = new Set([
 ]);
 
 const RUBY_MODULES = new Set([
-  "rails", "sinatra", "rack", "puma", "unicorn", "thin",
-  "activerecord", "active_record", "activesupport", "actionpack", "actionview",
+  "rails", "sinatra", "rack", "rackup", "webrick", "puma", "unicorn", "thin",
+  "activerecord", "active_record", "activesupport", "actionpack", "actionview", "action_dispatch", "action_controller",
   "nokogiri", "httparty", "faraday", "rest-client",
   "rspec", "minitest", "capybara", "factory_bot",
   "devise", "cancancan", "pundit", "omniauth",

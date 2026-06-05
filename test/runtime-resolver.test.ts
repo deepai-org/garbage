@@ -315,6 +315,9 @@ describe('Import Analysis', () => {
 
   test('real-world compatibility package imports infer their owning runtimes', () => {
     expect(analyzeImportPath('starlette.requests')!.runtime).toBe(OmniRuntime.Python);
+    expect(analyzeImportPath('uvicorn')!.runtime).toBe(OmniRuntime.Python);
+    expect(analyzeImportPath('werkzeug.serving')!.runtime).toBe(OmniRuntime.Python);
+    expect(analyzeImportPath('anyio')!.runtime).toBe(OmniRuntime.Python);
     expect(analyzeImportPath('asyncpg')!.runtime).toBe(OmniRuntime.Python);
     expect(analyzeImportPath('psycopg.rows')!.runtime).toBe(OmniRuntime.Python);
     expect(analyzeImportPath('marshmallow')!.runtime).toBe(OmniRuntime.Python);
@@ -329,8 +332,14 @@ describe('Import Analysis', () => {
     expect(analyzeImportPath('node:stream/web')!.runtime).toBe(OmniRuntime.JavaScript);
     expect(analyzeImportPath('undici')!.runtime).toBe(OmniRuntime.JavaScript);
     expect(analyzeImportPath('undici/types')!.runtime).toBe(OmniRuntime.JavaScript);
+    expect(analyzeImportPath('busboy')!.runtime).toBe(OmniRuntime.JavaScript);
+    expect(analyzeImportPath('multer')!.runtime).toBe(OmniRuntime.JavaScript);
+    expect(analyzeImportPath('body-parser')!.runtime).toBe(OmniRuntime.JavaScript);
+    expect(analyzeImportPath('koa-bodyparser')!.runtime).toBe(OmniRuntime.JavaScript);
     expect(analyzeImportPath('rack/mock')!.runtime).toBe(OmniRuntime.Ruby);
+    expect(analyzeImportPath('rackup/handler/webrick')!.runtime).toBe(OmniRuntime.Ruby);
     expect(analyzeImportPath('active_record/relation')!.runtime).toBe(OmniRuntime.Ruby);
+    expect(analyzeImportPath('action_dispatch')!.runtime).toBe(OmniRuntime.Ruby);
     expect(analyzeImportPath('reactor.core.publisher.Flux')!.runtime).toBe(OmniRuntime.Java);
     expect(analyzeImportPath('io.reactivex.rxjava3.core.Flowable')!.runtime).toBe(OmniRuntime.Java);
     expect(analyzeImportPath('io.unknown')?.runtime).not.toBe(OmniRuntime.Java);
@@ -790,6 +799,64 @@ describe('Import-to-Usage Propagation', () => {
       OmniRuntime.Python,
       OmniRuntime.Python,
       OmniRuntime.Python,
+    ]);
+  });
+
+  test('ASGI server support imports propagate Python runtime', () => {
+    const result = resolve([
+      'import uvicorn',
+      'from werkzeug.serving import make_server',
+      'import anyio',
+      'const config = uvicorn.Config(app)',
+      'const server = make_server("127.0.0.1", 0, app)',
+      'const group = anyio.create_task_group()',
+    ].join('\n'));
+    const callRuntimes = [...result.affinityMap]
+      .filter(([node]) => node.kind === 'Call')
+      .map(([, aff]) => aff.runtime);
+
+    expect(callRuntimes).toEqual([
+      OmniRuntime.Python,
+      OmniRuntime.Python,
+      OmniRuntime.Python,
+    ]);
+  });
+
+  test('Node upload and body parser imports propagate JavaScript runtime', () => {
+    const result = resolve([
+      'import Busboy from "busboy"',
+      'import multer from "multer"',
+      'import bodyParser from "body-parser"',
+      'const parser = Busboy({ headers })',
+      'const upload = multer({ storage: multer.memoryStorage() })',
+      'const json = bodyParser.json()',
+    ].join('\n'));
+    const callRuntimes = [...result.affinityMap]
+      .filter(([node]) => node.kind === 'Call')
+      .map(([, aff]) => aff.runtime);
+
+    expect(callRuntimes).toEqual([
+      OmniRuntime.JavaScript,
+      OmniRuntime.JavaScript,
+      OmniRuntime.JavaScript,
+      OmniRuntime.JavaScript,
+    ]);
+  });
+
+  test('Rackup and ActionDispatch imports propagate Ruby runtime', () => {
+    const result = resolve([
+      'import Rackup from "rackup/handler/webrick"',
+      'import ActionDispatch from "action_dispatch"',
+      'const handler = Rackup.get("webrick")',
+      'const response = ActionDispatch.Response.new(200)',
+    ].join('\n'));
+    const callRuntimes = [...result.affinityMap]
+      .filter(([node]) => node.kind === 'Call')
+      .map(([, aff]) => aff.runtime);
+
+    expect(callRuntimes).toEqual([
+      OmniRuntime.Ruby,
+      OmniRuntime.Ruby,
     ]);
   });
 
