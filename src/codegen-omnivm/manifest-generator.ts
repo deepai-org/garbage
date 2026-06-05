@@ -68,7 +68,7 @@ import * as C from '../type-system/canonical';
 import { lowerAnnotatedProgram } from './lowering';
 import { LoweredDefineFunc, LoweredManifestIR, LoweredManifestNode } from './lowering-ir';
 
-type BindingKind = "value" | "channel" | "stream" | "resource" | "table" | "job_handle" | "spawn_handle" | "function";
+type BindingKind = "value" | "channel" | "stream" | "resource" | "lifecycle_proxy" | "table" | "job_handle" | "spawn_handle" | "function";
 
 export class ManifestCodeGenerator {
   private affinityMap: Map<AST.Decl | AST.Stmt | AST.Expr, RuntimeAffinity> = new Map();
@@ -80,6 +80,8 @@ export class ManifestCodeGenerator {
   private bindingKinds: Map<string, BindingKind> = new Map();
   /** Tracks owner-side cleanup semantics for manifest resource handles. */
   private resourceDisposers: Map<string, string> = new Map();
+  /** Tracks framework/server-owned objects that should proxy without owner cleanup. */
+  private lifecycleProxyTypes: Map<string, string> = new Map();
   /** Records why a binding was assigned to its owning runtime. */
   private bindingAffinities: Map<string, RuntimeAffinity> = new Map();
   /** Non-fatal diagnostics that help users understand runtime boundary mistakes. */
@@ -114,6 +116,7 @@ export class ManifestCodeGenerator {
     this.bindingTable = new Map();
     this.bindingKinds = new Map();
     this.resourceDisposers = new Map();
+    this.lifecycleProxyTypes = new Map();
     this.bindingAffinities = new Map();
     this.diagnostics = [];
     this.boundaryDiagnosticKeys = new Set();
@@ -323,6 +326,9 @@ export class ManifestCodeGenerator {
     }
     if (kind === "resource") {
       return { op: "proxy_with_finalizer", meta: { disposer: this.resourceDisposers.get(binding) || "close" } };
+    }
+    if (kind === "lifecycle_proxy") {
+      return { op: "proxy_with_finalizer", meta: { type: this.lifecycleProxyTypes.get(binding) || binding, ownership: "borrowed" } };
     }
     if (kind === "table") {
       return { op: "share_memory", meta: { format: "arrow_c_data", ownership: "borrowed" } };
@@ -1488,6 +1494,10 @@ export class ManifestCodeGenerator {
       if (disposer) {
         this.resourceDisposers.set(name, disposer);
       }
+    } else if (this.isBorrowedLifecycleProxyType(type)) {
+      this.typedBindingKinds.set(name, "lifecycle_proxy");
+      this.typedBindingRuntimeHints.set(name, this.borrowedLifecycleProxyRuntimeHint(type));
+      this.lifecycleProxyTypes.set(name, this.typeName(type));
     }
   }
 
@@ -1561,6 +1571,28 @@ export class ManifestCodeGenerator {
     return this.resourceRuntimeForTypeName(name) !== undefined;
   }
 
+  private borrowedLifecycleProxyRuntimeHint(type: AST.TypeNode): OmniRuntime {
+    const name = this.typeName(type).toLowerCase();
+    return this.borrowedLifecycleProxyRuntimeForTypeName(name) || this.defaultRuntime;
+  }
+
+  private isBorrowedLifecycleProxyType(type: AST.TypeNode): boolean {
+    const name = this.typeName(type).toLowerCase();
+    return this.borrowedLifecycleProxyRuntimeForTypeName(name) !== undefined;
+  }
+
+  private borrowedLifecycleProxyRuntimeForTypeName(name: string): OmniRuntime | undefined {
+    if (this.matchesTypeName(name, [
+      "express.request", "express.response",
+      "fastifyrequest", "fastify.fastifyrequest",
+      "fastifyreply", "fastify.fastifyreply",
+      "koa.request", "koa.response", "koa.context",
+      "http.incomingmessage", "node.http.incomingmessage",
+      "http.serverresponse", "node.http.serverresponse",
+    ])) return OmniRuntime.JavaScript;
+    return undefined;
+  }
+
   private resourceRuntimeForTypeName(name: string): OmniRuntime | undefined {
     if (this.matchesTypeName(name, [
       "completablefuture", "java.util.concurrent.completablefuture",
@@ -1588,14 +1620,6 @@ export class ManifestCodeGenerator {
       "sqlalchemy.engine.nestedtransaction",
       "sqlalchemy.ext.asyncio.asyncsessiontransaction",
     ])) return OmniRuntime.Python;
-    if (this.matchesTypeName(name, [
-      "express.request", "express.response",
-      "fastifyrequest", "fastify.fastifyrequest",
-      "fastifyreply", "fastify.fastifyreply",
-      "koa.request", "koa.response", "koa.context",
-      "http.incomingmessage", "node.http.incomingmessage",
-      "http.serverresponse", "node.http.serverresponse",
-    ])) return OmniRuntime.JavaScript;
     return undefined;
   }
 
@@ -1625,18 +1649,6 @@ export class ManifestCodeGenerator {
       "sqlalchemy.ext.asyncio.asyncconnection",
       "asyncpg.connection",
     ])) return "close";
-    if (this.matchesTypeName(name, [
-      "express.request",
-      "fastifyrequest", "fastify.fastifyrequest",
-      "koa.request",
-      "http.incomingmessage", "node.http.incomingmessage",
-    ])) return "destroy";
-    if (this.matchesTypeName(name, [
-      "express.response",
-      "fastifyreply", "fastify.fastifyreply",
-      "koa.response", "koa.context",
-      "http.serverresponse", "node.http.serverresponse",
-    ])) return "end";
     if (this.matchesTypeName(name, [
       "completablefuture", "java.util.concurrent.completablefuture",
       "futuretask", "java.util.concurrent.futuretask",

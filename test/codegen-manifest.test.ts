@@ -2427,7 +2427,7 @@ console.log(sessionInfo, connectionOptions, transactionRecord)
     ]));
   });
 
-  test('typed Node server lifecycle handles infer resource runtime hints', () => {
+  test('typed Node server lifecycle handles infer borrowed proxy runtime hints', () => {
     const code = `
 import os
 const expressReq: express.Request = make_express_req()
@@ -2446,14 +2446,18 @@ os.path.join(expressReq.path, expressRes.statusCode, fastifyReq.id, fastifyReply
       expect(evals.find(op => op.bind === binding)).toMatchObject({ runtime: "javascript" });
     }
     expect(m.bridges).toEqual(expect.arrayContaining([
-      expect.objectContaining({ binding: "expressReq", op: "proxy_with_finalizer", from: "javascript", to: "python", meta: { disposer: "destroy" } }),
-      expect.objectContaining({ binding: "expressRes", op: "proxy_with_finalizer", from: "javascript", to: "python", meta: { disposer: "end" } }),
-      expect.objectContaining({ binding: "fastifyReq", op: "proxy_with_finalizer", from: "javascript", to: "python", meta: { disposer: "destroy" } }),
-      expect.objectContaining({ binding: "fastifyReply", op: "proxy_with_finalizer", from: "javascript", to: "python", meta: { disposer: "end" } }),
-      expect.objectContaining({ binding: "koaCtx", op: "proxy_with_finalizer", from: "javascript", to: "python", meta: { disposer: "end" } }),
-      expect.objectContaining({ binding: "nodeReq", op: "proxy_with_finalizer", from: "javascript", to: "python", meta: { disposer: "destroy" } }),
-      expect.objectContaining({ binding: "nodeRes", op: "proxy_with_finalizer", from: "javascript", to: "python", meta: { disposer: "end" } }),
+      expect.objectContaining({ binding: "expressReq", op: "proxy_with_finalizer", from: "javascript", to: "python", meta: expect.objectContaining({ ownership: "borrowed" }) }),
+      expect.objectContaining({ binding: "expressRes", op: "proxy_with_finalizer", from: "javascript", to: "python", meta: expect.objectContaining({ ownership: "borrowed" }) }),
+      expect.objectContaining({ binding: "fastifyReq", op: "proxy_with_finalizer", from: "javascript", to: "python", meta: expect.objectContaining({ ownership: "borrowed" }) }),
+      expect.objectContaining({ binding: "fastifyReply", op: "proxy_with_finalizer", from: "javascript", to: "python", meta: expect.objectContaining({ ownership: "borrowed" }) }),
+      expect.objectContaining({ binding: "koaCtx", op: "proxy_with_finalizer", from: "javascript", to: "python", meta: expect.objectContaining({ ownership: "borrowed" }) }),
+      expect.objectContaining({ binding: "nodeReq", op: "proxy_with_finalizer", from: "javascript", to: "python", meta: expect.objectContaining({ ownership: "borrowed" }) }),
+      expect.objectContaining({ binding: "nodeRes", op: "proxy_with_finalizer", from: "javascript", to: "python", meta: expect.objectContaining({ ownership: "borrowed" }) }),
     ]));
+    for (const binding of ["expressReq", "expressRes", "fastifyReq", "fastifyReply", "koaCtx", "nodeReq", "nodeRes"]) {
+      const bridge = m.bridges?.find(op => op.binding === binding && op.op === "proxy_with_finalizer");
+      expect(bridge?.meta?.disposer).toBeUndefined();
+    }
   });
 
   test('typed Node lifecycle hints avoid broad request response DTO matches', () => {
