@@ -1372,6 +1372,25 @@ function process_all(items) {
     expect(loop.mode).toBe('foreach');
     expect(loop.variable).toBe('item');
   });
+
+  test('async for inside Python function emits awaited foreach metadata', () => {
+    const code = `
+async def consume_rows(rows):
+  async for row in rows:
+    await process(row)
+`;
+    const m = parseAndManifest(code);
+    const funcOp = m.ops.find(op => op.op === 'func_def' && (op as any).name === 'consume_rows') as any;
+    expect(funcOp).toBeDefined();
+    expect(funcOp.async).toBe(true);
+    const loop = funcOp.body.find((op: any) => op.op === 'loop');
+    expect(loop).toEqual(expect.objectContaining({
+      mode: 'foreach',
+      await: true,
+      variable: 'row',
+      iterable: { kind: 'ref', name: 'rows' },
+    }));
+  });
 });
 
 // --- Try/Catch/Throw ───────────────────────────────────────────

@@ -62,4 +62,11 @@ describe('Dispatch Manifest Schema', () => {
     expect(defs.JobOp.properties.action.enum).toEqual(['enqueue', 'complete', 'wait', 'cancel']);
     expect(defs.JobOp.properties.code.type).toBe('string');
   });
+
+  test('loop schema includes async foreach metadata', () => {
+    const defs = DISPATCH_MANIFEST_SCHEMA.$defs as any;
+    expect(defs.LoopOp.properties.mode.enum).toEqual(['while', 'for', 'infinite', 'foreach']);
+    expect(defs.LoopOp.properties.await.type).toBe('boolean');
+    expect(defs.LoopOp.properties.variable.type).toBe('string');
+  });
 });

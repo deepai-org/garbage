@@ -3250,6 +3250,9 @@ export class ManifestCodeGenerator {
             node.mode === "foreach" ? "foreach" : "infinite",
       body: bodyOps,
     };
+    if (node.await) {
+      loopOp.await = true;
+    }
 
     if (node.test) {
       const aff = this.affinityMap.get(node.test);

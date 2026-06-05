@@ -459,7 +459,9 @@ export class Parser extends ParserCursor {
     if (keyword === "async" && this.peekNext()?.value === "for") {
       this.advance(); // consume async
       this.advance(); // consume for
-      return ControlFlow.parseLoop(this);
+      const loop = ControlFlow.parseLoop(this);
+      loop.await = true;
+      return loop;
     }
 
     // Python async with -> context-manager statement with an async modifier.

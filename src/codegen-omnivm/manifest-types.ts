@@ -266,6 +266,7 @@ export interface IfArm {
 export interface LoopOp {
   op: "loop";
   mode: "while" | "for" | "infinite" | "foreach";
+  await?: boolean;
   test?: ConditionExpr;
   variable?: string;
   iterable?: ManifestValue;

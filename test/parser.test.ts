@@ -231,6 +231,22 @@ describe('Parser', () => {
       expect(loop.variable?.kind === 'Identifier' && loop.variable.name).toBe('item');
     });
 
+    test('preserves Python async for loops as awaited foreach loops', () => {
+      const ast = parseCode(`async def consume_rows(rows):
+  async for row in rows:
+    await process(row)
+`);
+      const func = ast.body[0] as AST.FuncDecl;
+      expect(func.kind).toBe('FuncDecl');
+      expect(func.async).toBe(true);
+      const loop = func.body.statements[0] as AST.Loop;
+      expect(loop.kind).toBe('Loop');
+      expect(loop.mode).toBe('foreach');
+      expect(loop.await).toBe(true);
+      expect(loop.variable?.kind === 'Identifier' && loop.variable.name).toBe('row');
+      expect(loop.iterable?.kind).toBe('Identifier');
+    });
+
     test('parses switch statements', () => {
       const ast = parseCode(`
         switch (x) {
