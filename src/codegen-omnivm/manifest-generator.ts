@@ -1483,14 +1483,16 @@ export class ManifestCodeGenerator {
 
   private tableRuntimeHint(type: AST.TypeNode): OmniRuntime {
     const name = this.typeName(type).toLowerCase();
-    if (/(pandas|pyarrow|dataframe|recordbatch)/.test(name)) return OmniRuntime.Python;
+    if (/(bytebuffer|directbytebuffer|intbuffer|floatbuffer|doublebuffer|longbuffer|shortbuffer|charbuffer)/.test(name)) return OmniRuntime.Java;
+    if (/(arraybuffer|dataview|typedarray|uint8array|uint8clampedarray|uint16array|uint32array|int8array|int16array|int32array|float32array|float64array|bigint64array|biguint64array)/.test(name)) return OmniRuntime.JavaScript;
+    if (/(pandas|pyarrow|dataframe|recordbatch|numpy|ndarray|tensor|jax|torch|cupy|dlpack)/.test(name)) return OmniRuntime.Python;
     if (/(arrowtable|datatable|table|polars)/.test(name)) return OmniRuntime.Python;
     return this.defaultRuntime;
   }
 
   private isTableType(type: AST.TypeNode): boolean {
     const name = this.typeName(type).toLowerCase();
-    return /(dataframe|arrowtable|recordbatch|table|polars|pandas|pyarrow)/.test(name);
+    return /(dataframe|arrowtable|recordbatch|table|polars|pandas|pyarrow|numpy|ndarray|tensor|jax|torch|cupy|dlpack|bytebuffer|directbytebuffer|intbuffer|floatbuffer|doublebuffer|longbuffer|shortbuffer|charbuffer|arraybuffer|dataview|typedarray|uint8array|uint8clampedarray|uint16array|uint32array|int8array|int16array|int32array|float32array|float64array|bigint64array|biguint64array)/.test(name);
   }
 
   private typeName(type: AST.TypeNode): string {

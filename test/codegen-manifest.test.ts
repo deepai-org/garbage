@@ -2399,6 +2399,30 @@ console.log(orders)
     ]));
   });
 
+  test('typed native-memory declarations infer table runtimes from ecosystem types', () => {
+    const code = `
+const features: JaxTensor = "jax-buffer"
+const payload: Uint8Array = "js-buffer"
+const javaBytes: DirectByteBuffer = "java-buffer"
+console.log(features, payload, javaBytes)
+`;
+    const m = parseAndManifest(code);
+    const tables = findAllOps(m, "table") as any[];
+
+    expect(tables).toEqual([
+      expect.objectContaining({ bind: "features", runtime: "python", format: "arrow_c_data" }),
+      expect.objectContaining({ bind: "payload", runtime: "javascript", format: "arrow_c_data" }),
+      expect.objectContaining({ bind: "javaBytes", runtime: "java", format: "arrow_c_data" }),
+    ]);
+    expect(m.bridges).toEqual(expect.arrayContaining([
+      expect.objectContaining({ binding: "features", op: "share_memory", from: "python" }),
+      expect.objectContaining({ binding: "javaBytes", op: "share_memory", from: "java" }),
+    ]));
+    expect(m.bridges).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ binding: "payload", op: "share_memory" }),
+    ]));
+  });
+
   test('typed stream captures emit deterministic stream_proxy bridge hints', () => {
     const code = `
 import os
