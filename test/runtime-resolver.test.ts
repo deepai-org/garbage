@@ -275,6 +275,12 @@ describe('Import Analysis', () => {
     expect(result!.runtime).toBe(OmniRuntime.Java);
   });
 
+  test('ambiguous stdlib import paths honor preferred syntax runtime', () => {
+    expect(analyzeImportPath('http')!.runtime).toBe(OmniRuntime.Go);
+    expect(analyzeImportPath('http', { preferredRuntime: OmniRuntime.JavaScript })!.runtime).toBe(OmniRuntime.JavaScript);
+    expect(analyzeImportPath('http', { preferredRuntime: OmniRuntime.Python })!.runtime).toBe(OmniRuntime.Python);
+  });
+
   test('./relative/path.js infers JavaScript', () => {
     const result = analyzeImportPath('./relative/path.js');
     expect(result).toBeDefined();
@@ -723,6 +729,33 @@ describe('Import-to-Usage Propagation', () => {
       .map(([, aff]) => aff.runtime);
 
     expect(callRuntimes).toEqual([OmniRuntime.JavaScript]);
+  });
+
+  test('ambiguous stdlib imports use source syntax over module-name defaults', () => {
+    const result = resolve([
+      'import django',
+      'import http from "http"',
+      'from http import client',
+      'const server = http.createServer(() => null)',
+      'const connection = client.HTTPConnection("example.com")',
+    ].join('\n'));
+    const callRuntimes = [...result.affinityMap]
+      .filter(([node]) => node.kind === 'Call')
+      .map(([, aff]) => aff.runtime);
+
+    expect(callRuntimes).toEqual([
+      OmniRuntime.JavaScript,
+      OmniRuntime.Python,
+    ]);
+  });
+
+  test('quoted Go stdlib imports can beat Python bare import defaults', () => {
+    const result = resolve('import "os"\nconst cwd = os.Getwd()');
+    const callRuntimes = [...result.affinityMap]
+      .filter(([node]) => node.kind === 'Call')
+      .map(([, aff]) => aff.runtime);
+
+    expect(callRuntimes).toEqual([OmniRuntime.Go]);
   });
 });
 

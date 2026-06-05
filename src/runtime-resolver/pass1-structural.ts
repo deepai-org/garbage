@@ -353,8 +353,11 @@ export class Pass1Structural {
   }
 
   private visitImport(node: AST.Import): void {
-    const affinity = node.path.startsWith('"') || node.path.startsWith("'")
-      ? analyzeImportPath(node.path.replace(/['"]/g, ""))
+    const raw = this.nodeSource(node);
+    const path = node.path.replace(/['"]/g, "");
+    const quotedImport = raw ? /^\s*import\s*["']/.test(raw) : node.path.startsWith('"') || node.path.startsWith("'");
+    const affinity = quotedImport
+      ? analyzeImportPath(path, { preferredRuntime: OmniRuntime.Go }) || analyzeBareImport(path)
       : analyzeBareImport(node.path) || analyzeImportPath(node.path);
 
     if (affinity) {
@@ -380,7 +383,10 @@ export class Pass1Structural {
   }
 
   private visitImportDecl(node: AST.ImportDecl): void {
-    const affinity = analyzeImportPath(node.path);
+    const preferredRuntime = this.importDeclPreferredRuntime(node);
+    const affinity = preferredRuntime
+      ? analyzeImportPath(node.path, { preferredRuntime }) || analyzeImportPath(node.path)
+      : analyzeImportPath(node.path);
 
     if (affinity) {
       const aff = affinityFromEvidence(chooseRuntime([{
@@ -412,6 +418,19 @@ export class Pass1Structural {
         }
       }
     }
+  }
+
+  private importDeclPreferredRuntime(node: AST.ImportDecl): OmniRuntime | undefined {
+    const raw = this.nodeSource(node)?.trim();
+    if (!raw) return undefined;
+    if (/\bfrom\s*["']/.test(raw)) return OmniRuntime.JavaScript;
+    if (raw.startsWith("from ")) return OmniRuntime.Python;
+    return undefined;
+  }
+
+  private nodeSource(node: AST.Decl | AST.Stmt | AST.Expr): string | undefined {
+    if (!this.source || !node.span || node.span.end <= node.span.start) return undefined;
+    return this.source.slice(node.span.start, node.span.end);
   }
 
   private importBindingNames(path: string, runtime: OmniRuntime, alias?: string): string[] {

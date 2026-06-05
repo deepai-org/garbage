@@ -106,8 +106,25 @@ const JAVA_MODULES = new Set([
 /**
  * Analyze an import path and infer the runtime affinity.
  */
-export function analyzeImportPath(path: string): RuntimeAffinity | undefined {
+export function analyzeImportPath(
+  path: string,
+  options?: { preferredRuntime?: OmniRuntime },
+): RuntimeAffinity | undefined {
   const evidence: AffinityEvidence = { type: "import", detail: `import "${path}"` };
+
+  if (options?.preferredRuntime === OmniRuntime.JavaScript &&
+      (path.startsWith("node:") || JS_MODULES.has(path) || [...JS_MODULES].some(mod => path.startsWith(`${mod}/`)))) {
+    return { runtime: OmniRuntime.JavaScript, confidence: "inferred", evidence: [evidence] };
+  }
+  if (options?.preferredRuntime === OmniRuntime.Python &&
+      (PYTHON_MODULES.has(path) || [...PYTHON_MODULES].some(mod => path.startsWith(`${mod}.`)))) {
+    return { runtime: OmniRuntime.Python, confidence: "inferred", evidence: [evidence] };
+  }
+  if (options?.preferredRuntime === OmniRuntime.Go &&
+      (GO_MODULES.has(path) || path.startsWith("github.com/") || path.startsWith("golang.org/") ||
+      path.startsWith("go.uber.org/") || path.startsWith("google.golang.org/"))) {
+    return { runtime: OmniRuntime.Go, confidence: "inferred", evidence: [evidence] };
+  }
 
   // Go module paths: quoted strings with / and often domain-like prefixes
   if (path.startsWith("github.com/") || path.startsWith("golang.org/") ||
