@@ -520,11 +520,43 @@ describe("Example files: end-to-end pipeline", () => {
       const streamSnapshot = manifest.ops.find(
         (o: any) => o.op === "eval" && String(o.code).includes("Array.from(stream_chunks)")
       ) as any;
+      const readFunc = manifest.ops.find(
+        (o: any) => o.op === "func_def" && o.name === "read_http_lines"
+      ) as any;
 
       expect(chanOps.map((o: any) => o.action)).toEqual(
         expect.arrayContaining(["make", "send", "close"])
       );
       expect(streamSnapshot?.runtime).toBe("javascript");
+      expect(readFunc?.async).toBe(true);
+      expect(readFunc?.body.length).toBeGreaterThan(0);
+      const nestedOps: any[] = [];
+      const collectOps = (value: any) => {
+        if (Array.isArray(value)) {
+          value.forEach(collectOps);
+          return;
+        }
+        if (!value || typeof value !== "object") return;
+        if (typeof value.op === "string") nestedOps.push(value);
+        Object.values(value).forEach(collectOps);
+      };
+      collectOps(readFunc.body);
+      const contextManagerEvals = nestedOps.filter(
+        (o: any) => o.op === "eval" && ["client", "response"].includes(o.bind)
+      );
+      expect(contextManagerEvals).toEqual([
+        expect.objectContaining({ runtime: "python", code: "httpx.AsyncClient()", bind: "client" }),
+        expect.objectContaining({ runtime: "python", code: "client.stream(\"GET\", url)", bind: "response" }),
+      ]);
+      expect(JSON.stringify(contextManagerEvals)).not.toContain(" as ");
+      expect(
+        nestedOps
+          .filter((o: any) => o.op === "resource" && o.action === "close")
+          .map((o: any) => o.target)
+      ).toEqual(expect.arrayContaining(["client", "response"]));
+      expect(manifest.ops).not.toContainEqual(
+        expect.objectContaining({ op: "exec", code: "async" })
+      );
     });
 
     it("lowers runnable resource/job example to first-class manifest ops", () => {

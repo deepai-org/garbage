@@ -987,26 +987,40 @@ export function parseUsing(host: ControlFlowHost, ): AST.Using {
       span: host.createSpan(start, host.current - 1)
     } as AST.VarDecl;
   } else {
-  // Parse the resource expression
-  const expr = host.parseExpression();
+    // Parse the resource expression. The general expression parser treats
+    // `as` as a TypeScript type assertion; in a context-manager header it is
+    // Python's alias binder, so unwrap that shape here.
+    const expr = host.parseExpression();
+    const contextAliasAssertion =
+      expr.kind === "TypeAssertion" && expr.type.kind === "SimpleType"
+        ? (expr as AST.TypeAssertion & { type: AST.SimpleType })
+        : undefined;
+    const assertedAlias = contextAliasAssertion?.type.id;
 
-  // Check for Python-style 'as' alias
-  if (host.match("as")) {
-    const alias = host.parseIdentifier();
-    // Create a variable declaration for the alias
-    resource = {
-      kind: "VarDecl",
-      names: [alias],
-      values: [expr],
-      span: host.createSpan(start, host.current - 1)
-    } as AST.VarDecl;
-  } else if (host.isDeclStart()) {
-    // Rewind and parse as declaration
-    host.current = start + 1;
-    resource = host.parseDeclaration();
-  } else {
-    resource = expr;
-  }
+    // Check for Python-style 'as' alias
+    if (assertedAlias) {
+      resource = {
+        kind: "VarDecl",
+        names: [assertedAlias],
+        values: [contextAliasAssertion.expr],
+        span: host.createSpan(start, host.current - 1)
+      } as AST.VarDecl;
+    } else if (host.match("as")) {
+      const alias = host.parseIdentifier();
+      // Create a variable declaration for the alias
+      resource = {
+        kind: "VarDecl",
+        names: [alias],
+        values: [expr],
+        span: host.createSpan(start, host.current - 1)
+      } as AST.VarDecl;
+    } else if (host.isDeclStart()) {
+      // Rewind and parse as declaration
+      host.current = start + 1;
+      resource = host.parseDeclaration();
+    } else {
+      resource = expr;
+    }
   }
   
   // Consume closing paren for using (...) form

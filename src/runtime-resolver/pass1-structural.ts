@@ -241,6 +241,11 @@ export class Pass1Structural {
         if (node.finallyBody) this.visitBlock(node.finallyBody);
         break;
 
+      case "Using":
+        this.visitNode(node.resource);
+        this.visitBlock(node.body);
+        break;
+
       case "Return":
         for (const v of node.values) this.visitExpr(v);
         break;

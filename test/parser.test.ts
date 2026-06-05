@@ -47,6 +47,26 @@ describe('Parser', () => {
       expect(func.async).toBe(true);
     });
 
+    test('keeps async with statements inside async Python functions', () => {
+      const ast = parseCode(`async def read_http_lines(url):
+  async with httpx.AsyncClient() as client:
+    await asyncio.sleep(0)
+    return response.text.splitlines()
+`);
+      expect(ast.body).toHaveLength(1);
+      const func = ast.body[0] as AST.FuncDecl;
+      expect(func.kind).toBe('FuncDecl');
+      expect(func.async).toBe(true);
+      expect(func.body.statements).toHaveLength(1);
+      const using = func.body.statements[0] as AST.Using;
+      expect(using.kind).toBe('Using');
+      const resource = using.resource as AST.VarDecl;
+      expect(resource.kind).toBe('VarDecl');
+      expect(resource.names[0].name).toBe('client');
+      expect(resource.values?.[0].kind).toBe('Call');
+      expect(using.body.statements.map(stmt => stmt.kind)).toEqual(['ExprStmt', 'Return']);
+    });
+
     test('parses import statements', () => {
       const ast = parseCode('import "module" as mod;');
       expect(ast.body).toHaveLength(1);

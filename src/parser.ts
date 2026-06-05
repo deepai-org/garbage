@@ -462,6 +462,16 @@ export class Parser extends ParserCursor {
       return ControlFlow.parseLoop(this);
     }
 
+    // Python async with -> context-manager statement with an async modifier.
+    // The Using node does not need to model async itself for manifest lowering;
+    // it must stay as one statement so indented async function bodies do not
+    // split after a standalone Identifier("async").
+    if (keyword === "async" && this.peekNext()?.value === "with") {
+      this.advance(); // consume async
+      this.advance(); // consume with
+      return ControlFlow.parseUsing(this);
+    }
+
     // switch/match/when → parseSwitch
     if (this.check("switch")) {
       this.advance();

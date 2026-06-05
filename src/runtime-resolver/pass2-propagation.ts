@@ -131,6 +131,19 @@ export class Pass2Propagation {
         if (node.finallyBody) this.propagateBlock(node.finallyBody);
         return this.getOrDefault(node);
 
+      case "Using": {
+        const resourceAff = this.propagateNode(node.resource);
+        const bodyAff = this.propagateBlock(node.body);
+        const usingExisting = this.affinityMap.get(node);
+        const bestUsingAff = resourceAff.confidence !== "fallback" ? resourceAff :
+                             bodyAff.confidence !== "fallback" ? bodyAff : undefined;
+        if (bestUsingAff && (!usingExisting || usingExisting.confidence === "fallback" ||
+            (usingExisting.confidence === "inferred" && usingExisting.evidence[0]?.type === "scope"))) {
+          this.affinityMap.set(node, { ...bestUsingAff });
+        }
+        return this.getOrDefault(node);
+      }
+
       case "Block":
         return this.propagateBlock(node);
 
