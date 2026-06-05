@@ -116,8 +116,9 @@ export function analyzeImportPath(path: string): RuntimeAffinity | undefined {
     return { runtime: OmniRuntime.Go, confidence: "definite", evidence: [evidence] };
   }
 
-  // Java package paths: dotted with java/javax/org/com prefix
-  if (/^(java|javax|org|com|io|jakarta)\.[a-z]/.test(path)) {
+  // Java package paths: dotted with standard Java/JVM prefixes. Keep `io.*`
+  // specific via JAVA_MODULES so Python/Go `io` usage is not claimed as Java.
+  if (/^(java|javax|org|com|jakarta)\.[a-z]/.test(path)) {
     return { runtime: OmniRuntime.Java, confidence: "definite", evidence: [evidence] };
   }
   if (JAVA_MODULES.has(path) || [...JAVA_MODULES].some(mod => path.startsWith(`${mod}.`))) {

@@ -320,6 +320,7 @@ describe('Import Analysis', () => {
     expect(analyzeImportPath('active_record/relation')!.runtime).toBe(OmniRuntime.Ruby);
     expect(analyzeImportPath('reactor.core.publisher.Flux')!.runtime).toBe(OmniRuntime.Java);
     expect(analyzeImportPath('io.reactivex.rxjava3.core.Flowable')!.runtime).toBe(OmniRuntime.Java);
+    expect(analyzeImportPath('io.unknown')?.runtime).not.toBe(OmniRuntime.Java);
     expect(analyzeImportPath('kotlinx.coroutines.Job')!.runtime).toBe(OmniRuntime.Java);
   });
 
