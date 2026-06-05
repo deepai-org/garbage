@@ -1481,6 +1481,13 @@ export class ManifestCodeGenerator {
     } else if (this.isStreamLikeType(type)) {
       this.typedBindingKinds.set(name, "stream");
       this.typedBindingRuntimeHints.set(name, this.streamRuntimeHint(type));
+    } else if (this.isResourceLikeType(type)) {
+      this.typedBindingKinds.set(name, "resource");
+      this.typedBindingRuntimeHints.set(name, this.resourceRuntimeHint(type));
+      const disposer = this.resourceDisposerHint(type);
+      if (disposer) {
+        this.resourceDisposers.set(name, disposer);
+      }
     }
   }
 
@@ -1489,13 +1496,14 @@ export class ManifestCodeGenerator {
     if (/(bytebuffer|directbytebuffer|intbuffer|floatbuffer|doublebuffer|longbuffer|shortbuffer|charbuffer)/.test(name)) return OmniRuntime.Java;
     if (/(arraybuffer|dataview|typedarray|uint8array|uint8clampedarray|uint16array|uint32array|int8array|int16array|int32array|float32array|float64array|bigint64array|biguint64array)/.test(name)) return OmniRuntime.JavaScript;
     if (/(pandas|pyarrow|dataframe|recordbatch|numpy|ndarray|tensor|jax|torch|cupy|dlpack)/.test(name)) return OmniRuntime.Python;
-    if (/(arrowtable|datatable|table|polars)/.test(name)) return OmniRuntime.Python;
+    if (/(arrowtable|datatable|polars)/.test(name) || this.matchesTypeName(name, ["table"])) return OmniRuntime.Python;
     return this.defaultRuntime;
   }
 
   private isTableType(type: AST.TypeNode): boolean {
     const name = this.typeName(type).toLowerCase();
-    return /(dataframe|arrowtable|recordbatch|table|polars|pandas|pyarrow|numpy|ndarray|tensor|jax|torch|cupy|dlpack|bytebuffer|directbytebuffer|intbuffer|floatbuffer|doublebuffer|longbuffer|shortbuffer|charbuffer|arraybuffer|dataview|typedarray|uint8array|uint8clampedarray|uint16array|uint32array|int8array|int16array|int32array|float32array|float64array|bigint64array|biguint64array)/.test(name);
+    return /(dataframe|arrowtable|datatable|recordbatch|polars|pandas|pyarrow|numpy|ndarray|tensor|jax|torch|cupy|dlpack|bytebuffer|directbytebuffer|intbuffer|floatbuffer|doublebuffer|longbuffer|shortbuffer|charbuffer|arraybuffer|dataview|typedarray|uint8array|uint8clampedarray|uint16array|uint32array|int8array|int16array|int32array|float32array|float64array|bigint64array|biguint64array)/.test(name)
+      || this.matchesTypeName(name, ["table"]);
   }
 
   private streamRuntimeHint(type: AST.TypeNode): OmniRuntime {
@@ -1538,7 +1546,62 @@ export class ManifestCodeGenerator {
     return undefined;
   }
 
+  private resourceRuntimeHint(type: AST.TypeNode): OmniRuntime {
+    const name = this.typeName(type).toLowerCase();
+    return this.resourceRuntimeForTypeName(name) || this.defaultRuntime;
+  }
+
+  private isResourceLikeType(type: AST.TypeNode): boolean {
+    const name = this.typeName(type).toLowerCase();
+    return this.resourceRuntimeForTypeName(name) !== undefined;
+  }
+
+  private resourceRuntimeForTypeName(name: string): OmniRuntime | undefined {
+    if (this.matchesTypeName(name, [
+      "completablefuture", "java.util.concurrent.completablefuture",
+      "futuretask", "java.util.concurrent.futuretask",
+      "scheduledfuture", "java.util.concurrent.scheduledfuture",
+      "java.util.concurrent.future",
+      "executorservice", "java.util.concurrent.executorservice",
+      "listenablefuture", "com.google.common.util.concurrent.listenablefuture",
+      "reactor.core.disposable",
+      "io.reactivex.rxjava3.disposables.disposable",
+      "kotlinx.coroutines.job",
+      "autocloseable", "java.lang.autocloseable",
+      "closeable", "java.io.closeable",
+    ])) return OmniRuntime.Java;
+    return undefined;
+  }
+
+  private resourceDisposerHint(type: AST.TypeNode): string | undefined {
+    const name = this.typeName(type).toLowerCase();
+    if (this.matchesTypeName(name, [
+      "executorservice", "java.util.concurrent.executorservice",
+    ])) return "shutdown";
+    if (this.matchesTypeName(name, [
+      "reactor.core.disposable",
+      "io.reactivex.rxjava3.disposables.disposable",
+    ])) return "dispose";
+    if (this.matchesTypeName(name, [
+      "autocloseable", "java.lang.autocloseable",
+      "closeable", "java.io.closeable",
+    ])) return "close";
+    if (this.matchesTypeName(name, [
+      "completablefuture", "java.util.concurrent.completablefuture",
+      "futuretask", "java.util.concurrent.futuretask",
+      "scheduledfuture", "java.util.concurrent.scheduledfuture",
+      "java.util.concurrent.future",
+      "listenablefuture", "com.google.common.util.concurrent.listenablefuture",
+      "kotlinx.coroutines.job",
+    ])) return "cancel";
+    return undefined;
+  }
+
   private matchesStreamType(name: string, candidates: string[]): boolean {
+    return this.matchesTypeName(name, candidates);
+  }
+
+  private matchesTypeName(name: string, candidates: string[]): boolean {
     const normalized = name.replace(/\s+/g, "");
     return candidates.some(candidate => {
       const suffix = candidate.replace(/\s+/g, "").toLowerCase();

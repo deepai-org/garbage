@@ -2522,6 +2522,51 @@ console.log(Array.from(s3Pages), Array.from(dynamoRows), Array.from(googlePages)
     expect(m.diagnostics?.some(d => d.code === "non-stream-materialization")).not.toBe(true);
   });
 
+  test('typed Java future and disposable handles infer resource runtime hints', () => {
+    const code = `
+const future: java.util.concurrent.CompletableFuture = make_future()
+const scheduled: java.util.concurrent.ScheduledFuture = make_scheduled()
+const guava: com.google.common.util.concurrent.ListenableFuture = make_guava()
+const reactor: reactor.core.Disposable = subscribe_reactor()
+const rx: io.reactivex.rxjava3.disposables.Disposable = subscribe_rx()
+const job: kotlinx.coroutines.Job = make_job()
+const executor: java.util.concurrent.ExecutorService = make_executor()
+console.log(future, scheduled, guava, reactor, rx, job, executor)
+`;
+    const m = parseAndManifest(code);
+    const evals = findAllOps(m, "eval") as any[];
+
+    for (const binding of ["future", "scheduled", "guava", "reactor", "rx", "job", "executor"]) {
+      expect(evals.find(op => op.bind === binding)).toMatchObject({ runtime: "java" });
+    }
+    expect(m.bridges).toEqual(expect.arrayContaining([
+      expect.objectContaining({ binding: "future", op: "proxy_with_finalizer", from: "java", to: "javascript", meta: { disposer: "cancel" } }),
+      expect.objectContaining({ binding: "scheduled", op: "proxy_with_finalizer", from: "java", to: "javascript", meta: { disposer: "cancel" } }),
+      expect.objectContaining({ binding: "guava", op: "proxy_with_finalizer", from: "java", to: "javascript", meta: { disposer: "cancel" } }),
+      expect.objectContaining({ binding: "reactor", op: "proxy_with_finalizer", from: "java", to: "javascript", meta: { disposer: "dispose" } }),
+      expect.objectContaining({ binding: "rx", op: "proxy_with_finalizer", from: "java", to: "javascript", meta: { disposer: "dispose" } }),
+      expect.objectContaining({ binding: "job", op: "proxy_with_finalizer", from: "java", to: "javascript", meta: { disposer: "cancel" } }),
+      expect.objectContaining({ binding: "executor", op: "proxy_with_finalizer", from: "java", to: "javascript", meta: { disposer: "shutdown" } }),
+    ]));
+  });
+
+  test('typed resource ecosystem hints avoid broad async handle matches', () => {
+    const code = `
+const futureValue: FutureValue = load_future_value()
+const disposableBag: DisposableBag = load_disposable_bag()
+console.log(futureValue, disposableBag)
+`;
+    const m = parseAndManifest(code);
+    const evals = findAllOps(m, "eval") as any[];
+
+    expect(evals.find(op => op.bind === "futureValue")).toMatchObject({ runtime: "javascript" });
+    expect(evals.find(op => op.bind === "disposableBag")).toMatchObject({ runtime: "javascript" });
+    expect(m.bridges).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ binding: "futureValue", op: "proxy_with_finalizer" }),
+      expect.objectContaining({ binding: "disposableBag", op: "proxy_with_finalizer" }),
+    ]));
+  });
+
   test('typed stream ecosystem hints avoid broad domain type matches', () => {
     const code = `
 const cursorPosition: CursorPosition = load_cursor_position()
