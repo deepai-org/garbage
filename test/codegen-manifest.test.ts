@@ -2497,6 +2497,36 @@ console.log(Array.from(rows), Array.from(result), Array.from(asyncResult), Array
     expect(m.diagnostics?.some(d => d.code === "non-stream-materialization")).not.toBe(true);
   });
 
+  test('qualified ORM relationship and async result annotations infer Python stream hints', () => {
+    const code = `
+const query: sqlalchemy.orm.Query = load_query()
+const dynamicRelation: sqlalchemy.orm.dynamic.AppenderQuery = load_dynamic_relation()
+const relationshipRows: sqlalchemy.orm.collections.InstrumentedList = load_relationship_rows()
+const related: django.db.models.manager.RelatedManager = load_related()
+const asyncScalars: sqlalchemy.ext.asyncio.AsyncScalarResult = load_async_scalars()
+const asyncMappings: sqlalchemy.ext.asyncio.AsyncMappingResult = load_async_mappings()
+const cursorFactory: asyncpg.cursor.CursorFactory = load_cursor_factory()
+console.log(Array.from(query), Array.from(dynamicRelation), Array.from(relationshipRows), Array.from(related), Array.from(asyncScalars), Array.from(asyncMappings), Array.from(cursorFactory))
+`;
+    const m = parseAndManifest(code);
+    const evals = findAllOps(m, "eval") as any[];
+
+    for (const binding of ["query", "dynamicRelation", "relationshipRows", "related", "asyncScalars", "asyncMappings", "cursorFactory"]) {
+      expect(evals.find(op => op.bind === binding)).toMatchObject({ runtime: "python" });
+    }
+    expect(m.bridges).toEqual(expect.arrayContaining([
+      expect.objectContaining({ binding: "query", op: "stream_proxy", from: "python", to: "javascript" }),
+      expect.objectContaining({ binding: "dynamicRelation", op: "stream_proxy", from: "python", to: "javascript" }),
+      expect.objectContaining({ binding: "relationshipRows", op: "stream_proxy", from: "python", to: "javascript" }),
+      expect.objectContaining({ binding: "related", op: "stream_proxy", from: "python", to: "javascript" }),
+      expect.objectContaining({ binding: "asyncScalars", op: "stream_proxy", from: "python", to: "javascript" }),
+      expect.objectContaining({ binding: "asyncMappings", op: "stream_proxy", from: "python", to: "javascript" }),
+      expect.objectContaining({ binding: "cursorFactory", op: "stream_proxy", from: "python", to: "javascript" }),
+    ]));
+    expect(m.diagnostics?.some(d => d.code === "unknown-stream-materialization")).not.toBe(true);
+    expect(m.diagnostics?.some(d => d.code === "non-stream-materialization")).not.toBe(true);
+  });
+
   test('qualified SDK pager and cursor type annotations infer Python stream hints', () => {
     const code = `
 const s3Pages: botocore.paginate.PageIterator = list_s3_pages()
