@@ -357,6 +357,9 @@ export const GLOBAL_AFFINITY: Record<string, OmniRuntime> = {
   org: OmniRuntime.Java,
   com: OmniRuntime.Java,
   okhttp3: OmniRuntime.Java,
+  reactor: OmniRuntime.Java,
+  kotlin: OmniRuntime.Java,
+  kotlinx: OmniRuntime.Java,
 
   // Java classes commonly used as member roots.
   System: OmniRuntime.Java,

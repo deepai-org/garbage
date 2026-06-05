@@ -225,6 +225,9 @@ describe('Builtin Tables', () => {
     expect(lookupGlobalAffinity('org')).toBe(OmniRuntime.Java);
     expect(lookupGlobalAffinity('com')).toBe(OmniRuntime.Java);
     expect(lookupGlobalAffinity('okhttp3')).toBe(OmniRuntime.Java);
+    expect(lookupGlobalAffinity('reactor')).toBe(OmniRuntime.Java);
+    expect(lookupGlobalAffinity('kotlin')).toBe(OmniRuntime.Java);
+    expect(lookupGlobalAffinity('kotlinx')).toBe(OmniRuntime.Java);
   });
 
   test('JavaScript globals map to JavaScript globals', () => {
@@ -694,6 +697,15 @@ describe('Global Root Propagation', () => {
       .map(([, nodeAff]) => nodeAff.runtime);
     expect(callRuntimes).toContain(OmniRuntime.Java);
     expect(callRuntimes).not.toContain(OmniRuntime.Go);
+  });
+
+  test('reactive Java package roots resolve to Java without tags', () => {
+    const result = resolve('const flux = reactor.core.publisher.Flux.just("alpha")\nconst job = kotlinx.coroutines.Job()');
+    const callRuntimes = [...result.affinityMap]
+      .filter(([node]) => node.kind === 'Call')
+      .map(([, nodeAff]) => nodeAff.runtime);
+
+    expect(callRuntimes).toEqual([OmniRuntime.Java, OmniRuntime.Java]);
   });
 
   test('JavaScript global callee dominates fallback arguments', () => {
