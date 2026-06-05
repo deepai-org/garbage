@@ -428,6 +428,7 @@ export const AMBIGUOUS_METHODS = new Set([
   "clear",
   "get",
   "set",
+  "close",
   "add",
   "contains",
   "isEmpty",

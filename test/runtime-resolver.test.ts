@@ -187,6 +187,7 @@ describe('Method Tables', () => {
     expect(lookupMethodAffinity('entries')).toBeUndefined();
     expect(lookupMethodAffinity('count')).toBeUndefined();
     expect(lookupMethodAffinity('get')).toBeUndefined();
+    expect(lookupMethodAffinity('close')).toBeUndefined();
     expect(lookupMethodAffinity('length')).toBeUndefined();
   });
 
@@ -206,6 +207,10 @@ describe('Builtin Tables', () => {
 
   test('make() maps to Go', () => {
     expect(lookupBuiltinAffinity('make')).toBe(OmniRuntime.Go);
+  });
+
+  test('close() remains a Go builtin', () => {
+    expect(lookupBuiltinAffinity('close')).toBe(OmniRuntime.Go);
   });
 
   test('require() maps to JavaScript', () => {
@@ -632,20 +637,20 @@ describe('Import-to-Usage Propagation', () => {
   });
 
   test('collision-prone method names do not override file runtime without object provenance', () => {
-    const result = resolve('// @runtime python\nrow.then(callback)\nrow.count()\nrow.keys()\nrow.values()\nrow.entries()');
+    const result = resolve('// @runtime python\nrow.then(callback)\nrow.count()\nrow.keys()\nrow.values()\nrow.entries()\nrow.close()');
     const seen = new Set<string>();
 
     for (const [node, aff] of result.affinityMap) {
       if (node.kind === 'Member') {
         const name = (node as AST.Member).property.name;
-        if (['then', 'count', 'keys', 'values', 'entries'].includes(name)) {
+        if (['then', 'count', 'keys', 'values', 'entries', 'close'].includes(name)) {
           seen.add(name);
           expect(aff.runtime).toBe(OmniRuntime.Python);
         }
       }
     }
 
-    expect(seen).toEqual(new Set(['then', 'count', 'keys', 'values', 'entries']));
+    expect(seen).toEqual(new Set(['then', 'count', 'keys', 'values', 'entries', 'close']));
   });
 
   test('aliased import propagates: import numpy as np', () => {
