@@ -686,6 +686,24 @@ describe('Import-to-Usage Propagation', () => {
     ]);
   });
 
+  test('Python dotted imports bind package roots in mixed files', () => {
+    const result = resolve([
+      'import react',
+      'import starlette.requests',
+      'import django.http',
+      'const req = starlette.requests.Request(scope)',
+      'const response = django.http.HttpResponse("ok")',
+    ].join('\n'));
+    const callRuntimes = [...result.affinityMap]
+      .filter(([node]) => node.kind === 'Call')
+      .map(([, aff]) => aff.runtime);
+
+    expect(callRuntimes).toEqual([
+      OmniRuntime.Python,
+      OmniRuntime.Python,
+    ]);
+  });
+
   test('JS import { useState } from "react" → useState() is JS', () => {
     const result = resolve('import { useState } from "react"\nuseState(0)');
     for (const [node, aff] of result.affinityMap) {

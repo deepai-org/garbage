@@ -198,6 +198,17 @@ export class Pass2Propagation {
         if (node.declaration) return this.propagateNode(node.declaration);
         return this.getOrDefault(node);
 
+      case "Import":
+      case "ImportDecl":
+        return this.getOrDefault(node);
+
+      case "GroupedImport": {
+        for (const imported of node.imports) {
+          this.propagateNode(imported);
+        }
+        return this.getOrDefault(node);
+      }
+
       case "ClassDecl":
         for (const member of node.members) {
           if (member.body) this.propagateBlock(member.body);

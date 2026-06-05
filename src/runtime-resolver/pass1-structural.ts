@@ -355,7 +355,7 @@ export class Pass1Structural {
   private visitImport(node: AST.Import): void {
     const affinity = node.path.startsWith('"') || node.path.startsWith("'")
       ? analyzeImportPath(node.path.replace(/['"]/g, ""))
-      : analyzeBareImport(node.path);
+      : analyzeBareImport(node.path) || analyzeImportPath(node.path);
 
     if (affinity) {
       const aff = affinityFromEvidence(chooseRuntime([{
@@ -365,8 +365,10 @@ export class Pass1Structural {
         detail: affinity.evidence[0]?.detail || `import: ${node.path}`,
       }], this.fileDirective || OmniRuntime.JavaScript));
       this.assign(node, aff.runtime, aff.confidence, ...aff.evidence);
-      // Register imported name. Java dotted imports bind the simple class name
-      // (`import java.util.concurrent.CompletableFuture` -> `CompletableFuture`).
+      // Register imported names. Java dotted imports bind the simple class name
+      // (`import java.util.concurrent.CompletableFuture` -> `CompletableFuture`);
+      // Python dotted imports bind the package root
+      // (`import starlette.requests` -> `starlette`).
       const names = this.importBindingNames(node.path, affinity.runtime, node.alias?.name);
       for (const name of names) {
         this.symbolTable.define(name, {
@@ -424,6 +426,10 @@ export class Pass1Structural {
       if (last && last !== "*" && /^[A-Z_$]/.test(last)) {
         names.add(last);
       }
+    }
+    if (runtime === OmniRuntime.Python && cleaned.includes(".")) {
+      const root = cleaned.split(".")[0];
+      if (root) names.add(root);
     }
 
     if (slashName) names.add(slashName);
