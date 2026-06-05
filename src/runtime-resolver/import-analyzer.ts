@@ -101,7 +101,7 @@ const JAVA_MODULES = new Set([
   "okhttp3",
   "io.netty", "io.grpc", "io.reactivex", "io.reactivex.rxjava3", "reactor", "reactor.core",
   "kotlin", "kotlinx.coroutines",
-  "jakarta.servlet", "jakarta.persistence",
+  "jakarta.servlet", "jakarta.persistence", "jakarta.validation",
   "lombok",
 ]);
 

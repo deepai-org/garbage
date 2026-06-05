@@ -344,6 +344,8 @@ describe('Import Analysis', () => {
     expect(analyzeImportPath('reactor.core.publisher.Flux')!.runtime).toBe(OmniRuntime.Java);
     expect(analyzeImportPath('io.reactivex.rxjava3.core.Flowable')!.runtime).toBe(OmniRuntime.Java);
     expect(analyzeImportPath('com.google.common.util.concurrent.ListenableFuture')!.runtime).toBe(OmniRuntime.Java);
+    expect(analyzeImportPath('jakarta.validation')!.runtime).toBe(OmniRuntime.Java);
+    expect(analyzeImportPath('jakarta.validation.ConstraintViolationException')!.runtime).toBe(OmniRuntime.Java);
     expect(analyzeImportPath('io.unknown')?.runtime).not.toBe(OmniRuntime.Java);
     expect(analyzeImportPath('kotlinx.coroutines.Job')!.runtime).toBe(OmniRuntime.Java);
   });
