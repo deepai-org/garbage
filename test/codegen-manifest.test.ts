@@ -2427,6 +2427,53 @@ console.log(sessionInfo, connectionOptions, transactionRecord)
     ]));
   });
 
+  test('typed Node server lifecycle handles infer resource runtime hints', () => {
+    const code = `
+import os
+const expressReq: express.Request = make_express_req()
+const expressRes: express.Response = make_express_res()
+const fastifyReq: FastifyRequest = make_fastify_req()
+const fastifyReply: FastifyReply = make_fastify_reply()
+const koaCtx: Koa.Context = make_koa_context()
+const nodeReq: http.IncomingMessage = make_node_req()
+const nodeRes: http.ServerResponse = make_node_res()
+os.path.join(expressReq.path, expressRes.statusCode, fastifyReq.id, fastifyReply.statusCode, koaCtx.path, nodeReq.url, nodeRes.statusCode)
+`;
+    const m = parseAndManifest(code);
+    const evals = findAllOps(m, "eval") as any[];
+
+    for (const binding of ["expressReq", "expressRes", "fastifyReq", "fastifyReply", "koaCtx", "nodeReq", "nodeRes"]) {
+      expect(evals.find(op => op.bind === binding)).toMatchObject({ runtime: "javascript" });
+    }
+    expect(m.bridges).toEqual(expect.arrayContaining([
+      expect.objectContaining({ binding: "expressReq", op: "proxy_with_finalizer", from: "javascript", to: "python", meta: { disposer: "destroy" } }),
+      expect.objectContaining({ binding: "expressRes", op: "proxy_with_finalizer", from: "javascript", to: "python", meta: { disposer: "end" } }),
+      expect.objectContaining({ binding: "fastifyReq", op: "proxy_with_finalizer", from: "javascript", to: "python", meta: { disposer: "destroy" } }),
+      expect.objectContaining({ binding: "fastifyReply", op: "proxy_with_finalizer", from: "javascript", to: "python", meta: { disposer: "end" } }),
+      expect.objectContaining({ binding: "koaCtx", op: "proxy_with_finalizer", from: "javascript", to: "python", meta: { disposer: "end" } }),
+      expect.objectContaining({ binding: "nodeReq", op: "proxy_with_finalizer", from: "javascript", to: "python", meta: { disposer: "destroy" } }),
+      expect.objectContaining({ binding: "nodeRes", op: "proxy_with_finalizer", from: "javascript", to: "python", meta: { disposer: "end" } }),
+    ]));
+  });
+
+  test('typed Node lifecycle hints avoid broad request response DTO matches', () => {
+    const code = `
+import os
+const requestInfo: RequestInfo = load_request_info()
+const responseInit: ResponseInit = load_response_init()
+os.path.join(requestInfo.url, responseInit.statusText)
+`;
+    const m = parseAndManifest(code);
+    const evals = findAllOps(m, "eval") as any[];
+
+    expect(evals.find(op => op.bind === "requestInfo")).toMatchObject({ runtime: "javascript" });
+    expect(evals.find(op => op.bind === "responseInit")).toMatchObject({ runtime: "javascript" });
+    expect(m.bridges).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ binding: "requestInfo", op: "proxy_with_finalizer", meta: { disposer: "destroy" } }),
+      expect.objectContaining({ binding: "responseInit", op: "proxy_with_finalizer", meta: { disposer: "end" } }),
+    ]));
+  });
+
   test('typed table declarations lower to zero-copy table manifest ops automatically', () => {
     const code = `
 const orders: PandasDataFrame = "arrow-buffer"

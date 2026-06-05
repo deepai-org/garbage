@@ -1588,6 +1588,14 @@ export class ManifestCodeGenerator {
       "sqlalchemy.engine.nestedtransaction",
       "sqlalchemy.ext.asyncio.asyncsessiontransaction",
     ])) return OmniRuntime.Python;
+    if (this.matchesTypeName(name, [
+      "express.request", "express.response",
+      "fastifyrequest", "fastify.fastifyrequest",
+      "fastifyreply", "fastify.fastifyreply",
+      "koa.request", "koa.response", "koa.context",
+      "http.incomingmessage", "node.http.incomingmessage",
+      "http.serverresponse", "node.http.serverresponse",
+    ])) return OmniRuntime.JavaScript;
     return undefined;
   }
 
@@ -1617,6 +1625,18 @@ export class ManifestCodeGenerator {
       "sqlalchemy.ext.asyncio.asyncconnection",
       "asyncpg.connection",
     ])) return "close";
+    if (this.matchesTypeName(name, [
+      "express.request",
+      "fastifyrequest", "fastify.fastifyrequest",
+      "koa.request",
+      "http.incomingmessage", "node.http.incomingmessage",
+    ])) return "destroy";
+    if (this.matchesTypeName(name, [
+      "express.response",
+      "fastifyreply", "fastify.fastifyreply",
+      "koa.response", "koa.context",
+      "http.serverresponse", "node.http.serverresponse",
+    ])) return "end";
     if (this.matchesTypeName(name, [
       "completablefuture", "java.util.concurrent.completablefuture",
       "futuretask", "java.util.concurrent.futuretask",
