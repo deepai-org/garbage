@@ -183,6 +183,7 @@ describe('Method Tables', () => {
     expect(lookupMethodAffinity('then')).toBeUndefined();
     expect(lookupMethodAffinity('items')).toBeUndefined();
     expect(lookupMethodAffinity('keys')).toBeUndefined();
+    expect(lookupMethodAffinity('values')).toBeUndefined();
     expect(lookupMethodAffinity('count')).toBeUndefined();
     expect(lookupMethodAffinity('get')).toBeUndefined();
     expect(lookupMethodAffinity('length')).toBeUndefined();
@@ -612,20 +613,20 @@ describe('Import-to-Usage Propagation', () => {
   });
 
   test('collision-prone method names do not override file runtime without object provenance', () => {
-    const result = resolve('// @runtime python\nrow.then(callback)\nrow.count()\nrow.keys()');
+    const result = resolve('// @runtime python\nrow.then(callback)\nrow.count()\nrow.keys()\nrow.values()');
     const seen = new Set<string>();
 
     for (const [node, aff] of result.affinityMap) {
       if (node.kind === 'Member') {
         const name = (node as AST.Member).property.name;
-        if (['then', 'count', 'keys'].includes(name)) {
+        if (['then', 'count', 'keys', 'values'].includes(name)) {
           seen.add(name);
           expect(aff.runtime).toBe(OmniRuntime.Python);
         }
       }
     }
 
-    expect(seen).toEqual(new Set(['then', 'count', 'keys']));
+    expect(seen).toEqual(new Set(['then', 'count', 'keys', 'values']));
   });
 
   test('aliased import propagates: import numpy as np', () => {
