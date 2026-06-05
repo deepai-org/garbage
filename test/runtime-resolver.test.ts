@@ -312,6 +312,8 @@ describe('Import Analysis', () => {
     expect(analyzeImportPath('asyncpg')!.runtime).toBe(OmniRuntime.Python);
     expect(analyzeImportPath('marshmallow')!.runtime).toBe(OmniRuntime.Python);
     expect(analyzeImportPath('jsonschema.validators')!.runtime).toBe(OmniRuntime.Python);
+    expect(analyzeImportPath('node:stream')!.runtime).toBe(OmniRuntime.JavaScript);
+    expect(analyzeImportPath('node:stream/web')!.runtime).toBe(OmniRuntime.JavaScript);
     expect(analyzeImportPath('undici')!.runtime).toBe(OmniRuntime.JavaScript);
     expect(analyzeImportPath('undici/types')!.runtime).toBe(OmniRuntime.JavaScript);
     expect(analyzeImportPath('rack/mock')!.runtime).toBe(OmniRuntime.Ruby);
@@ -711,6 +713,15 @@ describe('Import-to-Usage Propagation', () => {
         expect(aff.runtime).toBe(OmniRuntime.JavaScript);
       }
     }
+  });
+
+  test('Node node: builtin imports resolve to JavaScript in mixed files', () => {
+    const result = resolve('import django\nimport { Readable } from "node:stream"\nconst stream = Readable.from(["chunk"])');
+    const callRuntimes = [...result.affinityMap]
+      .filter(([node]) => node.kind === 'Call')
+      .map(([, aff]) => aff.runtime);
+
+    expect(callRuntimes).toEqual([OmniRuntime.JavaScript]);
   });
 });
 

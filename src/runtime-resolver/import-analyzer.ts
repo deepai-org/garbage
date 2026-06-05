@@ -137,6 +137,11 @@ export function analyzeImportPath(path: string): RuntimeAffinity | undefined {
     return { runtime: OmniRuntime.Python, confidence: "inferred", evidence: [evidence] };
   }
 
+  // Modern Node.js builtin imports, e.g. node:stream or node:stream/web.
+  if (path.startsWith("node:")) {
+    return { runtime: OmniRuntime.JavaScript, confidence: "inferred", evidence: [evidence] };
+  }
+
   // JS modules (npm-style)
   if (JS_MODULES.has(path) || [...JS_MODULES].some(mod => path.startsWith(`${mod}/`))) {
     return { runtime: OmniRuntime.JavaScript, confidence: "inferred", evidence: [evidence] };
