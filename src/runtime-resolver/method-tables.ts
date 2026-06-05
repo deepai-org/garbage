@@ -385,6 +385,12 @@ export const GLOBAL_AFFINITY: Record<string, OmniRuntime> = {
   Short: OmniRuntime.Java,
 };
 
+const QUALIFIED_GLOBAL_AFFINITY: Array<[string[], OmniRuntime]> = [
+  [["io", "reactivex"], OmniRuntime.Java],
+  [["io", "grpc"], OmniRuntime.Java],
+  [["io", "netty"], OmniRuntime.Java],
+];
+
 /**
  * Method names that are ambiguous across runtimes.
  * These should not be used as strong evidence alone.
@@ -452,4 +458,17 @@ export function lookupBuiltinAffinity(name: string): OmniRuntime | undefined {
  */
 export function lookupGlobalAffinity(name: string): OmniRuntime | undefined {
   return GLOBAL_AFFINITY[name];
+}
+
+/**
+ * Look up qualified roots whose first segment is too ambiguous to expose as a
+ * bare global, such as Java's io.reactivex versus Python/Go io.
+ */
+export function lookupQualifiedGlobalAffinity(parts: string[]): OmniRuntime | undefined {
+  for (const [prefix, runtime] of QUALIFIED_GLOBAL_AFFINITY) {
+    if (parts.length >= prefix.length && prefix.every((part, idx) => parts[idx] === part)) {
+      return runtime;
+    }
+  }
+  return undefined;
 }

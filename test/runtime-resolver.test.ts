@@ -228,6 +228,7 @@ describe('Builtin Tables', () => {
     expect(lookupGlobalAffinity('reactor')).toBe(OmniRuntime.Java);
     expect(lookupGlobalAffinity('kotlin')).toBe(OmniRuntime.Java);
     expect(lookupGlobalAffinity('kotlinx')).toBe(OmniRuntime.Java);
+    expect(lookupGlobalAffinity('io')).toBeUndefined();
   });
 
   test('JavaScript globals map to JavaScript globals', () => {
@@ -706,6 +707,16 @@ describe('Global Root Propagation', () => {
       .map(([, nodeAff]) => nodeAff.runtime);
 
     expect(callRuntimes).toEqual([OmniRuntime.Java, OmniRuntime.Java]);
+  });
+
+  test('qualified io Java package prefixes resolve without making io global', () => {
+    const result = resolve('const flowable = io.reactivex.rxjava3.core.Flowable.just("alpha")\nconst channel = io.grpc.ManagedChannelBuilder.forTarget("localhost").usePlaintext().build()\nconst buffer = io.netty.buffer.Unpooled.buffer(1)');
+    const callRuntimes = [...result.affinityMap]
+      .filter(([node]) => node.kind === 'Call')
+      .map(([, nodeAff]) => nodeAff.runtime);
+
+    expect(callRuntimes.every(runtime => runtime === OmniRuntime.Java)).toBe(true);
+    expect(callRuntimes.length).toBeGreaterThanOrEqual(3);
   });
 
   test('JavaScript global callee dominates fallback arguments', () => {

@@ -8,7 +8,7 @@ import {
   AnnotatedNode,
 } from './types';
 import { SymbolTable } from './symbol-table';
-import { lookupGlobalAffinity, lookupMethodAffinity } from './method-tables';
+import { lookupGlobalAffinity, lookupMethodAffinity, lookupQualifiedGlobalAffinity } from './method-tables';
 import { computeBridgeCost } from './cost-model';
 import { affinityFromEvidence, chooseRuntime, EVIDENCE_WEIGHTS } from './evidence';
 
@@ -424,6 +424,7 @@ export class Pass2Propagation {
     // Look up method name for runtime affinity evidence
     const methodName = this.getMemberPropertyName(node);
     const methodRuntime = methodName ? lookupMethodAffinity(methodName) : undefined;
+    const qualifiedRuntime = lookupQualifiedGlobalAffinity(this.memberChainParts(node));
 
     const existing = this.affinityMap.get(node);
 
@@ -434,7 +435,9 @@ export class Pass2Propagation {
     // The method table only wins when:
     //   1. The object has no opinion (fallback confidence), OR
     //   2. The method's runtime MATCHES the object's runtime (reinforcing, not contradicting)
-    const objIsKnown = objAff.confidence !== "fallback";
+    const objIsKnown = objAff.confidence !== "fallback" &&
+      !(objAff.confidence === "inferred" && objAff.evidence[0]?.type === "scope" &&
+        objAff.evidence[0]?.detail.startsWith("scope majority"));
 
     if (objIsKnown) {
       // Object has a real runtime — inherit from object
@@ -445,6 +448,12 @@ export class Pass2Propagation {
           { type: "scope", detail: `inherited from object: ${objAff.runtime}` },
           ...objAff.evidence,
         ],
+      });
+    } else if (qualifiedRuntime && (!existing || existing.confidence !== "definite")) {
+      this.affinityMap.set(node, {
+        runtime: qualifiedRuntime,
+        confidence: "inferred",
+        evidence: [{ type: "builtin", detail: `qualified global: ${this.memberChainParts(node).join(".")}` }],
       });
     } else if (methodRuntime && (!existing || existing.confidence !== "definite") && !objIsKnown) {
       // Object is unknown (fallback) — method name provides the best evidence
@@ -656,6 +665,19 @@ export class Pass2Propagation {
       return (property as AST.Identifier).name;
     }
     return undefined;
+  }
+
+  private memberChainParts(expr: AST.Expr): string[] {
+    if (expr.kind === "Identifier") {
+      return [expr.name];
+    }
+    if (expr.kind === "Member") {
+      const property = expr.property as unknown;
+      if (property && typeof property === "object" && "kind" in property && property.kind === "Identifier") {
+        return [...this.memberChainParts(expr.object), (property as AST.Identifier).name];
+      }
+    }
+    return [];
   }
 
   private defineDeclaredNames(

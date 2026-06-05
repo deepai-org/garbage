@@ -8,7 +8,7 @@ import {
 } from './types';
 import { SymbolTable } from './symbol-table';
 import { analyzeImportPath, analyzeBareImport } from './import-analyzer';
-import { lookupBuiltinAffinity, lookupGlobalAffinity } from './method-tables';
+import { lookupBuiltinAffinity, lookupGlobalAffinity, lookupQualifiedGlobalAffinity } from './method-tables';
 import { affinityFromEvidence, chooseRuntime, EVIDENCE_WEIGHTS } from './evidence';
 
 /**
@@ -652,8 +652,13 @@ export class Pass1Structural {
     const propertyAff = property && typeof property === "object" && "kind" in property && property.kind !== "Identifier"
       ? this.getAffinity(property as AST.Expr)
       : undefined;
+    const qualifiedRuntime = lookupQualifiedGlobalAffinity(this.memberChainParts(expr));
 
-    if (objectAff && objectAff.confidence !== "fallback") {
+    const objectIsKnown = objectAff && objectAff.confidence !== "fallback" &&
+      !(objectAff.confidence === "inferred" && objectAff.evidence[0]?.type === "scope" &&
+        objectAff.evidence[0]?.detail.startsWith("scope majority"));
+
+    if (objectIsKnown) {
       return {
         runtime: objectAff.runtime,
         confidence: objectAff.confidence,
@@ -664,7 +669,28 @@ export class Pass1Structural {
       };
     }
 
+    if (qualifiedRuntime) {
+      return {
+        runtime: qualifiedRuntime,
+        confidence: "inferred",
+        evidence: [{ type: "builtin", detail: `qualified global: ${this.memberChainParts(expr).join(".")}` }],
+      };
+    }
+
     return propertyAff && propertyAff.confidence !== "fallback" ? propertyAff : undefined;
+  }
+
+  private memberChainParts(expr: AST.Expr): string[] {
+    if (expr.kind === "Identifier") {
+      return [expr.name];
+    }
+    if (expr.kind === "Member") {
+      const property = expr.property as unknown;
+      if (property && typeof property === "object" && "kind" in property && property.kind === "Identifier") {
+        return [...this.memberChainParts(expr.object), (property as AST.Identifier).name];
+      }
+    }
+    return [];
   }
 
   // --- Helpers ---
