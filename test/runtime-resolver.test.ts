@@ -298,6 +298,20 @@ describe('Import Analysis', () => {
     expect(analyzeImportPath('reactor.core')!.runtime).toBe(OmniRuntime.Java);
   });
 
+  test('real-world compatibility package imports infer their owning runtimes', () => {
+    expect(analyzeImportPath('starlette.requests')!.runtime).toBe(OmniRuntime.Python);
+    expect(analyzeImportPath('asyncpg')!.runtime).toBe(OmniRuntime.Python);
+    expect(analyzeImportPath('marshmallow')!.runtime).toBe(OmniRuntime.Python);
+    expect(analyzeImportPath('jsonschema.validators')!.runtime).toBe(OmniRuntime.Python);
+    expect(analyzeImportPath('undici')!.runtime).toBe(OmniRuntime.JavaScript);
+    expect(analyzeImportPath('undici/types')!.runtime).toBe(OmniRuntime.JavaScript);
+    expect(analyzeImportPath('rack/mock')!.runtime).toBe(OmniRuntime.Ruby);
+    expect(analyzeImportPath('active_record/relation')!.runtime).toBe(OmniRuntime.Ruby);
+    expect(analyzeImportPath('reactor.core.publisher.Flux')!.runtime).toBe(OmniRuntime.Java);
+    expect(analyzeImportPath('io.reactivex.rxjava3.core.Flowable')!.runtime).toBe(OmniRuntime.Java);
+    expect(analyzeImportPath('kotlinx.coroutines.Job')!.runtime).toBe(OmniRuntime.Java);
+  });
+
   test('unknown module returns undefined', () => {
     const result = analyzeImportPath('completely_unknown_module_xyz');
     expect(result).toBeUndefined();

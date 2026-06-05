@@ -7,8 +7,9 @@ const PYTHON_MODULES = new Set([
   "os", "sys", "math", "json", "re", "datetime", "collections", "itertools",
   "functools", "pathlib", "typing", "dataclasses", "abc", "enum", "io",
   "logging", "unittest", "pytest", "asyncio", "aiohttp", "requests",
-  "flask", "django", "fastapi", "numpy", "pandas", "polars", "pyarrow", "scipy", "matplotlib",
+  "flask", "django", "fastapi", "starlette", "numpy", "pandas", "polars", "pyarrow", "scipy", "matplotlib",
   "tensorflow", "torch", "sklearn", "sqlalchemy", "celery", "pydantic",
+  "asyncpg", "marshmallow", "jsonschema",
   "beautifulsoup4", "bs4", "jinja2", "httpx", "markdown",
   "selenium", "scrapy", "PIL", "cv2", "pickle",
   "subprocess", "threading", "multiprocessing", "socket", "http",
@@ -49,7 +50,7 @@ const JS_MODULES = new Set([
   "express", "koa", "fastify", "hapi", "nest", "nestjs",
   "lodash", "underscore", "ramda", "rxjs", "immutable",
   "zod", "cheerio", "marked", "d3-shape",
-  "axios", "node-fetch", "got", "superagent",
+  "axios", "node-fetch", "got", "superagent", "undici",
   "moment", "dayjs", "date-fns", "luxon",
   "webpack", "rollup", "vite", "parcel", "esbuild",
   "babel", "typescript", "ts-node",
@@ -96,7 +97,8 @@ const JAVA_MODULES = new Set([
   "org.apache", "org.slf4j", "org.mockito",
   "com.google", "com.fasterxml.jackson", "com.squareup",
   "okhttp3",
-  "io.netty", "io.grpc", "io.reactivex", "reactor.core",
+  "io.netty", "io.grpc", "io.reactivex", "io.reactivex.rxjava3", "reactor", "reactor.core",
+  "kotlin", "kotlinx.coroutines",
   "jakarta.servlet", "jakarta.persistence",
   "lombok",
 ]);
@@ -118,7 +120,7 @@ export function analyzeImportPath(path: string): RuntimeAffinity | undefined {
   if (/^(java|javax|org|com|io|jakarta)\.[a-z]/.test(path)) {
     return { runtime: OmniRuntime.Java, confidence: "definite", evidence: [evidence] };
   }
-  if (JAVA_MODULES.has(path)) {
+  if (JAVA_MODULES.has(path) || [...JAVA_MODULES].some(mod => path.startsWith(`${mod}.`))) {
     return { runtime: OmniRuntime.Java, confidence: "definite", evidence: [evidence] };
   }
 
@@ -136,7 +138,7 @@ export function analyzeImportPath(path: string): RuntimeAffinity | undefined {
   }
 
   // JS modules (npm-style)
-  if (JS_MODULES.has(path)) {
+  if (JS_MODULES.has(path) || [...JS_MODULES].some(mod => path.startsWith(`${mod}/`))) {
     return { runtime: OmniRuntime.JavaScript, confidence: "inferred", evidence: [evidence] };
   }
   // Relative imports with .js/.ts/.jsx/.tsx extension
@@ -149,7 +151,7 @@ export function analyzeImportPath(path: string): RuntimeAffinity | undefined {
   }
 
   // Ruby gems (require with dash/underscore naming)
-  if (RUBY_MODULES.has(path)) {
+  if (RUBY_MODULES.has(path) || [...RUBY_MODULES].some(mod => path.startsWith(`${mod}/`))) {
     return { runtime: OmniRuntime.Ruby, confidence: "inferred", evidence: [evidence] };
   }
 
@@ -179,7 +181,7 @@ export function analyzeBareImport(name: string): RuntimeAffinity | undefined {
     return { runtime: OmniRuntime.Ruby, confidence: "inferred", evidence: [evidence] };
   }
 
-  if (JAVA_MODULES.has(name)) {
+  if (JAVA_MODULES.has(name) || [...JAVA_MODULES].some(mod => name.startsWith(`${mod}.`))) {
     return { runtime: OmniRuntime.Java, confidence: "inferred", evidence: [evidence] };
   }
 
