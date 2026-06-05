@@ -662,6 +662,30 @@ describe('Import-to-Usage Propagation', () => {
     }
   });
 
+  test('Java dotted class imports bind simple class names in mixed files', () => {
+    const result = resolve([
+      'import react',
+      'import java.util.concurrent.CompletableFuture',
+      'import reactor.core.publisher.Flux',
+      'import io.reactivex.rxjava3.core.Flowable',
+      'import kotlinx.coroutines.Job',
+      'const future = CompletableFuture.completedFuture("ok")',
+      'const flux = Flux.just("a")',
+      'const flowable = Flowable.just("b")',
+      'const job = Job()',
+    ].join('\n'));
+    const callRuntimes = [...result.affinityMap]
+      .filter(([node]) => node.kind === 'Call')
+      .map(([, aff]) => aff.runtime);
+
+    expect(callRuntimes).toEqual([
+      OmniRuntime.Java,
+      OmniRuntime.Java,
+      OmniRuntime.Java,
+      OmniRuntime.Java,
+    ]);
+  });
+
   test('JS import { useState } from "react" → useState() is JS', () => {
     const result = resolve('import { useState } from "react"\nuseState(0)');
     for (const [node, aff] of result.affinityMap) {

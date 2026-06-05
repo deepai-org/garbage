@@ -365,12 +365,15 @@ export class Pass1Structural {
         detail: affinity.evidence[0]?.detail || `import: ${node.path}`,
       }], this.fileDirective || OmniRuntime.JavaScript));
       this.assign(node, aff.runtime, aff.confidence, ...aff.evidence);
-      // Register imported name
-      const name = node.alias?.name || node.path.replace(/['"]/g, "").split("/").pop() || node.path;
-      this.symbolTable.define(name, {
-        name,
-        affinity,
-      });
+      // Register imported name. Java dotted imports bind the simple class name
+      // (`import java.util.concurrent.CompletableFuture` -> `CompletableFuture`).
+      const names = this.importBindingNames(node.path, affinity.runtime, node.alias?.name);
+      for (const name of names) {
+        this.symbolTable.define(name, {
+          name,
+          affinity,
+        });
+      }
     }
   }
 
@@ -407,6 +410,25 @@ export class Pass1Structural {
         }
       }
     }
+  }
+
+  private importBindingNames(path: string, runtime: OmniRuntime, alias?: string): string[] {
+    if (alias) return [alias];
+
+    const cleaned = path.replace(/['"]/g, "");
+    const names = new Set<string>();
+    const slashName = cleaned.split("/").pop();
+
+    if (runtime === OmniRuntime.Java && cleaned.includes(".")) {
+      const last = cleaned.split(".").pop();
+      if (last && last !== "*" && /^[A-Z_$]/.test(last)) {
+        names.add(last);
+      }
+    }
+
+    if (slashName) names.add(slashName);
+    if (names.size === 0) names.add(path);
+    return [...names];
   }
 
   private visitCall(node: AST.Call): void {
