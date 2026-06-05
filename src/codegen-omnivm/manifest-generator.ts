@@ -1524,7 +1524,10 @@ export class ManifestCodeGenerator {
     ])) return OmniRuntime.Ruby;
     if (this.matchesStreamType(name, [
       "queryset", "asyncresult", "scalarresult", "sqlalchemy.result",
-      "sqlalchemy.asyncresult", "cursor", "asynccursor", "dbcursor",
+      "sqlalchemy.engine.result", "sqlalchemy.engine.cursorresult",
+      "sqlalchemy.engine.mappingresult", "sqlalchemy.engine.chunkediteratorresult",
+      "sqlalchemy.asyncresult", "sqlalchemy.ext.asyncio.asyncresult",
+      "cursor", "asynccursor", "dbcursor",
       "databasecursor", "servercursor", "asyncpg.cursor", "psycopg.cursor",
       "paginator", "pager", "pageiterator", "scaniterator", "scaniter",
     ])) return OmniRuntime.Python;

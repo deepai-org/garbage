@@ -2466,6 +2466,37 @@ console.log(Array.from(rows), Array.from(flux), Array.from(upload))
     expect(m.diagnostics?.some(d => d.code === "non-stream-materialization")).not.toBe(true);
   });
 
+  test('qualified lazy and stream ecosystem type annotations infer runtime hints', () => {
+    const code = `
+const rows: django.db.models.QuerySet = load_rows()
+const result: sqlalchemy.engine.Result = load_result()
+const asyncResult: sqlalchemy.ext.asyncio.AsyncResult = load_async_result()
+const relation: ActiveRecord.Relation = load_relation()
+const reader: java.io.Reader = load_reader()
+const readable: node.stream.Readable = load_readable()
+console.log(Array.from(rows), Array.from(result), Array.from(asyncResult), Array.from(relation), Array.from(reader), Array.from(readable))
+`;
+    const m = parseAndManifest(code);
+    const evals = findAllOps(m, "eval") as any[];
+
+    expect(evals.find(op => op.bind === "rows")).toMatchObject({ runtime: "python" });
+    expect(evals.find(op => op.bind === "result")).toMatchObject({ runtime: "python" });
+    expect(evals.find(op => op.bind === "asyncResult")).toMatchObject({ runtime: "python" });
+    expect(evals.find(op => op.bind === "relation")).toMatchObject({ runtime: "ruby" });
+    expect(evals.find(op => op.bind === "reader")).toMatchObject({ runtime: "java" });
+    expect(evals.find(op => op.bind === "readable")).toMatchObject({ runtime: "javascript" });
+    expect(m.bridges).toEqual(expect.arrayContaining([
+      expect.objectContaining({ binding: "result", op: "stream_proxy", from: "python", to: "javascript" }),
+      expect.objectContaining({ binding: "relation", op: "stream_proxy", from: "ruby", to: "javascript" }),
+      expect.objectContaining({ binding: "reader", op: "stream_proxy", from: "java", to: "javascript" }),
+    ]));
+    expect(m.bridges).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ binding: "readable", op: "stream_proxy" }),
+    ]));
+    expect(m.diagnostics?.some(d => d.code === "unknown-stream-materialization")).not.toBe(true);
+    expect(m.diagnostics?.some(d => d.code === "non-stream-materialization")).not.toBe(true);
+  });
+
   test('typed stream ecosystem hints avoid broad domain type matches', () => {
     const code = `
 const cursorPosition: CursorPosition = load_cursor_position()
