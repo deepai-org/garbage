@@ -233,17 +233,38 @@ class ManifestLowerer {
     const slice = (span: AST.Span | undefined) =>
       source && span && span.end > span.start ? source.slice(span.start, span.end) : "";
     const functionSource = slice(node.span);
+    const executableSource = this.executableFunctionSource(node, functionSource);
     return {
       paramsSource: node.params.map(param => slice(param.span)),
       bodySource: slice(node.body.span),
-      functionSource: node.generator ? this.executableGeneratorFunctionSource(functionSource) : functionSource,
+      functionSource: executableSource,
     };
+  }
+
+  private executableFunctionSource(node: AST.FuncDecl, source: string): string {
+    let executable = node.generator ? this.executableGeneratorFunctionSource(source) : source;
+    if (node.async && node.declKeyword === "def") {
+      executable = this.executablePythonAsyncFunctionSource(executable);
+    } else if (node.async && node.declKeyword === "function") {
+      executable = this.executableJavaScriptAsyncFunctionSource(executable);
+    }
+    return executable;
   }
 
   private executableGeneratorFunctionSource(source: string): string {
     return source.replace(/^(\s*)(async\s+)?\*/, (_match, leading: string, asyncPrefix: string | undefined) =>
       `${leading}${asyncPrefix ?? ""}function*`,
     );
+  }
+
+  private executablePythonAsyncFunctionSource(source: string): string {
+    if (/^\s*async\s+def\b/.test(source)) return source;
+    return source.replace(/^(\s*)def\b/, "$1async def");
+  }
+
+  private executableJavaScriptAsyncFunctionSource(source: string): string {
+    if (/^\s*async\s+function\b/.test(source)) return source;
+    return source.replace(/^(\s*)function\b/, "$1async function");
   }
 
   private importArtifact(node: AST.Import | AST.ImportDecl, runtime: OmniRuntime) {

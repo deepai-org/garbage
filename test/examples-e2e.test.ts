@@ -313,6 +313,10 @@ describe("Example files: end-to-end pipeline", () => {
         runtimes: ["javascript", "python"],
       },
       {
+        file: "python-async-generator-js-consume.poly",
+        runtimes: ["python", "javascript"],
+      },
+      {
         file: "java-docs-popular-packages.poly",
         runtimes: ["java", "python"],
       },
@@ -374,6 +378,33 @@ describe("Example files: end-to-end pipeline", () => {
       );
       expect(spawnOps.length).toBe(2);
       expect(snapshot?.runtime).toBe("javascript");
+    });
+
+    it("keeps Python async generator consumption lazy in JavaScript", () => {
+      const { manifest } = compile(path.join(examplesDir, "python-async-generator-js-consume.poly"));
+      const ops: any[] = [];
+      const collectOps = (value: any) => {
+        if (!value || typeof value !== "object") return;
+        if (Array.isArray(value)) {
+          for (const item of value) collectOps(item);
+          return;
+        }
+        if (typeof value.op === "string") ops.push(value);
+        for (const nested of Object.values(value)) collectOps(nested);
+      };
+      collectOps(manifest.ops);
+      const asyncExec = ops.find(
+        (op: any) =>
+          op.op === "exec" &&
+          op.runtime === "javascript" &&
+          String(op.code ?? "").includes('for await (const row of row_stream("break"))')
+      ) as any;
+      const collector = ops.find((op: any) => op.op === "func_def" && op.name === "collect_rows") as any;
+
+      expect(collector?.bodyRuntime).toBe("javascript");
+      expect(collector?.async).toBe(true);
+      expect(asyncExec).toBeDefined();
+      expect(asyncExec?.captures).toMatchObject({ row_stream: "row_stream" });
     });
 
     it("keeps framework handlers and server rendering in native runtimes", () => {

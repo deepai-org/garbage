@@ -1155,6 +1155,16 @@ describe('Async Functions', () => {
     expect(funcOp).toBeDefined();
     expect(funcOp.async).toBe(true);
     expect(funcOp.name).toBe('fetchData');
+    expect(funcOp.sourceArtifact?.functionSource).toContain('async function fetchData');
+  });
+
+  test('async Python function source artifact stays executable', () => {
+    const code = 'import asyncio\nasync def rows():\n  await asyncio.sleep(0)\n  return [1]\n';
+    const m = parseAndManifest(code);
+    const funcOp = m.ops.find(op => op.op === 'func_def' && (op as any).name === 'rows') as any;
+    expect(funcOp).toBeDefined();
+    expect(funcOp.async).toBe(true);
+    expect(funcOp.sourceArtifact?.functionSource).toContain('async def rows()');
   });
 
   test('non-async function does not have async flag', () => {
