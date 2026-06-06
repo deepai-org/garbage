@@ -482,6 +482,12 @@ export class Pass1Structural {
           confidence: "definite" as const,
           evidence: [{ type: "syntax" as const, detail: "Python from-import syntax" }],
         }
+      : preferredRuntime === OmniRuntime.JavaScript
+        ? {
+            runtime: OmniRuntime.JavaScript,
+            confidence: "inferred" as const,
+            evidence: [{ type: "syntax" as const, detail: "JavaScript import-from syntax" }],
+          }
       : undefined);
 
     if (affinity) {

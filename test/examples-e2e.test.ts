@@ -313,6 +313,10 @@ describe("Example files: end-to-end pipeline", () => {
         runtimes: ["javascript", "python"],
       },
       {
+        file: "pydantic-zod-error-fidelity.poly",
+        runtimes: ["python", "javascript"],
+      },
+      {
         file: "python-map-collision-docs.poly",
         runtimes: ["python", "javascript"],
       },

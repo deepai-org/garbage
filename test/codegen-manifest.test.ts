@@ -323,6 +323,16 @@ describe('ImportOp', () => {
       expect(importOp.path).toBe('react');
     }
   });
+
+  test('unknown JS package import stays JavaScript in mixed files', () => {
+    const m = parseAndManifest('import pydantic\nimport zod from "zod"');
+    const importOp = m.ops.find((op: any) => op.op === 'import' && op.path === 'zod');
+    expect(importOp).toBeDefined();
+    if (importOp && importOp.op === 'import') {
+      expect(importOp.runtime).toBe('javascript');
+      expect(importOp.defaultImport).toBe('zod');
+    }
+  });
 });
 
 // --- ConcatOp: polyglot string interpolation ---

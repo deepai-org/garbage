@@ -433,6 +433,7 @@ The sibling OmniVM repo documents how these examples map onto CPython-hosted `li
 - **java-docs-popular-packages.poly** — Docs-style Gson, jsoup, OkHttp, and Apache Commons CSV usage
 - **ruby-docs-popular-packages.poly** — Docs-style Nokogiri and Rack usage
 - **go-docs-popular-packages.poly** — Docs-style Go `net/http` and `encoding/json` usage
+- **pydantic-zod-error-fidelity.poly** — Pydantic and Zod validation failures preserving structured error details across Python/JavaScript catch blocks
 - **python-map-collision-docs.poly** — Python object and mapping fields named like proxy methods accessed naturally from JavaScript
 - **python-dataframe-js-table-docs.poly** — Pandas and Polars table values inspected naturally from JavaScript through the inferred table boundary
 - **true-async-stream-boundary.poly** — HTTPX async streams crossing into RxJS and Go workers through an explicit stream/materialization boundary
