@@ -317,6 +317,10 @@ describe("Example files: end-to-end pipeline", () => {
         runtimes: ["python", "javascript"],
       },
       {
+        file: "python-dataframe-js-table-docs.poly",
+        runtimes: ["python", "javascript"],
+      },
+      {
         file: "python-async-generator-js-consume.poly",
         runtimes: ["python", "javascript"],
       },

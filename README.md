@@ -434,6 +434,7 @@ The sibling OmniVM repo documents how these examples map onto CPython-hosted `li
 - **ruby-docs-popular-packages.poly** — Docs-style Nokogiri and Rack usage
 - **go-docs-popular-packages.poly** — Docs-style Go `net/http` and `encoding/json` usage
 - **python-map-collision-docs.poly** — Python object and mapping fields named like proxy methods accessed naturally from JavaScript
+- **python-dataframe-js-table-docs.poly** — Pandas and Polars table values inspected naturally from JavaScript through the inferred table boundary
 - **true-async-stream-boundary.poly** — HTTPX async streams crossing into RxJS and Go workers through an explicit stream/materialization boundary
 - **live-middleware-opaque-handles.poly** — FastAPI, Express, Rack, and Go HTTP handler shapes where request/response objects stay opaque
 - **database-transaction-resource-boundary.poly** — SQLAlchemy, Prisma, ActiveRecord, and JDBC transaction/resource boundaries with materialized rows
