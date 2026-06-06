@@ -1,6 +1,7 @@
 const js_payload = Object.freeze({
   "items": ["alpha", "beta"],
   "keys": ["id", "name"],
+  "then": "field-then",
   "get": "field-get",
   "close": "field-close",
   "length": 2,
@@ -8,10 +9,10 @@ const js_payload = Object.freeze({
 })
 
 def summarize_py(payload):
-  return f"{len(payload.items)}:{payload.items[0]}:{len(payload.keys)}:{payload.keys[0]}:{payload.get}:{payload.close}:{payload.length}:{payload.count}"
+  return f"{len(payload.items)}:{payload.items[0]}:{len(payload.keys)}:{payload.keys[0]}:{payload.then}:{payload.get}:{payload.close}:{payload.length}:{payload.count}"
 
 const py_summary = summarize_py(js_payload)
-const ruby_summary = Fiber.current.object_id && [js_payload.items.length, js_payload.items[0], js_payload.keys.length, js_payload.keys[0], js_payload.get, js_payload.close, js_payload.length, js_payload.count].join(":")
-const java_summary = java.lang.String.valueOf(js_payload.count) + ":" + java.lang.String.valueOf(js_payload.length)
+const ruby_summary = Fiber.current.object_id && [js_payload.items.length, js_payload.items[0], js_payload.keys.length, js_payload.keys[0], js_payload.then, js_payload.get, js_payload.close, js_payload.length, js_payload.count].join(":")
+const java_summary = java.lang.String.valueOf(js_payload.count) + ":" + java.lang.String.valueOf(js_payload.length) + ":" + java.lang.String.valueOf(js_payload.then)
 
 console.log(`JavaScript map collision docs py=${py_summary} ruby=${ruby_summary} java=${java_summary}`)
