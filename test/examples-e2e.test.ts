@@ -313,6 +313,10 @@ describe("Example files: end-to-end pipeline", () => {
         runtimes: ["javascript", "python"],
       },
       {
+        file: "python-map-collision-docs.poly",
+        runtimes: ["python", "javascript"],
+      },
+      {
         file: "python-async-generator-js-consume.poly",
         runtimes: ["python", "javascript"],
       },
