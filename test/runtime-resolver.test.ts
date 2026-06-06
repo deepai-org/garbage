@@ -37,6 +37,13 @@ describe('Parser Enrichment', () => {
     expect(func.declKeyword).toBe('def');
   });
 
+  test('Python-shaped class resolves to Python', () => {
+    const result = resolve('class Session:\n  def __enter__(self):\n    return self\n  def __exit__(self, exc_type, exc, tb):\n    pass');
+    const cls = result.program.body[0] as AST.ClassDecl;
+    expect(cls.kind).toBe('ClassDecl');
+    expect(result.affinityMap.get(cls)?.runtime).toBe(OmniRuntime.Python);
+  });
+
   test('FuncDecl captures declKeyword: "fn"', () => {
     // Note: "func" is not a keyword in the lexer, so it doesn't parse as a top-level
     // function declaration. We test with "fn" which IS a keyword.
@@ -238,6 +245,10 @@ describe('Builtin Tables', () => {
   test('JavaScript globals map to JavaScript globals', () => {
     expect(lookupGlobalAffinity('Array')).toBe(OmniRuntime.JavaScript);
     expect(lookupGlobalAffinity('JSON')).toBe(OmniRuntime.JavaScript);
+    expect(lookupGlobalAffinity('AbortController')).toBe(OmniRuntime.JavaScript);
+    expect(lookupGlobalAffinity('AbortSignal')).toBe(OmniRuntime.JavaScript);
+    expect(lookupGlobalAffinity('Worker')).toBe(OmniRuntime.JavaScript);
+    expect(lookupGlobalAffinity('ReadableStream')).toBe(OmniRuntime.JavaScript);
   });
 
   test('call-only builtins are not global roots', () => {
@@ -299,6 +310,11 @@ describe('Import Analysis', () => {
   });
 
   test('third-party ecosystem package aliases do not infer owning runtimes', () => {
+    expect(analyzeImportPath('django')).toBeUndefined();
+    expect(analyzeImportPath('fastapi')).toBeUndefined();
+    expect(analyzeImportPath('sqlalchemy')).toBeUndefined();
+    expect(analyzeImportPath('pandas')).toBeUndefined();
+    expect(analyzeImportPath('numpy')).toBeUndefined();
     expect(analyzeImportPath('react-dom/server')).toBeUndefined();
     expect(analyzeImportPath('active_record')).toBeUndefined();
     expect(analyzeImportPath('dry/validation')).toBeUndefined();
@@ -618,21 +634,34 @@ describe('Import-to-Usage Propagation', () => {
     }
   });
 
-  test('third-party imports do not resolve by package name alone', () => {
-    const result = resolve('import numpy\nnumpy.array([1, 2, 3])');
-    for (const [node, aff] of result.affinityMap) {
-      if (node.kind === 'Call') {
-        expect(aff.runtime).toBe(OmniRuntime.JavaScript);
+  test('Python-style third-party imports propagate by syntax, not package-name tables', () => {
+    for (const code of [
+      'import django\ndjango.setup()',
+      'import fastapi\nfastapi.FastAPI()',
+      'from fastapi import FastAPI\nFastAPI()',
+      'import sqlalchemy\nsqlalchemy.create_engine(url)',
+      'from sqlalchemy import create_engine, text\ncreate_engine(url)\ntext("select 1")',
+      'import pandas\npandas.DataFrame([])',
+      'import numpy\nnumpy.array([1, 2, 3])',
+      'import pyarrow\npyarrow.array([1, 2, 3])',
+      'from pyarrow import array\narray([1, 2, 3])',
+    ]) {
+      const result = resolve(code);
+      for (const [node, aff] of result.affinityMap) {
+        if (node.kind === 'Call') {
+          expect(aff.runtime).toBe(OmniRuntime.Python);
+        }
       }
     }
   });
 
-  test('unknown bare imports remain unresolved by package name alone', () => {
+  test('unknown bare imports use Python import syntax provenance', () => {
     const result = resolve('import react');
     const node = result.program.body[0];
     const aff = result.affinityMap.get(node);
-    expect(aff?.runtime).toBe(OmniRuntime.JavaScript);
-    expect(aff?.confidence).toBe("fallback");
+    expect(aff?.runtime).toBe(OmniRuntime.Python);
+    expect(aff?.confidence).toBe("definite");
+    expect(aff?.evidence.some(e => e.type === "syntax" && e.detail.includes("Python import syntax"))).toBe(true);
   });
 
   test('assigned variable inherits import runtime through chain', () => {
@@ -714,6 +743,226 @@ describe('Import-to-Usage Propagation', () => {
     ]);
   });
 
+  test('third-party Java class imports bind simple names by class syntax', () => {
+    const result = resolve([
+      'import io.reactivex.rxjava3.core.Flowable',
+      'import reactor.core.publisher.Flux',
+      'const flowable = Flowable.just("alpha")',
+      'const flux = Flux.just("beta")',
+    ].join('\n'));
+    const callRuntimes = [...result.affinityMap]
+      .filter(([node]) => node.kind === 'Call')
+      .map(([, aff]) => aff.runtime);
+
+    expect(callRuntimes).toEqual([
+      OmniRuntime.Java,
+      OmniRuntime.Java,
+    ]);
+
+    const importRuntimes = result.program.body
+      .filter((node): node is AST.Import => node.kind === 'Import')
+      .map(node => result.affinityMap.get(node));
+    expect(importRuntimes.every(aff =>
+      aff?.runtime === OmniRuntime.Java &&
+      aff.evidence.some(e => e.type === "syntax" && e.detail.includes("Java class import syntax"))
+    )).toBe(true);
+  });
+
+  test('third-party Java wildcard imports keep following class usage in Java by syntax', () => {
+    const result = resolve([
+      'import io.reactivex.rxjava3.core.*',
+      'const flowable = Flowable.just("alpha")',
+    ].join('\n'));
+    const importNode = result.program.body.find((node): node is AST.Import => node.kind === 'Import');
+    expect(importNode?.path).toBe('io.reactivex.rxjava3.core.*');
+
+    const importAffinity = importNode ? result.affinityMap.get(importNode) : undefined;
+    expect(importAffinity?.runtime).toBe(OmniRuntime.Java);
+    expect(importAffinity?.evidence.some(e =>
+      e.type === "syntax" && e.detail.includes("Java wildcard import syntax")
+    )).toBe(true);
+
+    const callRuntimes = [...result.affinityMap]
+      .filter(([node]) => node.kind === 'Call')
+      .map(([, aff]) => aff.runtime);
+    expect(callRuntimes).toEqual([OmniRuntime.Java]);
+  });
+
+  test('Java static imports bind imported member names by syntax', () => {
+    const result = resolve([
+      'import static java.util.concurrent.TimeUnit.SECONDS',
+      'import static reactor.core.publisher.Mono.just',
+      'const timeout_unit = SECONDS',
+      'const value = future.get(1, SECONDS)',
+      'const mono = just("ok")',
+    ].join('\n'));
+    const importNode = result.program.body.find((node): node is AST.Import =>
+      node.kind === 'Import' && node.path.includes('TimeUnit')
+    );
+    expect(importNode?.path).toBe('static java.util.concurrent.TimeUnit.SECONDS');
+    expect(importNode?.alias?.name).toBe('SECONDS');
+
+    const importAffinity = importNode ? result.affinityMap.get(importNode) : undefined;
+    expect(importAffinity?.runtime).toBe(OmniRuntime.Java);
+    expect(importAffinity?.evidence.some(e =>
+      e.type === "syntax" && e.detail.includes("Java static import syntax")
+    )).toBe(true);
+
+    const useRuntimes = [...result.affinityMap]
+      .filter(([node]) => node.kind === 'Identifier' && (node as AST.Identifier).name === 'SECONDS')
+      .map(([, aff]) => aff.runtime);
+    expect(useRuntimes.length).toBeGreaterThanOrEqual(2);
+    expect(useRuntimes.every(runtime => runtime === OmniRuntime.Java)).toBe(true);
+
+    const justImport = result.program.body.find((node): node is AST.Import =>
+      node.kind === 'Import' && node.path.includes('reactor.core.publisher.Mono.just')
+    );
+    expect(justImport?.alias?.name).toBe('just');
+
+    const justCall = [...result.affinityMap].find(([node]) =>
+      node.kind === 'Call' && (node as AST.Call).callee.kind === 'Identifier' &&
+      ((node as AST.Call).callee as AST.Identifier).name === 'just'
+    );
+    expect(justCall?.[1].runtime).toBe(OmniRuntime.Java);
+  });
+
+  test('Java static wildcard imports stay single Java imports without stray expressions', () => {
+    const result = resolve([
+      'import static org.junit.Assert.*',
+      'assertEquals(1, count)',
+    ].join('\n'));
+    expect(result.program.body.map(node => node.kind)).toEqual(['Import', 'ExprStmt']);
+
+    const importNode = result.program.body[0] as AST.Import;
+    expect(importNode.path).toBe('static org.junit.Assert.*');
+    expect(result.affinityMap.get(importNode)?.runtime).toBe(OmniRuntime.Java);
+
+    const callRuntimes = [...result.affinityMap]
+      .filter(([node]) => node.kind === 'Call')
+      .map(([, aff]) => aff.runtime);
+    expect(callRuntimes).toEqual([OmniRuntime.Java]);
+  });
+
+  test('Ruby Fiber core global infers Ruby without surrounding scope hints', () => {
+    const result = resolve('const fiber_id = Fiber.current.object_id');
+    const fiberOps = [...result.affinityMap]
+      .filter(([node]) => node.kind === 'Member' || node.kind === 'Call')
+      .map(([, aff]) => aff.runtime);
+
+    expect(fiberOps).toContain(OmniRuntime.Ruby);
+    expect(fiberOps.every(runtime => runtime === OmniRuntime.Ruby)).toBe(true);
+  });
+
+  test('Ruby Thread.current qualified core API beats bare Java Thread root', () => {
+    const rubyResult = resolve('const thread_id = Thread.current.object_id');
+    const rubyRuntimes = [...rubyResult.affinityMap]
+      .filter(([node]) => node.kind === 'Member')
+      .map(([, aff]) => aff.runtime);
+
+    expect(rubyRuntimes).toContain(OmniRuntime.Ruby);
+    expect(rubyRuntimes.every(runtime => runtime === OmniRuntime.Ruby)).toBe(true);
+
+    const javaResult = resolve('const current = Thread.currentThread()');
+    const javaRuntimes = [...javaResult.affinityMap]
+      .filter(([node]) => node.kind === 'Member' || node.kind === 'Call')
+      .map(([, aff]) => aff.runtime);
+
+    expect(javaRuntimes).toContain(OmniRuntime.Java);
+    expect(javaRuntimes.every(runtime => runtime === OmniRuntime.Java)).toBe(true);
+  });
+
+  test('Java typed catch binds handler param and body to Java', () => {
+    const code = [
+      'try {',
+      '  failJava()',
+      '} catch (RuntimeException java_err) {',
+      '  const java_error_summary = java_err.getRuntime() + java_err.getOriginRuntime() + java_err.getDetails()',
+      '}',
+    ].join('\n');
+    const result = resolve(code);
+    const tryNode = result.program.body.find((node): node is AST.Try => node.kind === 'Try');
+    const catchClause = tryNode?.catches[0];
+
+    expect(catchClause).toBeDefined();
+    expect(result.affinityMap.get(catchClause!.body)?.runtime).toBe(OmniRuntime.Java);
+    expect(result.affinityMap.get(catchClause!.param!)?.runtime).toBe(OmniRuntime.Java);
+
+    const javaErrRuntimes = [...result.affinityMap]
+      .filter(([node]) =>
+        node.kind !== 'Try' &&
+        node.kind !== 'Block' &&
+        node.span &&
+        code.slice(node.span.start, node.span.end).includes('java_err')
+      )
+      .map(([, aff]) => aff.runtime);
+
+    expect(javaErrRuntimes).toContain(OmniRuntime.Java);
+    expect(javaErrRuntimes.every(runtime => runtime === OmniRuntime.Java)).toBe(true);
+  });
+
+  test('Java qualified and multi-catch clauses preserve try structure and bind handler to Java', () => {
+    for (const code of [
+      [
+        'try {',
+        '  failJava()',
+        '} catch (java.io.IOException err) {',
+        '  const msg = err.getMessage()',
+        '}',
+      ].join('\n'),
+      [
+        'try {',
+        '  failJava()',
+        '} catch (IOException | SQLException err) {',
+        '  const msg = err.getMessage()',
+        '}',
+      ].join('\n'),
+    ]) {
+      const result = resolve(code);
+      expect(result.program.body).toHaveLength(1);
+      const tryNode = result.program.body[0] as AST.Try;
+      expect(tryNode.kind).toBe('Try');
+      expect(tryNode.catches).toHaveLength(1);
+      expect(tryNode.catches[0].param?.name).toBe('err');
+      expect(result.affinityMap.get(tryNode.catches[0].body)?.runtime).toBe(OmniRuntime.Java);
+      expect(result.affinityMap.get(tryNode.catches[0].param!)?.runtime).toBe(OmniRuntime.Java);
+
+      const catchBodyRuntimes = [...result.affinityMap]
+        .filter(([node]) =>
+          ['Identifier', 'Member', 'Call', 'ConstDecl'].includes(node.kind) &&
+          node.span &&
+          code.slice(node.span.start, node.span.end).includes('err.getMessage')
+        )
+        .map(([, aff]) => aff.runtime);
+      expect(catchBodyRuntimes.length).toBeGreaterThan(0);
+      expect(catchBodyRuntimes.every(runtime => runtime === OmniRuntime.Java)).toBe(true);
+    }
+  });
+
+  test('typed catch syntax does not steal Python except or TypeScript-style catch', () => {
+    const pythonCode = [
+      'try:',
+      '  fail_java()',
+      'except RuntimeException as py_err:',
+      '  py_error_summary = py_err.getRuntime()',
+    ].join('\n');
+    const pythonResult = resolve(pythonCode);
+    const pythonTry = pythonResult.program.body.find((node): node is AST.Try => node.kind === 'Try');
+    expect(pythonResult.affinityMap.get(pythonTry!.catches[0].body)?.runtime).toBe(OmniRuntime.Python);
+    expect(pythonResult.affinityMap.get(pythonTry!.catches[0].param!)?.runtime).toBe(OmniRuntime.Python);
+
+    const tsCode = [
+      'try {',
+      '  failJs()',
+      '} catch (err: Error) {',
+      '  const js_error_summary = err.message',
+      '}',
+    ].join('\n');
+    const tsResult = resolve(tsCode);
+    const tsTry = tsResult.program.body.find((node): node is AST.Try => node.kind === 'Try');
+    expect(tsResult.affinityMap.get(tsTry!.catches[0].body)?.runtime).toBe(OmniRuntime.JavaScript);
+    expect(tsResult.affinityMap.get(tsTry!.catches[0].param!)?.runtime).toBe(OmniRuntime.JavaScript);
+  });
+
   test('Python dotted stdlib imports bind package roots in mixed files', () => {
     const result = resolve([
       'import http.client',
@@ -749,6 +998,24 @@ describe('Import-to-Usage Propagation', () => {
     expect(callRuntimes).toEqual([OmniRuntime.JavaScript]);
   });
 
+  test('Go stdlib slash imports keep Go provenance even with default-import sugar', () => {
+    const result = resolve([
+      'import os',
+      'import http from "net/http"',
+      'import { Readable } from "node:stream"',
+      'const handler = http.HandlerFunc(go_handler)',
+      'const stream = Readable.from(["chunk"])',
+    ].join('\n'));
+    const callRuntimes = [...result.affinityMap]
+      .filter(([node]) => node.kind === 'Call')
+      .map(([, aff]) => aff.runtime);
+
+    expect(callRuntimes).toEqual([
+      OmniRuntime.Go,
+      OmniRuntime.JavaScript,
+    ]);
+  });
+
   test('ambiguous stdlib imports use source syntax over module-name defaults', () => {
     const result = resolve([
       'import django',
@@ -780,11 +1047,11 @@ describe('Import-to-Usage Propagation', () => {
 
     expect(callRuntimes).toEqual([
       OmniRuntime.JavaScript,
-      OmniRuntime.JavaScript,
+      OmniRuntime.Python,
     ]);
   });
 
-  test('tensor and SDK pager imports do not propagate without explicit runtime evidence', () => {
+  test('tensor and SDK pager imports propagate from Python import syntax without package heuristics', () => {
     const result = resolve([
       'import jax.numpy as jnp',
       'import boto3',
@@ -798,13 +1065,13 @@ describe('Import-to-Usage Propagation', () => {
       .map(([, aff]) => aff.runtime);
 
     expect(callRuntimes).toEqual([
-      OmniRuntime.JavaScript,
-      OmniRuntime.JavaScript,
-      OmniRuntime.JavaScript,
+      OmniRuntime.Python,
+      OmniRuntime.Python,
+      OmniRuntime.Python,
     ]);
   });
 
-  test('ASGI server support imports do not propagate without explicit runtime evidence', () => {
+  test('ASGI server support imports propagate from Python import syntax without package heuristics', () => {
     const result = resolve([
       'import uvicorn',
       'from werkzeug.serving import make_server',
@@ -818,9 +1085,9 @@ describe('Import-to-Usage Propagation', () => {
       .map(([, aff]) => aff.runtime);
 
     expect(callRuntimes).toEqual([
-      OmniRuntime.JavaScript,
-      OmniRuntime.JavaScript,
-      OmniRuntime.JavaScript,
+      OmniRuntime.Python,
+      OmniRuntime.Python,
+      OmniRuntime.Python,
     ]);
   });
 
@@ -862,7 +1129,72 @@ describe('Import-to-Usage Propagation', () => {
     ]);
   });
 
-  test('Protobuf imports do not propagate without explicit runtime evidence', () => {
+  test('Ruby constant paths infer Ruby without package-name heuristics', () => {
+    const result = resolve([
+      'import Rack from "rack"',
+      'import ActiveRecord from "active_record"',
+      'const response = Rack::Response.new("hello", 200).finish',
+      'const table = ActiveRecord::Base.connection.quote_table_name("users")',
+    ].join('\n'));
+    const callRuntimes = [...result.affinityMap]
+      .filter(([node]) => node.kind === 'Call')
+      .map(([, aff]) => aff.runtime);
+
+    expect(callRuntimes.length).toBeGreaterThanOrEqual(2);
+    expect(callRuntimes.every(runtime => runtime === OmniRuntime.Ruby)).toBe(true);
+
+    const importRuntimes = result.program.body
+      .filter((node): node is AST.ImportDecl => node.kind === 'ImportDecl')
+      .map(node => result.affinityMap.get(node)?.runtime);
+    expect(importRuntimes).toEqual([
+      OmniRuntime.Ruby,
+      OmniRuntime.Ruby,
+    ]);
+  });
+
+  test('unknown default imports can adopt later Ruby constant-path syntax', () => {
+    const result = resolve([
+      'import ActiveRecord from "active_record"',
+      'import React from "react"',
+      'const cast = ActiveRecord::Type::Integer.new.cast(value.to_s)',
+      'const view = React.createElement("div", null, cast)',
+    ].join('\n'));
+
+    const importRuntimes = result.program.body
+      .filter((node): node is AST.ImportDecl => node.kind === 'ImportDecl')
+      .map(node => result.affinityMap.get(node)?.runtime);
+
+    expect(importRuntimes).toEqual([
+      OmniRuntime.Ruby,
+      OmniRuntime.JavaScript,
+    ]);
+  });
+
+  test('Ruby require syntax drives gem imports without package-name heuristics', () => {
+    const result = resolve([
+      'require "active_record"',
+      'require "action_dispatch"',
+      'const table = ActiveRecord::Base.connection.quote_table_name("users")',
+      'const response = ActionDispatch::Response.new(200)',
+    ].join('\n'));
+
+    const importRuntimes = result.program.body
+      .filter((node): node is AST.Import => node.kind === 'Import')
+      .map(node => result.affinityMap.get(node));
+    expect(importRuntimes).toHaveLength(2);
+    expect(importRuntimes.every(aff =>
+      aff?.runtime === OmniRuntime.Ruby &&
+      aff.evidence.some(e => e.type === "syntax" && e.detail.includes("Ruby require syntax"))
+    )).toBe(true);
+
+    const callRuntimes = [...result.affinityMap]
+      .filter(([node]) => node.kind === 'Call')
+      .map(([, aff]) => aff.runtime);
+    expect(callRuntimes.length).toBeGreaterThanOrEqual(2);
+    expect(callRuntimes.every(runtime => runtime === OmniRuntime.Ruby)).toBe(true);
+  });
+
+  test('Protobuf from-imports propagate from Python syntax without package heuristics', () => {
     const result = resolve([
       'from google.protobuf import descriptor_pb2',
       'from google.protobuf import message_factory',
@@ -874,9 +1206,9 @@ describe('Import-to-Usage Propagation', () => {
       .map(([, aff]) => aff.runtime);
 
     expect(callRuntimes).toEqual([
-      OmniRuntime.JavaScript,
-      OmniRuntime.JavaScript,
-      OmniRuntime.JavaScript,
+      OmniRuntime.Python,
+      OmniRuntime.Python,
+      OmniRuntime.Python,
     ]);
   });
 
@@ -969,6 +1301,50 @@ describe('Global Root Propagation', () => {
     }
   });
 
+  test('JavaScript cancellation and stream globals stay JavaScript in mixed files', () => {
+    const result = resolve([
+      'def open_transaction():',
+      '  return engine.begin()',
+      'const signal = AbortSignal.timeout(1000)',
+      'const controller = new AbortController()',
+      'const worker = new Worker("worker.js")',
+      'const stream = new ReadableStream()',
+    ].join('\n'));
+
+    const runtimeForCallMember = (objectName: string, propertyName: string) => {
+      for (const [node, nodeAff] of result.affinityMap) {
+        if (
+          node.kind === 'Call' &&
+          node.callee.kind === 'Member' &&
+          node.callee.object.kind === 'Identifier' &&
+          node.callee.object.name === objectName &&
+          node.callee.property.name === propertyName
+        ) {
+          return nodeAff.runtime;
+        }
+      }
+      return undefined;
+    };
+    const runtimeForNewIdentifier = (name: string) => {
+      for (const [node, nodeAff] of result.affinityMap) {
+        if (
+          node.kind === 'NewExpr' &&
+          node.callee.kind === 'Identifier' &&
+          node.callee.name === name
+        ) {
+          return nodeAff.runtime;
+        }
+      }
+      return undefined;
+    };
+
+    expect(runtimeForCallMember('engine', 'begin')).toBe(OmniRuntime.Python);
+    expect(runtimeForCallMember('AbortSignal', 'timeout')).toBe(OmniRuntime.JavaScript);
+    expect(runtimeForNewIdentifier('AbortController')).toBe(OmniRuntime.JavaScript);
+    expect(runtimeForNewIdentifier('Worker')).toBe(OmniRuntime.JavaScript);
+    expect(runtimeForNewIdentifier('ReadableStream')).toBe(OmniRuntime.JavaScript);
+  });
+
   test('explains runtime inference evidence for a resolved node', () => {
     const ast = parseCode('const loud = files.map(f => f.toUpperCase())');
     const resolver = new RuntimeResolver();
@@ -1058,6 +1434,75 @@ describe('Syntactic Dominance', () => {
         expect(aff.runtime).toBe(OmniRuntime.Python);
       }
     }
+  });
+
+  test('neutral aggregate assignment adopts owner runtime from later mutable method use', () => {
+    const result = resolve(`
+closed = []
+
+def row_stream():
+  try:
+    yield {"items": 1}
+  finally:
+    closed.append("closed")
+`);
+
+    let closedAssignment: AST.Assign | undefined;
+    let closedArray: AST.ArrayLiteral | undefined;
+    let appendCall: AST.Call | undefined;
+    for (const [node] of result.affinityMap) {
+      if (node.kind === 'Assign' &&
+          node.left.kind === 'Identifier' &&
+          node.left.name === 'closed') {
+        closedAssignment = node;
+        if (node.right.kind === 'ArrayLiteral') {
+          closedArray = node.right;
+        }
+      }
+      if (node.kind === 'Call' &&
+          node.callee.kind === 'Member' &&
+          node.callee.property.name === 'append') {
+        appendCall = node;
+      }
+    }
+
+    expect(result.affinityMap.get(closedAssignment!)?.runtime).toBe(OmniRuntime.Python);
+    expect(result.affinityMap.get(closedArray!)?.runtime).toBe(OmniRuntime.Python);
+    expect(result.affinityMap.get(appendCall!)?.runtime).toBe(OmniRuntime.Python);
+  });
+
+  test('neutral aggregate assignment adopts owner runtime from later call argument use', () => {
+    const result = resolve(`
+def rank_user(user):
+  return user["id"]
+
+sample = {"id": "u-42"}
+result = rank_user(sample)
+`);
+
+    let sampleAssignment: AST.Assign | undefined;
+    let sampleObject: AST.ObjectLiteral | undefined;
+    let sampleArgument: AST.Identifier | undefined;
+    for (const [node] of result.affinityMap) {
+      if (node.kind === 'Assign' &&
+          node.left.kind === 'Identifier' &&
+          node.left.name === 'sample') {
+        sampleAssignment = node;
+        if (node.right.kind === 'ObjectLiteral') {
+          sampleObject = node.right;
+        }
+      }
+      if (node.kind === 'Call' &&
+          node.callee.kind === 'Identifier' &&
+          node.callee.name === 'rank_user' &&
+          node.args[0]?.kind === 'Identifier') {
+        sampleArgument = node.args[0];
+      }
+    }
+
+    expect(result.affinityMap.get(sampleAssignment!)?.runtime).toBe(OmniRuntime.Python);
+    expect(result.affinityMap.get(sampleObject!)?.runtime).toBe(OmniRuntime.Python);
+    expect(result.affinityMap.get(sampleArgument!)?.runtime).toBe(OmniRuntime.Python);
   });
 
   test('syntax collision: both JS and Python syntax in args → callee provenance wins', () => {

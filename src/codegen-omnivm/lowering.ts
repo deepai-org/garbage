@@ -232,11 +232,18 @@ class ManifestLowerer {
     const source = this.annotated.source || "";
     const slice = (span: AST.Span | undefined) =>
       source && span && span.end > span.start ? source.slice(span.start, span.end) : "";
+    const functionSource = slice(node.span);
     return {
       paramsSource: node.params.map(param => slice(param.span)),
       bodySource: slice(node.body.span),
-      functionSource: slice(node.span),
+      functionSource: node.generator ? this.executableGeneratorFunctionSource(functionSource) : functionSource,
     };
+  }
+
+  private executableGeneratorFunctionSource(source: string): string {
+    return source.replace(/^(\s*)(async\s+)?\*/, (_match, leading: string, asyncPrefix: string | undefined) =>
+      `${leading}${asyncPrefix ?? ""}function*`,
+    );
   }
 
   private importArtifact(node: AST.Import | AST.ImportDecl, runtime: OmniRuntime) {

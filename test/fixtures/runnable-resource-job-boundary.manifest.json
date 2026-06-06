@@ -81,7 +81,7 @@
     {
       "severity": "info",
       "code": "runtime-boundary-capture",
-      "message": "Inserted capture boundary for 'payload' from javascript to python. Source binding: javascript (inferred; scope: scope majority: javascript). Target expression: python (inferred; builtin: builtin: len).",
+      "message": "Inserted capture boundary for 'payload' from javascript to python. Source binding: javascript (fallback; fallback: neutral declaration literal). Target expression: python (inferred; builtin: builtin: len).",
       "span": {
         "start": 260,
         "end": 290,

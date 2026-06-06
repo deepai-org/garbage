@@ -223,6 +223,10 @@ export const BUILTIN_AFFINITY: Record<string, OmniRuntime> = {
   RegExp: OmniRuntime.JavaScript,
   Error: OmniRuntime.JavaScript,
   Symbol: OmniRuntime.JavaScript,
+  AbortController: OmniRuntime.JavaScript,
+  AbortSignal: OmniRuntime.JavaScript,
+  Worker: OmniRuntime.JavaScript,
+  ReadableStream: OmniRuntime.JavaScript,
   Map: OmniRuntime.JavaScript,
   Set: OmniRuntime.JavaScript,
   WeakMap: OmniRuntime.JavaScript,
@@ -276,6 +280,7 @@ export const BUILTIN_AFFINITY: Record<string, OmniRuntime> = {
   p: OmniRuntime.Ruby,
   pp: OmniRuntime.Ruby,
   raise: OmniRuntime.Ruby,
+  Fiber: OmniRuntime.Ruby,
   attr_reader: OmniRuntime.Ruby,
   attr_writer: OmniRuntime.Ruby,
   attr_accessor: OmniRuntime.Ruby,
@@ -329,6 +334,10 @@ export const GLOBAL_AFFINITY: Record<string, OmniRuntime> = {
   RegExp: OmniRuntime.JavaScript,
   Error: OmniRuntime.JavaScript,
   Symbol: OmniRuntime.JavaScript,
+  AbortController: OmniRuntime.JavaScript,
+  AbortSignal: OmniRuntime.JavaScript,
+  Worker: OmniRuntime.JavaScript,
+  ReadableStream: OmniRuntime.JavaScript,
   Map: OmniRuntime.JavaScript,
   Set: OmniRuntime.JavaScript,
   WeakMap: OmniRuntime.JavaScript,
@@ -348,6 +357,9 @@ export const GLOBAL_AFFINITY: Record<string, OmniRuntime> = {
 
   // Go package-like roots commonly used without an import in examples.
   fmt: OmniRuntime.Go,
+
+  // Ruby core class roots.
+  Fiber: OmniRuntime.Ruby,
 
   // Java package roots.
   java: OmniRuntime.Java,
@@ -381,6 +393,7 @@ export const GLOBAL_AFFINITY: Record<string, OmniRuntime> = {
 };
 
 const QUALIFIED_GLOBAL_AFFINITY: Array<[string[], OmniRuntime]> = [
+  [["Thread", "current"], OmniRuntime.Ruby],
   [["io", "reactivex"], OmniRuntime.Java],
   [["io", "grpc"], OmniRuntime.Java],
   [["io", "netty"], OmniRuntime.Java],

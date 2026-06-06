@@ -31,6 +31,19 @@ export class SymbolTable {
   }
 
   /**
+   * Update the nearest existing symbol binding.
+   */
+  update(name: string, entry: SymbolEntry): boolean {
+    for (let i = this.scopes.length - 1; i >= 0; i--) {
+      if (this.scopes[i].has(name)) {
+        this.scopes[i].set(name, entry);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
    * Look up a symbol, searching from innermost to outermost scope.
    */
   lookup(name: string): SymbolEntry | undefined {

@@ -152,6 +152,7 @@ export class Parser extends ParserCursor {
     // Check for decorators (@decorator syntax)
     if (this.check("@")) {
       const decorators: AST.Expr[] = [];
+      const decoratorStart = this.current;
       while (this.check("@")) {
         this.advance(); // consume @
         
@@ -169,6 +170,8 @@ export class Parser extends ParserCursor {
         }
       }
       
+      this.skipJavaDeclarationModifiers();
+
       // After decorators, we expect a declaration (function or class)
       // Check for class first since Python can have 'def' inside class
       if (this.match("class")) {
@@ -181,13 +184,25 @@ export class Parser extends ParserCursor {
         
         if (this.match("def", "fun", "fn", "func", "function")) {
           const isGenerator = this.previous()?.value === "function" && this.match("*");
-          const func = Functions.parseFuncDecl(this, isAsync, isUnsafe, isGenerator, decorators);
+          const func = Functions.parseFuncDecl(this, isAsync, isUnsafe, isGenerator, decorators, decoratorStart);
           return func;
         }
       } else if (this.match("def", "fun", "fn", "func", "function")) {
         const isGenerator = this.previous()?.value === "function" && this.match("*");
-        const func = Functions.parseFuncDecl(this, false, false, isGenerator, decorators);
+        const func = Functions.parseFuncDecl(this, false, false, isGenerator, decorators, decoratorStart);
         return func;
+      } else if (Types.isType(this)) {
+        const isRetTypeFn = this.attempt(() => {
+          this.parseType();
+          if (this.peek().type === TokenType.Identifier) {
+            this.advance();
+            if (this.check("(")) return true;
+          }
+          return null;
+        });
+        if (isRetTypeFn) {
+          return Functions.parseFuncDeclWithReturnTypeBefore(this, decorators, decoratorStart);
+        }
       }
       
       // If we have decorators but no valid declaration follows, it's an error
@@ -275,10 +290,10 @@ export class Parser extends ParserCursor {
       for (let i = 1; i <= 30; i++) {
         const ahead = this.peekAt(i);
         if (!ahead || ahead.type === TokenType.EOF) break;
-        if (ahead.value === "import" && ahead.type === TokenType.Keyword) return true;
+        if (ahead.value === "import") return true;
         // Stop if we see operators that aren't dots, or virtual semis
         if (ahead.virtualSemi) break;
-        if (ahead.type === TokenType.Operator && ahead.value !== ".") break;
+        if (ahead.type === TokenType.Operator && ahead.value !== "." && ahead.value !== ".." && ahead.value !== "...") break;
       }
       return false;
     }
@@ -333,6 +348,13 @@ export class Parser extends ParserCursor {
     }
     return false;
   }
+
+  private skipJavaDeclarationModifiers(): void {
+    while (this.check("public") || this.check("private") || this.check("protected") ||
+           this.check("abstract") || this.check("static") || this.check("final")) {
+      this.advance();
+    }
+  }
   
   public parseDeclaration(): AST.Decl {
     const keyword = this.peek().value;
@@ -340,7 +362,7 @@ export class Parser extends ParserCursor {
     // ---- Complex multi-token disambiguation ----
 
     // Python-style: from module import names
-    if (keyword === "from" && this.peek().type === TokenType.Keyword && this.isDeclStart()) {
+    if (keyword === "from" && this.isDeclStart()) {
       return Imports.parseFromImport(this);
     }
 
@@ -365,10 +387,7 @@ export class Parser extends ParserCursor {
     // Java-style modifiers before class/interface: public class, public abstract class, etc.
     if (keyword === "public" || keyword === "private" || keyword === "protected" || keyword === "abstract") {
       // Skip all modifiers until we find class/interface/enum
-      while (this.check("public") || this.check("private") || this.check("protected") ||
-             this.check("abstract") || this.check("static") || this.check("final")) {
-        this.advance();
-      }
+      this.skipJavaDeclarationModifiers();
       if (this.match("class")) {
         return ClassDecl.parseClassDecl(this);
       }
@@ -576,6 +595,21 @@ export class Parser extends ParserCursor {
       return { kind: "FuncDecl", name, params: [], body, span: this.createSpanFrom(opToken) } as any;
     }
 
+    const rubyDoBlock = this.tryParseRubyDoBlockExprStmt();
+    if (rubyDoBlock) {
+      return rubyDoBlock;
+    }
+
+    const rubyStabbyLambda = this.tryParseRubyStabbyLambdaExprStmt();
+    if (rubyStabbyLambda) {
+      return rubyStabbyLambda;
+    }
+
+    const rubyLabelCommand = this.tryParseRubyLabelCommandExprStmt();
+    if (rubyLabelCommand) {
+      return rubyLabelCommand;
+    }
+
     // Short declarations (Go-style :=) and Python type-annotated assignments (name: Type = value)
     if (this.peek().type === TokenType.Identifier) {
       const checkpoint = this.current;
@@ -639,6 +673,216 @@ export class Parser extends ParserCursor {
     }
 
     return this.parseExprStmt();
+  }
+
+  private tryParseRubyDoBlockExprStmt(): AST.ExprStmt | null {
+    const endIndex = this.findRubyDoBlockEndIndex();
+    if (endIndex === undefined) return null;
+
+    const start = this.current;
+    const span = this.createSpan(start, endIndex);
+    this.current = endIndex + 1;
+    this.consumeSemicolon();
+
+    return this.rawSpanExprStmt(span);
+  }
+
+  private tryParseRubyLabelCommandExprStmt(): AST.ExprStmt | null {
+    const endIndex = this.findCurrentStatementEndIndex();
+    if (endIndex === undefined || endIndex <= this.current) return null;
+    if (!this.statementHasRubyCommandLabel(endIndex)) return null;
+
+    const span = this.createSpan(this.current, endIndex);
+    this.current = endIndex + 1;
+    this.consumeSemicolon();
+    return this.rawSpanExprStmt(span);
+  }
+
+  private tryParseRubyStabbyLambdaExprStmt(): AST.ExprStmt | null {
+    const endIndex = this.findCurrentStatementEndIndex();
+    if (endIndex === undefined || endIndex <= this.current) return null;
+    if (!this.statementHasRubyStabbyLambda(endIndex)) return null;
+
+    const start = this.current;
+    const assignToken = this.tokens[start + 1];
+    if (this.tokens[start]?.type === TokenType.Identifier && assignToken?.value === "=") {
+      const leftToken = this.tokens[start];
+      const rightSpan = this.createSpan(start + 2, endIndex);
+      const right: AST.StringLiteral = {
+        kind: "StringLiteral",
+        parts: [{ kind: "Text", value: "" }],
+        flags: {},
+        delimiter: "\"",
+        span: rightSpan,
+      };
+      const left: AST.Identifier = {
+        kind: "Identifier",
+        name: leftToken.value,
+        span: this.createSpanFrom(leftToken),
+      };
+      const assign: AST.Assign = {
+        kind: "Assign",
+        op: "=",
+        left,
+        right,
+        span: this.createSpan(start, endIndex),
+      };
+      this.current = endIndex + 1;
+      this.consumeSemicolon();
+      return {
+        kind: "ExprStmt",
+        expr: assign,
+        span: assign.span,
+      };
+    }
+
+    const span = this.createSpan(start, endIndex);
+    this.current = endIndex + 1;
+    this.consumeSemicolon();
+    return this.rawSpanExprStmt(span);
+  }
+
+  private rawSpanExprStmt(span: AST.Span): AST.ExprStmt {
+    const expr: AST.StringLiteral = {
+      kind: "StringLiteral",
+      parts: [{ kind: "Text", value: "" }],
+      flags: {},
+      delimiter: "\"",
+      span,
+    };
+    return {
+      kind: "ExprStmt",
+      expr,
+      span,
+    };
+  }
+
+  private findCurrentStatementEndIndex(): number | undefined {
+    let parenDepth = 0;
+    let bracketDepth = 0;
+    let braceDepth = 0;
+    let last = this.current;
+
+    for (let i = this.current; i < this.tokens.length; i++) {
+      const token = this.tokens[i];
+      if (!token || token.type === TokenType.EOF) return last;
+      if ((token.virtualSemi || token.value === ";") && parenDepth === 0 && bracketDepth === 0 && braceDepth === 0) {
+        return last;
+      }
+
+      if (token.value === "(") parenDepth++;
+      else if (token.value === ")" && parenDepth > 0) parenDepth--;
+      else if (token.value === "[") bracketDepth++;
+      else if (token.value === "]" && bracketDepth > 0) bracketDepth--;
+      else if (token.value === "{") braceDepth++;
+      else if (token.value === "}" && braceDepth > 0) braceDepth--;
+
+      last = i;
+    }
+
+    return last;
+  }
+
+  private statementHasRubyCommandLabel(endIndex: number): boolean {
+    const first = this.peek();
+    if (first.type !== TokenType.Identifier && first.type !== TokenType.Keyword) return false;
+
+    let parenDepth = 0;
+    let bracketDepth = 0;
+    let braceDepth = 0;
+    let sawQuestion = false;
+    let sawAssignment = false;
+
+    for (let i = this.current; i <= endIndex; i++) {
+      const token = this.tokens[i];
+      if (!token) break;
+
+      if (token.value === "?") sawQuestion = true;
+      if (this.isAssignmentOp(token)) sawAssignment = true;
+
+      if (token.value === "(") parenDepth++;
+      else if (token.value === ")" && parenDepth > 0) parenDepth--;
+      else if (token.value === "[") bracketDepth++;
+      else if (token.value === "]" && bracketDepth > 0) bracketDepth--;
+      else if (token.value === "{") braceDepth++;
+      else if (token.value === "}" && braceDepth > 0) braceDepth--;
+
+      const next = this.tokens[i + 1];
+      const isLabel = (token.type === TokenType.Identifier || token.type === TokenType.Keyword) &&
+        next?.value === ":" &&
+        token.end === next.start &&
+        this.tokens[i + 2]?.value !== ":" &&
+        parenDepth === 0 &&
+        bracketDepth === 0 &&
+        braceDepth === 0;
+      const isSpacedSymbolArg = token.value === ":" &&
+        next &&
+        (next.type === TokenType.Identifier || next.type === TokenType.Keyword) &&
+        i > this.current &&
+        this.tokens[i - 1]?.end < token.start &&
+        parenDepth === 0 &&
+        bracketDepth === 0 &&
+        braceDepth === 0;
+
+      if (isLabel || isSpacedSymbolArg) {
+        return i > this.current && !sawQuestion && !sawAssignment;
+      }
+    }
+
+    return false;
+  }
+
+  private statementHasRubyStabbyLambda(endIndex: number): boolean {
+    for (let i = this.current; i <= endIndex; i++) {
+      if (this.tokens[i]?.value === "->") {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private findRubyDoBlockEndIndex(): number | undefined {
+    let parenDepth = 0;
+    let bracketDepth = 0;
+    let braceDepth = 0;
+    let doIndex: number | undefined;
+
+    for (let i = this.current; i < this.tokens.length; i++) {
+      const token = this.tokens[i];
+      if (!token || token.type === TokenType.EOF || token.virtualSemi || token.value === ";") break;
+
+      if (token.value === "(") parenDepth++;
+      else if (token.value === ")" && parenDepth > 0) parenDepth--;
+      else if (token.value === "[") bracketDepth++;
+      else if (token.value === "]" && bracketDepth > 0) bracketDepth--;
+      else if (token.value === "{") braceDepth++;
+      else if (token.value === "}" && braceDepth > 0) braceDepth--;
+
+      if (token.value === "do" && parenDepth === 0 && bracketDepth === 0 && braceDepth === 0) {
+        doIndex = i;
+        break;
+      }
+    }
+
+    if (doIndex === undefined) return undefined;
+
+    let rubyDepth = 1;
+    for (let i = doIndex + 1; i < this.tokens.length; i++) {
+      const token = this.tokens[i];
+      if (!token || token.type === TokenType.EOF) return undefined;
+      const value = token.value;
+
+      if (value === "do" || value === "class" || value === "module" || value === "def" ||
+          value === "begin" || value === "if" || value === "unless" || value === "case" ||
+          value === "while" || value === "until" || value === "for") {
+        rubyDepth++;
+      } else if (value === "end") {
+        rubyDepth--;
+        if (rubyDepth === 0) return i;
+      }
+    }
+
+    return undefined;
   }
   
   

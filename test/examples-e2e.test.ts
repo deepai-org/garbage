@@ -416,6 +416,9 @@ describe("Example files: end-to-end pipeline", () => {
       const rubyFiber = manifest.ops.find(
         (o: any) => o.runtime === "ruby" && String(o.code).includes("Fiber.current")
       ) as any;
+      const activeRecordImport = manifest.ops.find(
+        (o: any) => o.op === "import" && o.path === "active_record"
+      ) as any;
       const reactRender = manifest.ops.find(
         (o: any) => o.runtime === "javascript" && String(o.code).includes("renderToStaticMarkup")
       ) as any;
@@ -429,6 +432,7 @@ describe("Example files: end-to-end pipeline", () => {
       expect(goSpawns.length).toBe(2);
       expect(javaService?.code).toContain("ObjectMapper");
       expect(javaFuture?.code).toContain("CompletableFuture.completedFuture");
+      expect(activeRecordImport?.runtime).toBe("ruby");
       if (rubyFiber) {
         expect(rubyFiber.code).toContain("Fiber.current");
       }
@@ -532,18 +536,28 @@ describe("Example files: end-to-end pipeline", () => {
       };
       collectOps(readFunc.body);
       const contextManagerEvals = nestedOps.filter(
-        (o: any) => o.op === "eval" && ["client", "response"].includes(o.bind)
+        (o: any) => o.op === "eval" && ["__using_context_1", "client", "__using_context_2", "response"].includes(o.bind)
       );
       expect(contextManagerEvals).toEqual([
-        expect.objectContaining({ runtime: "python", code: "httpx.AsyncClient()", bind: "client" }),
-        expect.objectContaining({ runtime: "python", code: "client.stream(\"GET\", url)", bind: "response" }),
+        expect.objectContaining({ runtime: "python", code: "httpx.AsyncClient()", bind: "__using_context_1" }),
+        expect.objectContaining({ runtime: "python", code: "__using_context_1.__enter__()", bind: "client" }),
+        expect.objectContaining({ runtime: "python", code: "client.stream(\"GET\", url)", bind: "__using_context_2" }),
+        expect.objectContaining({ runtime: "python", code: "__using_context_2.__enter__()", bind: "response" }),
       ]);
       expect(JSON.stringify(contextManagerEvals)).not.toContain(" as ");
-      expect(
-        nestedOps
-          .filter((o: any) => o.op === "resource" && o.action === "close")
-          .map((o: any) => o.target)
-      ).toEqual(expect.arrayContaining(["client", "response"]));
+      const contextCloses = nestedOps.filter((o: any) => o.op === "resource" && o.action === "close");
+      expect(contextCloses).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          target: "__using_context_1",
+          runtime: "python",
+          code: "__using_context_1.__exit__(None, None, None)",
+        }),
+        expect.objectContaining({
+          target: "__using_context_2",
+          runtime: "python",
+          code: "__using_context_2.__exit__(None, None, None)",
+        }),
+      ]));
       expect(manifest.ops).not.toContainEqual(
         expect.objectContaining({ op: "exec", code: "async" })
       );

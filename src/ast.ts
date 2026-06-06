@@ -703,6 +703,7 @@ export interface TypeDecl {
 export interface Decorator {
   kind: "Decorator";
   name: Identifier;
+  expression?: Expr;
   args?: Expr[];
   span: Span;
 }

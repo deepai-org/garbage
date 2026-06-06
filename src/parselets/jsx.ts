@@ -736,6 +736,12 @@ function parseJSXText(host: JSXHost): AST.JSXText | null {
       raw += " ";
     }
 
+    if (token.type === TokenType.StringLiteral && token.value.includes("</")) {
+      if (splitStringLiteralBeforeJSXClosingTag(host, token)) {
+        continue;
+      }
+    }
+
     if (token.type === TokenType.Identifier ||
         token.type === TokenType.Keyword ||
         token.type === TokenType.NumericLiteral ||
@@ -764,6 +770,62 @@ function parseJSXText(host: JSXHost): AST.JSXText | null {
     raw,
     span: host.createSpan(start, host.current - 1)
   };
+}
+
+function splitStringLiteralBeforeJSXClosingTag(host: JSXHost, token: Token): boolean {
+  const closeOffset = token.value.indexOf("</");
+  if (closeOffset <= 0) return false;
+
+  const before = token.value.slice(0, closeOffset);
+  const rest = token.value.slice(closeOffset);
+  const closeMatch = rest.match(/^<\/([A-Za-z_$][\w$.-]*)(>)(.*)$/);
+  if (!closeMatch) return false;
+
+  const closeStart = token.start + closeOffset;
+  const tagName = closeMatch[1];
+  const after = closeMatch[3] || "";
+  const synthetic: Token[] = [
+    { ...token, type: TokenType.Operator, value: "<", start: closeStart, end: closeStart + 1 },
+    { ...token, type: TokenType.Operator, value: "/", start: closeStart + 1, end: closeStart + 2 },
+    { ...token, type: TokenType.Identifier, value: tagName, start: closeStart + 2, end: closeStart + 2 + tagName.length },
+    { ...token, type: TokenType.Operator, value: ">", start: closeStart + 2 + tagName.length, end: closeStart + 3 + tagName.length },
+  ];
+
+  const afterStart = closeStart + 3 + tagName.length;
+  for (let i = 0; i < after.length; i++) {
+    const value = after[i];
+    if (!value.trim()) continue;
+    synthetic.push({
+      ...token,
+      type: TokenType.Operator,
+      value,
+      start: afterStart + i,
+      end: afterStart + i + 1,
+    });
+  }
+
+  host.tokens[host.current] = {
+    ...token,
+    value: before,
+    end: token.start + closeOffset,
+  };
+  host.tokens.splice(host.current + 1, 0, ...synthetic);
+  for (let i = host.current + 1 + synthetic.length; i < host.tokens.length; i++) {
+    const nextToken = host.tokens[i];
+    if (nextToken?.type !== TokenType.StringLiteral || !/^\s*$/.test(nextToken.value)) continue;
+    if (nextToken.value.includes("\n")) {
+      host.tokens[i] = {
+        ...nextToken,
+        type: TokenType.VirtualSemi,
+        value: ";",
+        virtualSemi: true,
+      };
+    } else {
+      host.tokens.splice(i, 1);
+      i--;
+    }
+  }
+  return true;
 }
 
 // ============ Expression Containers ============

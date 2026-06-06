@@ -443,7 +443,7 @@ export function parseObjectLiteral(host: LiteralHost): AST.ObjectLiteral | AST.S
         let value: AST.Expr;
         let shorthand = false;
 
-        if (host.match(":")) {
+        if (host.match(":", "=>")) {
           value = host.parseAssignmentExpression();
 
           if (host.check("for")) {

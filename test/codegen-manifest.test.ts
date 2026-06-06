@@ -153,6 +153,39 @@ describe('FuncDefOp', () => {
     }
   });
 
+  test('Python source-backed function body is not hoisted before func_def', () => {
+    const m = parseAndManifest('def fail_py():\n  raise ValueError("bad order")\n\ntry {\n  fail_py()\n} catch (err) {\n  console.log(err.message)\n}');
+    const funcOp = m.ops.find(op => op.op === 'func_def') as any;
+    expect(funcOp).toBeDefined();
+    expect(funcOp.bodyRuntime).toBe('python');
+    expect(funcOp.body.some((op: any) =>
+      op.op === 'exec' &&
+      op.runtime === 'python' &&
+      String(op.code ?? '').includes('raise ValueError("bad order")')
+    )).toBe(true);
+    expect(funcOp.sourceArtifact?.functionSource).toContain('raise ValueError("bad order")');
+    const topLevelRaise = m.ops.find((op: any) =>
+      op.op === 'exec' &&
+      op.runtime === 'python' &&
+      String(op.code ?? '').includes('raise ValueError("bad order")')
+    );
+    expect(topLevelRaise).toBeUndefined();
+  });
+
+  test('Python function call arguments preserve f-string syntax', () => {
+    const m = parseAndManifest('def record(row):\n  labels.append(f"{row.items}:{row.close}")');
+    const funcOp = m.ops.find(op => op.op === 'func_def' && (op as any).name === 'record') as any;
+    expect(funcOp).toBeDefined();
+    const appendOp = funcOp.body.find((op: any) =>
+      op.op === 'exec' &&
+      op.runtime === 'python' &&
+      String(op.code ?? '').includes('labels.append')
+    );
+    expect(appendOp).toBeDefined();
+    expect(appendOp.code).toContain('labels.append(f"{row.items}:{row.close}")');
+    expect(appendOp.code).not.toContain('`${');
+  });
+
   test('Rust fn generates func_def with compiled block', () => {
     const m = parseAndManifest('fn compute(x: i32) -> i32 { x * 2 }');
     // Rust is compiled — should be exec_compiled or func_def
@@ -186,11 +219,13 @@ describe('FuncDefOp', () => {
   });
 
   test('JS and Python func_def carry lowering source artifacts', () => {
-    const m = parseAndManifest('function render({limit, payload}) { return payload.slice(0, limit) }\ndef rank(request, **kwargs):\n  return kwargs.get("limit", 0)');
+    const m = parseAndManifest('function render({limit, payload}) { return payload.slice(0, limit) }\nfunction* rows() { yield 1 }\ndef rank(request, **kwargs):\n  return kwargs.get("limit", 0)');
     const render = m.ops.find((op: any) => op.op === 'func_def' && op.name === 'render') as any;
+    const rows = m.ops.find((op: any) => op.op === 'func_def' && op.name === 'rows') as any;
     const rank = m.ops.find((op: any) => op.op === 'func_def' && op.name === 'rank') as any;
     expect(render.sourceArtifact.paramsSource).toEqual(['{limit, payload}']);
     expect(render.sourceArtifact.bodySource).toContain('return payload.slice(0, limit)');
+    expect(rows.sourceArtifact.functionSource).toContain('function* rows()');
     expect(rank.sourceArtifact.paramsSource.join(',')).toContain('**kwargs');
     expect(rank.sourceArtifact.bodySource).toContain('kwargs.get("limit", 0)');
   });
@@ -1352,6 +1387,27 @@ describe('Foreach Loops', () => {
     expect(loop.iterable).toBeDefined();
     expect(loop.iterable.kind).toBe('ref');
     expect(loop.iterable.name).toBe('items');
+  });
+
+  test('for-of loop over literal collection emits literal iterable value', () => {
+    const code = `
+function* rows() {
+  for (const row of [{"items": "alpha", "count": 1}, {"items": "beta", "count": 2}]) {
+    yield row
+  }
+}`;
+    const m = parseAndManifest(code);
+    const funcOp = m.ops.find(op => op.op === 'func_def' && (op as any).name === 'rows') as any;
+    expect(funcOp).toBeDefined();
+    const loop = funcOp.body.find((op: any) => op.op === 'loop');
+    expect(loop).toBeDefined();
+    expect(loop.iterable).toEqual({
+      kind: 'literal',
+      value: [
+        { items: 'alpha', count: 1 },
+        { items: 'beta', count: 2 },
+      ],
+    });
   });
 
   test('foreach inside function with cross-runtime body', () => {

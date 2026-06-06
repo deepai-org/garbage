@@ -10,6 +10,7 @@ import { SymbolTable } from './symbol-table';
 import { analyzeImportPath, analyzeBareImport } from './import-analyzer';
 import { lookupBuiltinAffinity, lookupGlobalAffinity, lookupQualifiedGlobalAffinity } from './method-tables';
 import { affinityFromEvidence, chooseRuntime, EVIDENCE_WEIGHTS } from './evidence';
+import { inferCatchClauseAffinity } from './catch-affinity';
 
 /**
  * Pass 1: Top-down structural analysis.
@@ -24,6 +25,7 @@ export class Pass1Structural {
   private fileDirective?: OmniRuntime;
   private scopeStack: OmniRuntime[] = [];
   private source?: string;
+  private importBindingNodes = new Map<string, AST.Import | AST.ImportDecl>();
 
   constructor(
     symbolTable: SymbolTable,
@@ -190,6 +192,19 @@ export class Pass1Structural {
         break;
 
       case "ExprStmt":
+        {
+          const rawExpr = this.nodeSource(node.expr)?.trim();
+          if (rawExpr && this.isRubyDoBlockSource(rawExpr)) {
+            this.assign(node.expr, OmniRuntime.Ruby, "definite", { type: "syntax", detail: "Ruby do/end block expression" });
+            this.assign(node, OmniRuntime.Ruby, "definite", { type: "syntax", detail: "Ruby do/end block expression" });
+          } else if (rawExpr && this.isRubyStabbyLambdaSource(rawExpr)) {
+            this.assign(node.expr, OmniRuntime.Ruby, "definite", { type: "syntax", detail: "Ruby stabby lambda ->" });
+            this.assign(node, OmniRuntime.Ruby, "definite", { type: "syntax", detail: "Ruby stabby lambda ->" });
+          } else if (rawExpr && (this.isRubyLabelSource(rawExpr) || this.isRubySymbolCommandSource(rawExpr))) {
+            this.assign(node.expr, OmniRuntime.Ruby, "definite", { type: "syntax", detail: "Ruby command argument syntax" });
+            this.assign(node, OmniRuntime.Ruby, "definite", { type: "syntax", detail: "Ruby command argument syntax" });
+          }
+        }
         this.visitExpr(node.expr);
         break;
 
@@ -220,6 +235,12 @@ export class Pass1Structural {
         break;
 
       case "Loop":
+        {
+          const rawLoop = this.nodeSource(node)?.trim();
+          if (rawLoop && this.isPythonForLoopSource(rawLoop)) {
+            this.assign(node, OmniRuntime.Python, "definite", { type: "syntax", detail: "Python for-in loop syntax" });
+          }
+        }
         if (node.test) this.visitExpr(node.test);
         if (node.iterable) this.visitExpr(node.iterable);
         this.visitBlock(node.body);
@@ -237,7 +258,7 @@ export class Pass1Structural {
 
       case "Try":
         this.visitBlock(node.body);
-        for (const c of node.catches) this.visitBlock(c.body);
+        for (const c of node.catches) this.visitCatchClause(c);
         if (node.finallyBody) this.visitBlock(node.finallyBody);
         break;
 
@@ -307,6 +328,15 @@ export class Pass1Structural {
       });
     }
 
+    for (const decorator of node.decorators || []) {
+      if (decorator.expression) {
+        this.visitExprGeneric(decorator.expression);
+      } else {
+        this.visitExprGeneric(decorator.name);
+        for (const arg of decorator.args || []) this.visitExprGeneric(arg);
+      }
+    }
+
     // Visit body with scope
     const scopeRuntime = runtime || this.currentScopeRuntime();
     if (scopeRuntime) {
@@ -356,15 +386,53 @@ export class Pass1Structural {
     const raw = this.nodeSource(node);
     const path = node.path.replace(/['"]/g, "");
     const quotedImport = raw ? /^\s*import\s*["']/.test(raw) : node.path.startsWith('"') || node.path.startsWith("'");
-    const affinity = quotedImport
+    const analyzedAffinity = quotedImport
       ? analyzeImportPath(path, { preferredRuntime: OmniRuntime.Go }) || analyzeBareImport(path)
       : analyzeBareImport(node.path) || analyzeImportPath(node.path);
+    const rubyRequireImport = raw ? /^\s*require\s+["']/.test(raw) : false;
+    const javaStaticImport = !quotedImport && this.isJavaStaticImportPath(path);
+    const javaClassImport = !quotedImport && this.isJavaClassImportPath(path);
+    const javaWildcardImport = !quotedImport && this.isJavaWildcardImport(raw, path);
+    const pythonSyntaxImport = raw
+      ? /^\s*import\s+[A-Za-z_][\w]*(?:\.[A-Za-z_][\w]*)*(?:\s+as\s+[A-Za-z_][\w]*)?\s*;?\s*$/.test(raw)
+      : !quotedImport && /^[A-Za-z_][\w]*(?:\.[A-Za-z_][\w]*)*$/.test(node.path);
+    const affinity = analyzedAffinity || (rubyRequireImport
+      ? {
+          runtime: OmniRuntime.Ruby,
+          confidence: "definite" as const,
+          evidence: [{ type: "syntax" as const, detail: "Ruby require syntax" }],
+        }
+      : undefined) || (javaStaticImport || javaClassImport || javaWildcardImport
+      ? {
+          runtime: OmniRuntime.Java,
+          confidence: "definite" as const,
+          evidence: [{
+            type: "syntax" as const,
+            detail: javaStaticImport
+              ? "Java static import syntax"
+              : javaWildcardImport
+                ? "Java wildcard import syntax"
+                : "Java class import syntax",
+          }],
+        }
+      : undefined) || (pythonSyntaxImport
+      ? {
+          runtime: OmniRuntime.Python,
+          confidence: "definite" as const,
+          evidence: [{ type: "syntax" as const, detail: "Python import syntax" }],
+        }
+      : undefined);
+
+    const bindingNames = affinity
+      ? this.importBindingNames(node.path, affinity.runtime, node.alias?.name)
+      : node.alias?.name ? [node.alias.name] : [];
+    this.registerImportBindingNodes(bindingNames, node);
 
     if (affinity) {
       const aff = affinityFromEvidence(chooseRuntime([{
         runtime: affinity.runtime,
-        source: "import",
-        weight: EVIDENCE_WEIGHTS.import,
+        source: analyzedAffinity ? "import" : "syntax",
+        weight: analyzedAffinity ? EVIDENCE_WEIGHTS.import : EVIDENCE_WEIGHTS.syntax,
         detail: affinity.evidence[0]?.detail || `import: ${node.path}`,
       }], this.fileDirective || OmniRuntime.JavaScript));
       this.assign(node, aff.runtime, aff.confidence, ...aff.evidence);
@@ -372,8 +440,7 @@ export class Pass1Structural {
       // (`import java.util.concurrent.CompletableFuture` -> `CompletableFuture`);
       // Python dotted imports bind the package root
       // (`import package.module` -> `package`).
-      const names = this.importBindingNames(node.path, affinity.runtime, node.alias?.name);
-      for (const name of names) {
+      for (const name of bindingNames) {
         this.symbolTable.define(name, {
           name,
           affinity,
@@ -382,17 +449,46 @@ export class Pass1Structural {
     }
   }
 
+  private isJavaClassImportPath(path: string): boolean {
+    const cleaned = path.replace(/['"]/g, "");
+    if (!/^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+$/.test(cleaned)) return false;
+    const last = cleaned.split(".").pop();
+    return !!last && /^[A-Z_$]/.test(last);
+  }
+
+  private isJavaStaticImportPath(path: string): boolean {
+    const cleaned = path.replace(/['"]/g, "");
+    return /^static\s+[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+(?:\.\*)?$/.test(cleaned);
+  }
+
+  private isJavaWildcardImport(raw: string | undefined, path: string): boolean {
+    const rawText = raw?.trim();
+    if (rawText) {
+      return /^import\s+[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+\.\*\s*;?$/.test(rawText);
+    }
+    const cleaned = path.replace(/['"]/g, "");
+    return /^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+\.\*$/.test(cleaned);
+  }
+
   private visitImportDecl(node: AST.ImportDecl): void {
+    this.registerImportDeclBindingNodes(node);
     const preferredRuntime = this.importDeclPreferredRuntime(node);
-    const affinity = preferredRuntime
+    const analyzedAffinity = preferredRuntime
       ? analyzeImportPath(node.path, { preferredRuntime }) || analyzeImportPath(node.path)
       : analyzeImportPath(node.path);
+    const affinity = analyzedAffinity || (preferredRuntime === OmniRuntime.Python
+      ? {
+          runtime: OmniRuntime.Python,
+          confidence: "definite" as const,
+          evidence: [{ type: "syntax" as const, detail: "Python from-import syntax" }],
+        }
+      : undefined);
 
     if (affinity) {
       const aff = affinityFromEvidence(chooseRuntime([{
         runtime: affinity.runtime,
-        source: "import",
-        weight: EVIDENCE_WEIGHTS.import,
+        source: analyzedAffinity ? "import" : "syntax",
+        weight: analyzedAffinity ? EVIDENCE_WEIGHTS.import : EVIDENCE_WEIGHTS.syntax,
         detail: affinity.evidence[0]?.detail || `import: ${node.path}`,
       }], this.fileDirective || OmniRuntime.JavaScript));
       this.assign(node, aff.runtime, aff.confidence, ...aff.evidence);
@@ -420,9 +516,30 @@ export class Pass1Structural {
     }
   }
 
+  private registerImportDeclBindingNodes(node: AST.ImportDecl): void {
+    if (node.defaultImport) this.importBindingNodes.set(node.defaultImport.name, node);
+    if (node.namespaceImport) this.importBindingNodes.set(node.namespaceImport.name, node);
+    if (node.specifiers) {
+      for (const spec of node.specifiers) {
+        this.importBindingNodes.set(spec.local, node);
+      }
+    }
+  }
+
+  private registerImportBindingNodes(names: string[], node: AST.Import | AST.ImportDecl): void {
+    for (const name of names) {
+      this.importBindingNodes.set(name, node);
+    }
+  }
+
   private importDeclPreferredRuntime(node: AST.ImportDecl): OmniRuntime | undefined {
     const raw = this.nodeSource(node)?.trim();
     if (!raw) return undefined;
+    if (/\bfrom\s*["']/.test(raw) &&
+        node.path.includes("/") &&
+        analyzeImportPath(node.path, { preferredRuntime: OmniRuntime.Go })?.runtime === OmniRuntime.Go) {
+      return OmniRuntime.Go;
+    }
     if (/\bfrom\s*["']/.test(raw)) return OmniRuntime.JavaScript;
     if (raw.startsWith("from ")) return OmniRuntime.Python;
     return undefined;
@@ -431,6 +548,54 @@ export class Pass1Structural {
   private nodeSource(node: AST.Decl | AST.Stmt | AST.Expr): string | undefined {
     if (!this.source || !node.span || node.span.end <= node.span.start) return undefined;
     return this.source.slice(node.span.start, node.span.end);
+  }
+
+  private isRubyClassSource(raw: string): boolean {
+    const firstLine = raw.split(/\r?\n/, 1)[0]?.trim() || "";
+    return /^class\s+[A-Za-z_]\w*(?:::[A-Za-z_]\w*)?(?:\s*<\s*[A-Za-z_]\w*(?:::[A-Za-z_]\w*)*)?\s*$/.test(firstLine) &&
+      /\bend\s*$/.test(raw);
+  }
+
+  private isRubyDoBlockSource(raw: string): boolean {
+    return /\bdo(?:\s*\|[^|]*\|)?\s*(?:\r?\n|;)/.test(raw) && /\bend\s*$/.test(raw);
+  }
+
+  private isPythonForLoopSource(raw: string): boolean {
+    const firstLine = raw.split(/\r?\n/, 1)[0]?.trim() || "";
+    return /^(?:async\s+)?for\s+[^():]+\s+in\s+.+:\s*$/.test(firstLine);
+  }
+
+  private isPythonClassSource(raw: string): boolean {
+    const firstLine = raw.split(/\r?\n/, 1)[0]?.trim() || "";
+    return /^class\s+[A-Za-z_]\w*(?:\([^{}]*\))?:\s*$/.test(firstLine) &&
+      /(?:^|\n)\s+def\s+[A-Za-z_]\w*\s*\(/.test(raw);
+  }
+
+  private isRubyStabbyLambdaSource(raw: string): boolean {
+    return /(?:^|[=\s(,])->\s*(?:\([^)]*\))?\s*\{/.test(raw);
+  }
+
+  private isRubyLabelSource(raw: string): boolean {
+    return /^[A-Za-z_]\w*(?:[!?=]?\s+|(?:\.[A-Za-z_]\w*)+\s+)[A-Za-z_]\w*:\s/.test(raw);
+  }
+
+  private isRubySymbolIndexSource(raw: string): boolean {
+    return /\[:[A-Za-z_]\w*[!?=]?\]/.test(raw);
+  }
+
+  private hasRubyIndexContext(expr: AST.Index): boolean {
+    const objectAff = this.getAffinity(expr.object);
+    if (objectAff?.runtime === OmniRuntime.Ruby && objectAff.confidence !== "fallback") return true;
+    const scopeAff = this.symbolTable.getScopeAffinity();
+    return scopeAff?.runtime === OmniRuntime.Ruby && scopeAff.confidence !== "fallback";
+  }
+
+  private isRubySymbolCommandSource(raw: string): boolean {
+    return /^[A-Za-z_]\w*[!?=]?\s+:[A-Za-z_]\w*[!?=]?(?:\s*,|\s*$)/.test(raw);
+  }
+
+  private isRubyHashRocketSource(raw: string): boolean {
+    return /=>/.test(raw);
   }
 
   private importBindingNames(path: string, runtime: OmniRuntime, alias?: string): string[] {
@@ -444,6 +609,12 @@ export class Pass1Structural {
       const last = cleaned.split(".").pop();
       if (last && last !== "*" && /^[A-Z_$]/.test(last)) {
         names.add(last);
+      }
+      if (cleaned.startsWith("static ")) {
+        const staticLast = cleaned.split(".").pop();
+        if (staticLast && staticLast !== "*") {
+          names.add(staticLast);
+        }
       }
     }
     if (runtime === OmniRuntime.Python && cleaned.includes(".")) {
@@ -475,6 +646,13 @@ export class Pass1Structural {
 
     for (const arg of node.args) {
       this.visitExpr(arg);
+    }
+
+    const rubyLabelArg = node.args
+      .map(arg => this.getAffinity(arg))
+      .find(aff => aff?.runtime === OmniRuntime.Ruby && aff.confidence !== "fallback");
+    if (rubyLabelArg) {
+      this.assign(node, OmniRuntime.Ruby, "definite", { type: "syntax", detail: "Ruby keyword label argument" });
     }
   }
 
@@ -513,20 +691,91 @@ export class Pass1Structural {
   }
 
   private visitClassDecl(node: AST.ClassDecl): void {
+    const rawClass = this.nodeSource(node)?.trim();
+    if (rawClass && this.isRubyClassSource(rawClass)) {
+      this.assign(node, OmniRuntime.Ruby, "definite", { type: "syntax", detail: "Ruby class/end declaration" });
+    } else if (rawClass && this.isPythonClassSource(rawClass)) {
+      this.assign(node, OmniRuntime.Python, "definite", { type: "syntax", detail: "Python class declaration" });
+    }
+
+    const decoratorAffinities: RuntimeAffinity[] = [];
+    const visitDecorator = (decorator: AST.Decorator) => {
+      if (decorator.expression) {
+        this.visitExprGeneric(decorator.expression);
+        const aff = this.getAffinity(decorator.expression);
+        if (aff && aff.confidence !== "fallback") decoratorAffinities.push(aff);
+      } else {
+        this.visitExprGeneric(decorator.name);
+        const aff = this.getAffinity(decorator.name);
+        if (aff && aff.confidence !== "fallback") decoratorAffinities.push(aff);
+        for (const arg of decorator.args || []) this.visitExprGeneric(arg);
+      }
+    };
+
+    for (const decorator of node.decorators || []) {
+      visitDecorator(decorator);
+    }
+    for (const member of node.members) {
+      for (const decorator of member.decorators || []) {
+        visitDecorator(decorator);
+      }
+    }
+
+    const decoratorAffinity = decoratorAffinities[0];
+    if (decoratorAffinity) {
+      this.assign(node, decoratorAffinity.runtime, decoratorAffinity.confidence, ...decoratorAffinity.evidence);
+    }
+
     this.symbolTable.define(node.name.name, {
       name: node.name.name,
-      affinity: this.currentScopeAffinity(),
+      affinity: this.getAffinity(node) || this.currentScopeAffinity(),
     });
+    const classAff = this.getAffinity(node);
+    if (classAff && classAff.confidence !== "fallback") {
+      this.scopeStack.push(classAff.runtime);
+    }
     this.symbolTable.pushScope();
     for (const member of node.members) {
       if (member.body) this.visitBlock(member.body);
     }
     this.symbolTable.popScope();
+    if (classAff && classAff.confidence !== "fallback") {
+      this.scopeStack.pop();
+    }
   }
 
   private visitBlock(block: AST.Block): void {
     for (const stmt of block.statements) {
       this.visitNode(stmt);
+    }
+  }
+
+  private visitCatchClause(clause: AST.CatchClause): void {
+    const catchAff = inferCatchClauseAffinity(clause, this.source);
+    const scopeRuntime = catchAff?.runtime || this.currentScopeRuntime();
+
+    if (catchAff) {
+      this.assign(clause.body, catchAff.runtime, catchAff.confidence, ...catchAff.evidence);
+    }
+
+    if (scopeRuntime) {
+      this.scopeStack.push(scopeRuntime);
+    }
+    this.symbolTable.pushScope();
+
+    if (clause.param) {
+      const paramAff = catchAff || this.currentScopeAffinity();
+      this.assign(clause.param, paramAff.runtime, paramAff.confidence, ...paramAff.evidence);
+      this.symbolTable.define(clause.param.name, {
+        name: clause.param.name,
+        affinity: paramAff,
+      });
+    }
+
+    this.visitBlock(clause.body);
+    this.symbolTable.popScope();
+    if (scopeRuntime) {
+      this.scopeStack.pop();
     }
   }
 
@@ -537,6 +786,9 @@ export class Pass1Structural {
   private visitExprGeneric(expr: AST.Expr): void {
     switch (expr.kind) {
       case "Binary":
+        if (expr.op === ":") {
+          this.assign(expr, OmniRuntime.Ruby, "definite", { type: "syntax", detail: "Ruby keyword label name: value" });
+        }
         if (expr.op === "===" || expr.op === "!==") {
           this.assign(expr, OmniRuntime.JavaScript, "definite", { type: "syntax", detail: `strict equality ${expr.op}` });
         }
@@ -579,11 +831,18 @@ export class Pass1Structural {
         const memberAff = this.inferMemberAffinity(expr);
         if (memberAff) {
           this.assign(expr, memberAff.runtime, memberAff.confidence, ...memberAff.evidence);
+          this.applyMemberRootSyntaxAffinity(expr, memberAff);
         }
         break;
       case "Index":
         this.visitExpr(expr.object);
         this.visitExpr(expr.index);
+        {
+          const rawIndex = this.nodeSource(expr)?.trim();
+          if (rawIndex && this.isRubySymbolIndexSource(rawIndex) && this.hasRubyIndexContext(expr)) {
+            this.assign(expr, OmniRuntime.Ruby, "definite", { type: "syntax", detail: "Ruby symbol index [:name]" });
+          }
+        }
         break;
       case "Ternary":
         this.visitExpr(expr.test);
@@ -596,6 +855,12 @@ export class Pass1Structural {
       case "ObjectLiteral":
         for (const prop of expr.properties) {
           this.visitExpr(prop.value);
+        }
+        {
+          const rawObject = this.nodeSource(expr)?.trim();
+          if (rawObject && this.isRubyHashRocketSource(rawObject)) {
+            this.assign(expr, OmniRuntime.Ruby, "definite", { type: "syntax", detail: "Ruby hash rocket =>" });
+          }
         }
         break;
       case "Lambda":
@@ -624,6 +889,17 @@ export class Pass1Structural {
         break;
       case "TypeAssertion":
         this.visitExpr(expr.expr);
+        break;
+      case "StringLiteral":
+        {
+          const rawString = this.nodeSource(expr)?.trim();
+          if (expr.delimiter === "`") {
+            this.assign(expr, OmniRuntime.JavaScript, "definite", { type: "syntax", detail: "JavaScript template literal" });
+          }
+          if (rawString && this.isRubyStabbyLambdaSource(rawString)) {
+            this.assign(expr, OmniRuntime.Ruby, "definite", { type: "syntax", detail: "Ruby stabby lambda ->" });
+          }
+        }
         break;
       case "Identifier":
         // Check if identifier is a known symbol
@@ -700,10 +976,27 @@ export class Pass1Structural {
       ? this.getAffinity(property as AST.Expr)
       : undefined;
     const qualifiedRuntime = lookupQualifiedGlobalAffinity(this.memberChainParts(expr));
+    const rawMember = this.nodeSource(expr);
+
+    if (rawMember?.includes("::")) {
+      return {
+        runtime: OmniRuntime.Ruby,
+        confidence: "definite",
+        evidence: [{ type: "syntax", detail: "Ruby constant path ::" }],
+      };
+    }
 
     const objectIsKnown = objectAff && objectAff.confidence !== "fallback" &&
       !(objectAff.confidence === "inferred" && objectAff.evidence[0]?.type === "scope" &&
         objectAff.evidence[0]?.detail.startsWith("scope majority"));
+
+    if (qualifiedRuntime) {
+      return {
+        runtime: qualifiedRuntime,
+        confidence: "inferred",
+        evidence: [{ type: "builtin", detail: `qualified global: ${this.memberChainParts(expr).join(".")}` }],
+      };
+    }
 
     if (objectIsKnown) {
       return {
@@ -713,14 +1006,6 @@ export class Pass1Structural {
           { type: "scope", detail: `member root: ${objectAff.runtime}` },
           ...objectAff.evidence,
         ],
-      };
-    }
-
-    if (qualifiedRuntime) {
-      return {
-        runtime: qualifiedRuntime,
-        confidence: "inferred",
-        evidence: [{ type: "builtin", detail: `qualified global: ${this.memberChainParts(expr).join(".")}` }],
       };
     }
 
@@ -738,6 +1023,31 @@ export class Pass1Structural {
       }
     }
     return [];
+  }
+
+  private applyMemberRootSyntaxAffinity(expr: AST.Member, affinity: RuntimeAffinity): void {
+    if (affinity.runtime !== OmniRuntime.Ruby) return;
+    if (!affinity.evidence.some(e => e.type === "syntax" && e.detail.includes("Ruby constant path"))) return;
+
+    const root = this.memberRootIdentifier(expr);
+    if (!root) return;
+
+    this.assign(root, affinity.runtime, affinity.confidence, ...affinity.evidence);
+    this.symbolTable.define(root.name, {
+      name: root.name,
+      affinity,
+    });
+
+    const importNode = this.importBindingNodes.get(root.name);
+    if (importNode) {
+      this.assign(importNode, affinity.runtime, affinity.confidence, ...affinity.evidence);
+    }
+  }
+
+  private memberRootIdentifier(expr: AST.Expr): AST.Identifier | undefined {
+    if (expr.kind === "Identifier") return expr;
+    if (expr.kind === "Member") return this.memberRootIdentifier(expr.object);
+    return undefined;
   }
 
   // --- Helpers ---

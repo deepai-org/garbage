@@ -50,11 +50,13 @@ export function parseFuncDecl(
   async = false,
   unsafe = false,
   generator = false,
-  decorators?: AST.Expr[]
+  decorators?: AST.Expr[],
+  decoratorStart?: number
 ): AST.FuncDecl {
-  const start = host.current - 1;
+  const keywordStart = host.current - 1;
+  const start = decoratorStart ?? keywordStart;
 
-  const declKeywordValue = host.tokens[start]?.value;
+  const declKeywordValue = host.tokens[keywordStart]?.value;
   const declKeyword = (declKeywordValue === "def" || declKeywordValue === "fn" ||
                        declKeywordValue === "fun" || declKeywordValue === "func" ||
                        declKeywordValue === "function") ? declKeywordValue as AST.FuncDecl["declKeyword"] : undefined;
@@ -176,7 +178,7 @@ export function parseFuncDecl(
   } else if (host.check("{")) {
     body = host.parseBlock();
   } else if (isRubyDef) {
-    body = parseRubyFuncBody(host, start);
+    body = parseRubyFuncBody(host, keywordStart);
   } else {
     if (host.peek().virtualSemi || host.isAtEnd()) {
       body = {
@@ -214,6 +216,7 @@ export function parseFuncDecl(
       name: expr.kind === "Identifier" ? expr :
             expr.kind === "Call" && expr.callee.kind === "Identifier" ? expr.callee :
             { kind: "Identifier" as const, name: "unknown", span: expr.span },
+      expression: expr,
       args: expr.kind === "Call" ? expr.args : undefined,
       span: expr.span
     }));
@@ -311,8 +314,13 @@ function parseRubyFuncBody(host: FunctionHost, start: number): AST.Block {
   };
 }
 
-export function parseFuncDeclWithReturnTypeBefore(host: FunctionHost): AST.FuncDecl {
-  const start = host.current;
+export function parseFuncDeclWithReturnTypeBefore(
+  host: FunctionHost,
+  decorators?: AST.Expr[],
+  decoratorStart?: number
+): AST.FuncDecl {
+  const typeStart = host.current;
+  const start = decoratorStart ?? typeStart;
   const returnType = host.parseType();
   const name = host.parseIdentifier();
   const params = parseParameterList(host);
@@ -321,7 +329,7 @@ export function parseFuncDeclWithReturnTypeBefore(host: FunctionHost): AST.FuncD
     host.parseExpressionBody() :
     host.parseBlock();
 
-  return {
+  const funcDecl: AST.FuncDecl = {
     kind: "FuncDecl",
     name,
     genericParams: undefined,
@@ -332,6 +340,20 @@ export function parseFuncDeclWithReturnTypeBefore(host: FunctionHost): AST.FuncD
     body: body as AST.Block,
     span: host.createSpan(start, host.current - 1)
   };
+
+  if (decorators && decorators.length > 0) {
+    funcDecl.decorators = decorators.map(expr => ({
+      kind: "Decorator" as const,
+      name: expr.kind === "Identifier" ? expr :
+            expr.kind === "Call" && expr.callee.kind === "Identifier" ? expr.callee :
+            { kind: "Identifier" as const, name: "unknown", span: expr.span },
+      expression: expr,
+      args: expr.kind === "Call" ? expr.args : undefined,
+      span: expr.span
+    }));
+  }
+
+  return funcDecl;
 }
 
 // ============ Parameters ============

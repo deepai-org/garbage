@@ -34,6 +34,47 @@ export function parseImport(host: ImportHost): AST.Import | AST.ImportDecl | AST
   let alias: AST.Identifier | undefined;
   let path: string;
 
+  // Java static import: import static java.util.concurrent.TimeUnit.SECONDS
+  if (host.check("static")) {
+    host.advance();
+    const pathParts: string[] = [];
+    let lastIdentifier: AST.Identifier | undefined;
+
+    if (host.peek().type === TokenType.Identifier || host.peek().type === TokenType.Keyword) {
+      lastIdentifier = host.parseIdentifier();
+      pathParts.push(lastIdentifier.name);
+      while (host.match(".") || host.match(".*")) {
+        const sep = host.previous()!.value;
+        if (sep === ".*") {
+          pathParts.push(".*");
+          lastIdentifier = undefined;
+          break;
+        }
+        if (host.peek().type === TokenType.Identifier || host.peek().type === TokenType.Keyword) {
+          lastIdentifier = host.parseIdentifier();
+          pathParts.push(".");
+          pathParts.push(lastIdentifier.name);
+        } else if (host.match("*")) {
+          pathParts.push(".*");
+          lastIdentifier = undefined;
+          break;
+        } else {
+          break;
+        }
+      }
+    } else {
+      throw host.error(host.peek(), "Expected Java static import path after 'static'");
+    }
+
+    host.consumeSemicolon();
+    return {
+      kind: "Import",
+      path: `static ${pathParts.join("")}`,
+      alias: lastIdentifier,
+      span: host.createSpan(start, host.current - 1)
+    };
+  }
+
   // Destructured imports: import { Token, TokenType } from './lexer'
   if (host.check("{")) {
     host.advance();
@@ -172,8 +213,12 @@ export function parseImport(host: ImportHost): AST.Import | AST.ImportDecl | AST
     // Old-style simple import (dotted or :: separated)
     else {
       let pathParts = [host.advance().value];
-      while (host.match(".") || host.match("::")) {
+      while (host.match(".") || host.match("::") || host.match(".*")) {
         const sep = host.previous()!.value;
+        if (sep === ".*") {
+          pathParts.push(".*");
+          break;
+        }
         if (host.peek().type === TokenType.Identifier || host.peek().type === TokenType.Keyword) {
           pathParts.push(sep === "::" ? "::" : ".");
           pathParts.push(host.advance().value);
@@ -270,14 +315,14 @@ export function parseFromImport(host: ImportHost): AST.ImportDecl {
   } else {
     // Handle relative imports: from .module or from ..package.module
     let pathStr = "";
-    while (host.check(".") && !host.check("..") || host.check("...")) {
+    while (host.check(".") || host.check("..") || host.check("...")) {
       pathStr += host.advance().value;
     }
     if (!host.check("import")) {
       // Module path follows the dots
       pathStr += host.advance().value; // first identifier
-      while (host.match(".")) {
-        pathStr += "." + host.advance().value;
+      while (host.match(".") || host.match("..") || host.match("...")) {
+        pathStr += host.previous()!.value + host.advance().value;
       }
     }
     path = pathStr;

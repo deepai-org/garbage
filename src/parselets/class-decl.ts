@@ -35,9 +35,100 @@ export interface ClassHost {
 
   parseIdentifier(): AST.Identifier;
   parseExpression(): AST.Expr;
+  parsePostfix(expr: AST.Expr): AST.Expr;
   parseAssignmentExpression(): AST.Expr;
   parseType(): AST.TypeNode;
   parseBlock(): AST.Block;
+}
+
+function decoratorFromExpr(expr: AST.Expr, span: AST.Span): AST.Decorator {
+  return {
+    kind: "Decorator",
+    name: expr.kind === "Identifier" ? expr :
+          expr.kind === "Call" && expr.callee.kind === "Identifier" ? expr.callee :
+          { kind: "Identifier" as const, name: "unknown", span: expr.span },
+    expression: expr,
+    args: expr.kind === "Call" ? expr.args : undefined,
+    span,
+  };
+}
+
+function isHeaderTerminator(token: Token | undefined): boolean {
+  return !token ||
+    token.type === TokenType.EOF ||
+    token.virtualSemi ||
+    token.value === ";" ||
+    token.value === "{" ||
+    token.value === ":";
+}
+
+function looksLikeTypeParameterList(host: ClassHost): boolean {
+  if (!host.check("<")) return false;
+
+  let depth = 0;
+  for (let i = host.current; i < host.tokens.length; i++) {
+    const token = host.tokens[i];
+    if (!token || token.type === TokenType.EOF || token.virtualSemi || token.value === ";") {
+      return false;
+    }
+    if (token.value === "<") {
+      depth++;
+    } else if (token.value === ">") {
+      depth--;
+      if (depth === 0) return true;
+    } else if (depth === 0 && (token.value === "{" || token.value === ":")) {
+      return false;
+    }
+  }
+  return false;
+}
+
+function parseRubySuperclass(host: ClassHost): AST.TypeNode | undefined {
+  if (!host.match("<")) return undefined;
+
+  const superStart = host.current;
+  const parts: string[] = [];
+  while (!isHeaderTerminator(host.peek())) {
+    parts.push(host.advance().value);
+  }
+
+  if (parts.length === 0) return undefined;
+  const span = host.createSpan(superStart, host.current - 1);
+  const id: AST.Identifier = {
+    kind: "Identifier",
+    name: parts.join(""),
+    span,
+  };
+  return {
+    kind: "SimpleType",
+    id,
+    span,
+  };
+}
+
+function consumeRubyClassBody(host: ClassHost): void {
+  while (host.check(";") || host.peek().virtualSemi) {
+    host.advance();
+  }
+
+  let depth = 1;
+  while (!host.isAtEnd() && depth > 0) {
+    const value = host.peek().value;
+
+    if (value === "class" || value === "module" || value === "def" || value === "begin" || value === "do") {
+      depth++;
+      host.advance();
+      continue;
+    }
+
+    if (value === "end") {
+      depth--;
+      host.advance();
+      continue;
+    }
+
+    host.advance();
+  }
 }
 
 export function parseClassDecl(host: ClassHost, decorators?: AST.Expr[]): AST.ClassDecl {
@@ -46,7 +137,7 @@ export function parseClassDecl(host: ClassHost, decorators?: AST.Expr[]): AST.Cl
 
   // Parse type parameters
   let typeParams: AST.Identifier[] | undefined;
-  if (host.match("<")) {
+  if (looksLikeTypeParameterList(host) && host.match("<")) {
     typeParams = [];
     do {
       typeParams.push(host.parseIdentifier());
@@ -95,6 +186,11 @@ export function parseClassDecl(host: ClassHost, decorators?: AST.Expr[]): AST.Cl
     extendsType = host.parseType();
   }
 
+  // Ruby-style class inheritance: class Name < Superclass
+  if (!extendsType && host.check("<")) {
+    extendsType = parseRubySuperclass(host);
+  }
+
   // Parse implements clause
   let implementsTypes: AST.TypeNode[] | undefined;
   if (host.match("implements")) {
@@ -113,9 +209,10 @@ export function parseClassDecl(host: ClassHost, decorators?: AST.Expr[]): AST.Cl
     } while (host.match(","));
   }
 
-  // Parse class body - handle both { } and Python-style :
+  // Parse class body - handle { }, Python-style :, and Ruby-style ... end
   const members: AST.ClassMember[] = [];
   let isPythonStyle = false;
+  let isRubyStyle = false;
   let classIndent = -1;
 
   if (host.match(":")) {
@@ -127,12 +224,17 @@ export function parseClassDecl(host: ClassHost, decorators?: AST.Expr[]): AST.Cl
     }
     // Record the indentation level of the class body
     classIndent = host.peek().indentCol ?? 0;
-  } else {
+  } else if (host.check("{")) {
     // Traditional braces style
-    host.consume("{", "Expected '{' before class body");
+    host.advance();
+  } else {
+    // Ruby classes are delimited by `end` and their bodies often contain
+    // DSL macros that do not fit the generic class-member model.
+    isRubyStyle = true;
+    consumeRubyClassBody(host);
   }
 
-  while (!host.isAtEnd()) {
+  while (!isRubyStyle && !host.isAtEnd()) {
     // Skip virtual semicolons and regular semicolons before dedent checks.
     // Python class fields are separated by virtual semicolons; checking
     // indentation before consuming them makes the parser leave the second
@@ -161,35 +263,18 @@ export function parseClassDecl(host: ClassHost, decorators?: AST.Expr[]): AST.Cl
 
       // Parse member decorators (e.g., @Input, @Output, @HostListener)
       const memberDecorators: AST.Decorator[] = [];
+      const memberDecoratorExprs: AST.Expr[] = [];
+      let firstDecoratorStart: number | undefined;
       while (host.check("@")) {
         const decoratorStart = host.current;
+        if (firstDecoratorStart === undefined) firstDecoratorStart = decoratorStart;
         host.advance(); // consume @
 
-        // Parse the decorator name
         if (host.peek().type === TokenType.Identifier) {
-          const name = host.parseIdentifier();
-          let args: AST.Expr[] | undefined;
-
-          // Parse decorator arguments if present
-          if (host.check("(")) {
-            host.advance(); // consume (
-            args = [];
-
-            if (!host.check(")")) {
-              do {
-                args.push(host.parseExpression());
-              } while (host.match(","));
-            }
-
-            host.consume(")", "Expected ')' after decorator arguments");
-          }
-
-          memberDecorators.push({
-            kind: "Decorator",
-            name,
-            args,
-            span: host.createSpan(decoratorStart, host.current - 1)
-          });
+          const base = host.parseIdentifier();
+          const expression = host.parsePostfix(base);
+          memberDecoratorExprs.push(expression);
+          memberDecorators.push(decoratorFromExpr(expression, host.createSpan(decoratorStart, host.current - 1)));
         }
 
         // Skip virtual semicolons after decorators
@@ -200,14 +285,15 @@ export function parseClassDecl(host: ClassHost, decorators?: AST.Expr[]): AST.Cl
 
       // Handle Ruby-style def...end methods
       if (host.match("def")) {
-        const method = Functions.parseFuncDecl(host as any, );
+        const method = Functions.parseFuncDecl(host as any, false, false, false, memberDecoratorExprs, firstDecoratorStart);
         members.push(method as any);
         continue;
       }
 
       // Handle regular function declarations
       if (host.match("fn", "fun", "function", "func")) {
-        const method = Functions.parseFuncDecl(host as any, );
+        const isGenerator = host.previous()?.value === "function" && host.match("*");
+        const method = Functions.parseFuncDecl(host as any, false, false, isGenerator, memberDecoratorExprs, firstDecoratorStart);
         members.push(method as any);
         continue;
       }
@@ -239,7 +325,8 @@ export function parseClassDecl(host: ClassHost, decorators?: AST.Expr[]): AST.Cl
       if (host.match("async")) {
         // Check if followed by function keyword
         if (host.match("fn", "fun", "function", "func", "def")) {
-          const method = Functions.parseFuncDecl(host as any, true);
+          const isGenerator = host.previous()?.value === "function" && host.match("*");
+          const method = Functions.parseFuncDecl(host as any, true, false, isGenerator, memberDecoratorExprs, firstDecoratorStart);
           members.push(method as any);
           continue;
         }
@@ -911,8 +998,8 @@ export function parseClassDecl(host: ClassHost, decorators?: AST.Expr[]): AST.Cl
     }
   }
 
-  // Only consume closing brace for non-Python style
-  if (!isPythonStyle) {
+  // Only consume closing brace for non-Python/non-Ruby style
+  if (!isPythonStyle && !isRubyStyle) {
     host.consume("}", "Expected '}' after class body");
   }
 
@@ -942,6 +1029,7 @@ export function parseClassDecl(host: ClassHost, decorators?: AST.Expr[]): AST.Cl
       name: expr.kind === "Identifier" ? expr :
             expr.kind === "Call" && expr.callee.kind === "Identifier" ? expr.callee :
             { kind: "Identifier", name: "unknown", span: expr.span } as AST.Identifier,
+      expression: expr,
       args: expr.kind === "Call" ? expr.args : undefined,
       span: expr.span
     }));

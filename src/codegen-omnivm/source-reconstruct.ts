@@ -135,6 +135,9 @@ export function exprToCodeForRuntime(expr: AST.Expr, runtime: OmniRuntime, sourc
     return exprToCodeForRuntime(expr.expr, tagToRuntime(expr.runtime), source);
   }
   if (runtime === OmniRuntime.Java) {
+    return exprToJavaCode(expr, source);
+  }
+  if (runtime === OmniRuntime.Ruby) {
     return spanExtract(expr, source) || exprToCode(expr, source);
   }
   if (runtime === OmniRuntime.Python) {
@@ -143,8 +146,72 @@ export function exprToCodeForRuntime(expr: AST.Expr, runtime: OmniRuntime, sourc
   return exprToCode(expr, source);
 }
 
+function exprToJavaCode(expr: AST.Expr, source?: string): string {
+  switch (expr.kind) {
+    case "Identifier":
+      return expr.name;
+    case "NumericLiteral":
+      return expr.raw;
+    case "StringLiteral":
+      return stringLiteralToCode(expr);
+    case "BooleanLiteral":
+      return String(expr.value);
+    case "NullLiteral":
+      return "null";
+    case "Member": {
+      const obj = exprToJavaCode(expr.object, source);
+      if (expr.computed) {
+        return `${obj}[${exprToJavaCode(expr.property as AST.Expr, source)}]`;
+      }
+      return `${obj}.${expr.property.name}`;
+    }
+    case "Call":
+      return `${exprToJavaCode(expr.callee, source)}(${expr.args.map(a => exprToJavaCode(a, source)).join(", ")})`;
+    case "NewExpr":
+      return `new ${exprToJavaCode(expr.callee, source)}(${expr.args.map(a => exprToJavaCode(a, source)).join(", ")})`;
+    case "Binary":
+      return `(${exprToJavaCode(expr.left, source)} ${expr.op} ${exprToJavaCode(expr.right, source)})`;
+    case "Unary": {
+      if (expr.prefix) {
+        const space = /^[a-z]+$/i.test(expr.op) ? " " : "";
+        return `${expr.op}${space}${exprToJavaCode(expr.argument, source)}`;
+      }
+      return `${exprToJavaCode(expr.argument, source)}${expr.op}`;
+    }
+    case "Index":
+      return `${exprToJavaCode(expr.object, source)}[${exprToJavaCode(expr.index, source)}]`;
+    case "Assign":
+      return `${exprToJavaCode(expr.left, source)} ${expr.op} ${exprToJavaCode(expr.right, source)}`;
+    case "Ternary":
+      return `(${exprToJavaCode(expr.test, source)} ? ${exprToJavaCode(expr.consequent, source)} : ${exprToJavaCode(expr.alternate, source)})`;
+    case "ArrayLiteral":
+      return `java.util.Arrays.asList(${expr.elements.map(e => exprToJavaCode(e, source)).join(", ")})`;
+    case "ObjectLiteral": {
+      if (expr.properties.length === 0) {
+        return "new java.util.LinkedHashMap()";
+      }
+      const entries = expr.properties.map(p => {
+        if (p.shorthand && p.key.kind === "Identifier") {
+          return `java.util.Map.entry(${JSON.stringify(p.key.name)}, ${p.key.name})`;
+        }
+        const key = p.computed
+          ? exprToJavaCode(p.key as AST.Expr, source)
+          : (p.key.kind === "Identifier" ? JSON.stringify(p.key.name) : exprToJavaCode(p.key as AST.Expr, source));
+        return `java.util.Map.entry(${key}, ${exprToJavaCode(p.value, source)})`;
+      }).join(", ");
+      return `new java.util.LinkedHashMap(java.util.Map.ofEntries(${entries}))`;
+    }
+    case "RuntimeTag":
+      return exprToJavaCode(expr.expr, source);
+    default:
+      return spanExtract(expr, source) || exprToCode(expr, source);
+  }
+}
+
 function exprToPythonCode(expr: AST.Expr, source?: string): string {
   switch (expr.kind) {
+    case "StringLiteral":
+      return stringLiteralToPythonCode(expr, source);
     case "Lambda":
       return lambdaToPythonCode(expr, source);
     case "BooleanLiteral":
@@ -169,7 +236,7 @@ function exprToPythonCode(expr: AST.Expr, source?: string): string {
     case "Member":
       return `${exprToPythonCode(expr.object, source)}.${expr.property.name}`;
     case "Index":
-      return `${exprToPythonCode(expr.object, source)}[${exprToPythonCode(expr.index, source)}]`;
+      return spanExtract(expr, source) || `${exprToPythonCode(expr.object, source)}[${exprToPythonCode(expr.index, source)}]`;
     case "Binary":
       return `(${exprToPythonCode(expr.left, source)} ${expr.op} ${exprToPythonCode(expr.right, source)})`;
     case "Unary": {
@@ -187,6 +254,32 @@ function exprToPythonCode(expr: AST.Expr, source?: string): string {
     default:
       return exprToCode(expr, source);
   }
+}
+
+function stringLiteralToPythonCode(node: AST.StringLiteral, source?: string): string {
+  const raw = spanExtract(node, source)?.trim();
+  if (raw && /^[rubf]*f/i.test(raw)) {
+    return raw;
+  }
+  if (node.parts.length === 1 && node.parts[0].kind === "Text") {
+    return JSON.stringify(node.parts[0].value as string);
+  }
+
+  let result = 'f"';
+  for (const part of node.parts) {
+    if (part.kind === "Text") {
+      result += String(part.value)
+        .replace(/\\/g, "\\\\")
+        .replace(/"/g, '\\"')
+        .replace(/{/g, "{{")
+        .replace(/}/g, "}}");
+    } else {
+      const value = typeof part.value === "string" ? part.value : exprToPythonCode(part.value as AST.Expr, source);
+      result += "{" + value + "}";
+    }
+  }
+  result += '"';
+  return result;
 }
 
 export function stringLiteralToCode(node: AST.StringLiteral): string {
@@ -880,6 +973,7 @@ function collectIds(
     }
     case "FuncDecl": {
       const funcNode = node as AST.FuncDecl;
+      for (const decorator of funcNode.decorators || []) collectDecoratorIds(decorator, ids, locals);
       locals.add(funcNode.name.name);
       const funcLocals = new Set(locals);
       for (const p of funcNode.params) {
@@ -888,10 +982,41 @@ function collectIds(
       for (const s of funcNode.body.statements) collectIds(s, ids, funcLocals);
       break;
     }
+    case "ClassDecl": {
+      const classNode = node as AST.ClassDecl;
+      for (const decorator of classNode.decorators || []) collectDecoratorIds(decorator, ids, locals);
+      locals.add(classNode.name.name);
+      const classLocals = new Set(locals);
+      for (const member of classNode.members) {
+        for (const decorator of member.decorators || []) collectDecoratorIds(decorator, ids, classLocals);
+        const memberLocals = new Set(classLocals);
+        for (const param of member.params || []) {
+          if (param.name.kind === "Identifier") memberLocals.add(param.name.name);
+        }
+        if (member.name) memberLocals.add(member.name.name);
+        if (member.body) {
+          for (const stmt of member.body.statements) collectIds(stmt, ids, memberLocals);
+        }
+      }
+      break;
+    }
     // For other node kinds, don't try to walk — they use span extraction anyway
     default:
       break;
   }
+}
+
+function collectDecoratorIds(
+  decorator: AST.Decorator,
+  ids: Set<string>,
+  locals: Set<string>,
+): void {
+  if (decorator.expression) {
+    collectIds(decorator.expression, ids, locals);
+    return;
+  }
+  collectIds(decorator.name, ids, locals);
+  for (const arg of decorator.args || []) collectIds(arg, ids, locals);
 }
 
 export function isExprKind(kind: string): boolean {

@@ -665,6 +665,32 @@ export function parseArguments(host: PostfixHost, ): AST.Expr[] {
       } else {
         // Parse expression but stop at comma at this level
         const expr = host.parseAssignmentExpression();
+
+        if (host.check(":") && !host.check("::") && expr.span.end === host.peek().start) {
+          host.advance();
+          const value = host.parseAssignmentExpression();
+          args.push({
+            kind: "Binary",
+            op: ":",
+            left: expr,
+            right: value,
+            span: host.createSpanFrom(expr)
+          } as any);
+          while (host.peek().virtualSemi) {
+            host.advance();
+          }
+          if (!host.match(",")) {
+            break;
+          }
+          while (host.peek().virtualSemi) {
+            host.advance();
+          }
+          if (host.check(")")) {
+            break;
+          }
+          continue;
+        }
+
         // Python generator expression inside function call: func(expr for x in items)
         while (host.peek().virtualSemi) host.advance();
         if (host.check("for") && args.length === 0) {
@@ -795,4 +821,3 @@ export function tryParseGenericArgs(host: PostfixHost, ): AST.TypeNode[] | null 
     return null;
   }
 }
-

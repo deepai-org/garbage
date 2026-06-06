@@ -1382,10 +1382,18 @@ export class ManifestCodeGenerator {
         return true;
       case "StringLiteral":
         // Only plain strings (no interpolation)
-        return expr.parts.length === 1 && expr.parts[0].kind === "Text";
+        return expr.parts.length === 1 &&
+          expr.parts[0].kind === "Text" &&
+          this.isSourceStringLiteral(expr);
       default:
         return false;
     }
+  }
+
+  private isSourceStringLiteral(expr: AST.StringLiteral): boolean {
+    if (!this.source || !expr.span || expr.span.end <= expr.span.start) return true;
+    const raw = this.source.slice(expr.span.start, expr.span.end).trim();
+    return /^(?:[rubfcRUBFC]+)?["'`]/.test(raw);
   }
 
   /**
@@ -1830,13 +1838,42 @@ export class ManifestCodeGenerator {
   private emitUsing(node: AST.Using, blockRuntime: OmniRuntime): TryOp {
     const resourceOps: ManifestOp[] = [];
     let resourceName: string | undefined;
+    let cleanupRuntime: OmniRuntime | undefined;
+    let cleanupCode: string | undefined;
 
     if (node.resource.kind === "VarDecl" || node.resource.kind === "ConstDecl") {
       const names = node.resource.names;
       resourceName = names[0]?.name;
-      resourceOps.push(...(node.resource.kind === "VarDecl"
-        ? this.emitVarDecl(node.resource)
-        : this.emitConstDecl(node.resource)));
+      const value = node.resource.values?.[0];
+      const valueAff = value ? this.affinityMap.get(value) : undefined;
+      const declAff = this.affinityMap.get(node.resource);
+      const runtime = valueAff?.runtime || declAff?.runtime || blockRuntime;
+      if (resourceName && value && runtime === OmniRuntime.Python) {
+        const contextName = `__using_context_${++this.usingCounter}`;
+        const captures = this.computeCaptures(value, runtime);
+        resourceOps.push({
+          op: "eval",
+          runtime,
+          bind: contextName,
+          code: this.exprCode(value, runtime),
+          ...(captures ? { captures } : {}),
+        });
+        resourceOps.push({
+          op: "eval",
+          runtime,
+          bind: resourceName,
+          code: `${contextName}.__enter__()`,
+        });
+        this.recordBinding(contextName, runtime, "value", value);
+        this.recordBinding(resourceName, runtime, "value", node.resource);
+        cleanupRuntime = runtime;
+        cleanupCode = `${contextName}.__exit__(None, None, None)`;
+        resourceName = contextName;
+      } else {
+        resourceOps.push(...(node.resource.kind === "VarDecl"
+          ? this.emitVarDecl(node.resource)
+          : this.emitConstDecl(node.resource)));
+      }
     } else {
       resourceName = `__using_resource_${++this.usingCounter}`;
       const resourceExpr = node.resource as AST.Expr;
@@ -1866,7 +1903,13 @@ export class ManifestCodeGenerator {
     }
 
     const closeOp: ResourceOp = resourceName
-      ? { op: "resource", action: "close", target: resourceName }
+      ? {
+          op: "resource",
+          action: "close",
+          target: resourceName,
+          ...(cleanupRuntime ? { runtime: cleanupRuntime } : {}),
+          ...(cleanupCode ? { code: cleanupCode } : {}),
+        }
       : { op: "resource", action: "close", target: "__unknown_resource" };
 
     return {
@@ -1886,6 +1929,18 @@ export class ManifestCodeGenerator {
       return this.exprCode(expr, runtime);
     }
     return nativeSource || this.exprCode(expr, runtime);
+  }
+
+  private statementCode(expr: AST.Expr, runtime: OmniRuntime): string {
+    const code = this.exprCode(expr, runtime);
+    if (runtime !== OmniRuntime.Java) {
+      return code;
+    }
+    const trimmed = code.trim();
+    if (trimmed === "" || trimmed.endsWith(";") || trimmed.endsWith("}")) {
+      return code;
+    }
+    return `${code};`;
   }
 
   private emitEcho(node: AST.Echo, blockRuntime: OmniRuntime): NativeOp {
@@ -2041,7 +2096,7 @@ export class ManifestCodeGenerator {
       return {
         op: "exec",
         runtime: tagRt,
-        code: this.exprCode(expr.expr, tagRt),
+        code: this.statementCode(expr.expr, tagRt),
         ...(captures ? { captures } : {}),
       };
     }
@@ -2055,7 +2110,7 @@ export class ManifestCodeGenerator {
     return {
       op: "exec",
       runtime,
-      code: this.exprCode(expr, runtime),
+      code: this.statementCode(expr, runtime),
       ...(captures ? { captures } : {}),
     };
   }
@@ -2813,6 +2868,7 @@ export class ManifestCodeGenerator {
       this.recordBinding(name, "__params__" as OmniRuntime);
     }
 
+    const loweredSourceArtifact = this.loweredDefineFuncFor(node)?.sourceArtifact;
     // Increment funcDepth so body ops capture ALL external bindings
     // (not just cross-runtime). Function bodies run in isolated scope.
     this.funcDepth++;
@@ -2854,7 +2910,7 @@ export class ManifestCodeGenerator {
       params,
       body: bodyOps,
       ...(singleRuntime ? { bodyRuntime: singleRuntime } : {}),
-      ...(this.loweredDefineFuncFor(node)?.sourceArtifact ? { sourceArtifact: this.loweredDefineFuncFor(node)?.sourceArtifact } : {}),
+      ...(loweredSourceArtifact ? { sourceArtifact: loweredSourceArtifact } : {}),
       ...(node.async ? { async: true } : {}),
       ...(node.generator ? { generator: true } : {}),
     };
@@ -2897,8 +2953,9 @@ export class ManifestCodeGenerator {
     // Imports are always hoistable (module-level by nature)
     if (op.op === "import") return true;
 
-    // Eval/exec ops: check if captures reference any param
-    if (op.op === "eval" || op.op === "exec") {
+    // Eval ops: check if captures reference any param. Exec ops are
+    // side-effecting statements and must remain in the function body.
+    if (op.op === "eval") {
       const caps = op.captures;
       if (!caps) return true; // no captures → no param dependency
       for (const key of Object.keys(caps)) {
@@ -3352,6 +3409,18 @@ export class ManifestCodeGenerator {
   }
 
   private emitLoop(node: AST.Loop): ManifestOp {
+    const loopAff = this.affinityMap.get(node);
+    const loopRuntime = loopAff?.runtime || this.defaultRuntime;
+    if (this.shouldEmitNativeJavaScriptLoop(node, loopRuntime)) {
+      const captures = this.computeCaptures(node, OmniRuntime.JavaScript);
+      return {
+        op: "exec",
+        runtime: OmniRuntime.JavaScript,
+        code: nodeToSourceCode(node, this.source),
+        ...(captures ? { captures } : {}),
+      };
+    }
+
     const bodyBlocks = consolidateBlocks(node.body.statements, this.affinityMap);
     const bodyOps: ManifestOp[] = [];
     for (const block of bodyBlocks) {
@@ -3392,16 +3461,30 @@ export class ManifestCodeGenerator {
         }
       }
       if (node.iterable) {
-        if (node.iterable.kind === "Identifier") {
-          loopOp.iterable = { kind: "ref", name: node.iterable.name };
-        } else {
-          // Complex iterable expression → ref to a literal representation
-          loopOp.iterable = { kind: "ref", name: exprToCode(node.iterable, this.source) };
-        }
+        loopOp.iterable = this.foreachIterableValue(node.iterable);
       }
     }
 
     return loopOp;
+  }
+
+  private foreachIterableValue(expr: AST.Expr): ManifestValue {
+    const literal = this.tryLiteralValue(expr);
+    if (literal.ok) {
+      return { kind: "literal", value: literal.value };
+    }
+    if (expr.kind === "Identifier") {
+      return { kind: "ref", name: expr.name };
+    }
+    return { kind: "ref", name: exprToCode(expr, this.source) };
+  }
+
+  private shouldEmitNativeJavaScriptLoop(node: AST.Loop, loopRuntime: OmniRuntime): boolean {
+    if (loopRuntime !== OmniRuntime.JavaScript || node.mode !== "foreach" || !node.iterable) {
+      return false;
+    }
+    const iterableAff = this.affinityMap.get(node.iterable);
+    return !!iterableAff && iterableAff.runtime !== OmniRuntime.JavaScript && iterableAff.confidence !== "fallback";
   }
 
   private emitReturn(node: AST.Return): ReturnOp {
@@ -3518,7 +3601,7 @@ export class ManifestCodeGenerator {
     return tryOp;
   }
 
-  private emitThrow(node: AST.Throw): ThrowOp {
+  private emitThrow(node: AST.Throw): ThrowOp | ExecOp {
     if (this.isSimpleLiteral(node.value)) {
       return {
         op: "throw",
@@ -3531,11 +3614,32 @@ export class ManifestCodeGenerator {
         value: { kind: "ref", name: node.value.name },
       };
     }
-    // Complex expression — use literal with stringified code
+
+    // Complex throw expressions should stay native so runtime-specific error
+    // objects preserve name/message/stack through the manifest catch boundary.
+    const aff = this.affinityMap.get(node.value);
+    const runtime = aff?.runtime || this.defaultRuntime;
+    const captures = this.computeCaptures(node.value, runtime);
     return {
-      op: "throw",
-      value: { kind: "literal", value: exprToCode(node.value, this.source) },
+      op: "exec",
+      runtime,
+      code: this.throwStatementCode(node.value, runtime),
+      ...(captures ? { captures } : {}),
     };
+  }
+
+  private throwStatementCode(value: AST.Expr, runtime: OmniRuntime): string {
+    const code = this.exprCode(value, runtime);
+    switch (runtime) {
+      case OmniRuntime.Python:
+        return `raise ${code}`;
+      case OmniRuntime.Ruby:
+        return `raise ${code}`;
+      case OmniRuntime.Java:
+        return `throw ${code};`;
+      default:
+        return `throw ${code}`;
+    }
   }
 
   // ─── Imports ──────────────────────────────────────────────────

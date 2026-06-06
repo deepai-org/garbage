@@ -428,6 +428,7 @@ export function parsePrimary(host: PrefixHost, ): AST.Expr {
     return host.parsePostfix(parseGoCompositeLiteral(host));
   }
   if (host.check("[") && host.peekAt(1)?.value === "]" &&
+      !host.peekAt(2)?.newline &&
       (host.peekAt(2)?.type === TokenType.Identifier ||
        (host.peekAt(2)?.type === TokenType.Keyword &&
         ["map", "interface", "struct", "chan"].includes(host.peekAt(2)?.value || "")))) {

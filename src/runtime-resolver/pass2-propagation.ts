@@ -81,11 +81,20 @@ export class Pass2Propagation {
         return this.propagateFuncDecl(node);
 
       case "If":
+        let bestIfAff: RuntimeAffinity | undefined;
         for (const arm of node.arms) {
-          this.propagateExpr(arm.test);
-          this.propagateBlock(arm.body);
+          const testAff = this.propagateExpr(arm.test);
+          const bodyAff = this.propagateBlock(arm.body);
+          bestIfAff = this.preferRuntimeAffinity(bestIfAff, bodyAff);
+          bestIfAff = this.preferRuntimeAffinity(bestIfAff, testAff);
         }
-        if (node.elseBody) this.propagateBlock(node.elseBody);
+        if (node.elseBody) bestIfAff = this.preferRuntimeAffinity(bestIfAff, this.propagateBlock(node.elseBody));
+        if (bestIfAff) {
+          const ifExisting = this.affinityMap.get(node);
+          if (!ifExisting || this.isWeakScopeAffinity(ifExisting) || ifExisting.confidence === "fallback") {
+            this.affinityMap.set(node, { ...bestIfAff });
+          }
+        }
         return this.getOrDefault(node);
 
       case "Loop": {
@@ -93,12 +102,12 @@ export class Pass2Propagation {
         let loopIterAff: RuntimeAffinity | undefined;
         if (node.iterable) loopIterAff = this.propagateExpr(node.iterable);
         const loopBodyAff = this.propagateBlock(node.body);
-        // Inherit from iterable or body if loop only has scope fallback
+        // The iterable may be foreign. Keep loop execution anchored to body/control
+        // syntax when present, and leave iterable affinity attached to the iterable
+        // expression for bridge/capture analysis.
         const loopExisting = this.affinityMap.get(node);
-        const bestLoopAff = (loopIterAff && loopIterAff.confidence !== "fallback") ? loopIterAff :
-                            (loopBodyAff && loopBodyAff.confidence !== "fallback") ? loopBodyAff : undefined;
-        if (bestLoopAff && (!loopExisting || loopExisting.confidence === "fallback" ||
-            (loopExisting.confidence === "inferred" && loopExisting.evidence[0]?.type === "scope"))) {
+        const bestLoopAff = this.preferRuntimeAffinity(loopBodyAff, loopIterAff);
+        if (bestLoopAff && (!loopExisting || loopExisting.confidence === "fallback" || this.isWeakScopeAffinity(loopExisting))) {
           this.affinityMap.set(node, { ...bestLoopAff });
         }
         return this.getOrDefault(node);
@@ -125,9 +134,27 @@ export class Pass2Propagation {
         this.propagateExpr(node.value);
         return this.getOrDefault(node);
 
+      case "Break":
+      case "Continue": {
+        const controlExisting = this.affinityMap.get(node);
+        if (!controlExisting || controlExisting.confidence === "fallback" || this.isWeakScopeAffinity(controlExisting)) {
+          const scopeRuntime = this.scopeRuntimeStack.length > 0
+            ? this.scopeRuntimeStack[this.scopeRuntimeStack.length - 1]
+            : undefined;
+          if (scopeRuntime) {
+            this.affinityMap.set(node, {
+              runtime: scopeRuntime,
+              confidence: "inferred",
+              evidence: [{ type: "scope", detail: `control flow in ${scopeRuntime} block` }],
+            });
+          }
+        }
+        return this.getOrDefault(node);
+      }
+
       case "Try":
         this.propagateBlock(node.body);
-        for (const c of node.catches) this.propagateBlock(c.body);
+        for (const c of node.catches) this.propagateCatchClause(c);
         if (node.finallyBody) this.propagateBlock(node.finallyBody);
         return this.getOrDefault(node);
 
@@ -154,13 +181,22 @@ export class Pass2Propagation {
         }
         // Inherit value's runtime if declaration only has scope fallback
         const varExisting = this.affinityMap.get(node);
-        if (valAff && valAff.confidence !== "fallback" &&
+        if (this.isMeaningfulAffinity(valAff) &&
             (!varExisting || varExisting.confidence === "fallback" ||
-            (varExisting.confidence === "inferred" && varExisting.evidence[0]?.type === "scope"))) {
+            this.isWeakScopeAffinity(varExisting))) {
           this.affinityMap.set(node, { ...valAff });
+        } else if (!varExisting || varExisting.confidence === "fallback" || this.isWeakScopeAffinity(varExisting)) {
+          this.affinityMap.set(node, {
+            runtime: this.defaultRuntime,
+            confidence: "fallback",
+            evidence: [{ type: "fallback", detail: "neutral declaration literal" }],
+          });
         }
-        if (valAff && valAff.confidence !== "fallback") {
+        const varAff = this.getOrDefault(node);
+        if (this.isMeaningfulAffinity(valAff)) {
           this.defineDeclaredNames(node.names, valAff, node);
+        } else if (varAff.runtime === OmniRuntime.JavaScript) {
+          this.defineDeclaredNames(node.names, varAff, node);
         }
         return this.getOrDefault(node);
       }
@@ -170,13 +206,22 @@ export class Pass2Propagation {
         for (const v of node.values) constValAff = this.propagateExpr(v);
         // Inherit value's runtime if declaration only has scope fallback
         const constExisting = this.affinityMap.get(node);
-        if (constValAff && constValAff.confidence !== "fallback" &&
+        if (this.isMeaningfulAffinity(constValAff) &&
             (!constExisting || constExisting.confidence === "fallback" ||
-            (constExisting.confidence === "inferred" && constExisting.evidence[0]?.type === "scope"))) {
+            this.isWeakScopeAffinity(constExisting))) {
           this.affinityMap.set(node, { ...constValAff });
+        } else if (!constExisting || constExisting.confidence === "fallback" || this.isWeakScopeAffinity(constExisting)) {
+          this.affinityMap.set(node, {
+            runtime: this.defaultRuntime,
+            confidence: "fallback",
+            evidence: [{ type: "fallback", detail: "neutral declaration literal" }],
+          });
         }
-        if (constValAff && constValAff.confidence !== "fallback") {
+        const constAff = this.getOrDefault(node);
+        if (this.isMeaningfulAffinity(constValAff)) {
           this.defineDeclaredNames(node.names, constValAff, node);
+        } else if (constAff.runtime === OmniRuntime.JavaScript) {
+          this.defineDeclaredNames(node.names, constAff, node);
         }
         return this.getOrDefault(node);
       }
@@ -210,9 +255,18 @@ export class Pass2Propagation {
       }
 
       case "ClassDecl":
+        for (const decorator of node.decorators || []) {
+          this.propagateDecorator(decorator);
+        }
+        for (const member of node.members) {
+          for (const decorator of member.decorators || []) {
+            this.propagateDecorator(decorator);
+          }
+        }
         for (const member of node.members) {
           if (member.body) this.propagateBlock(member.body);
         }
+        this.propagateClassFromDecorators(node);
         return this.getOrDefault(node);
 
       case "ImplDecl":
@@ -249,6 +303,24 @@ export class Pass2Propagation {
 
       case "Assign":
         const rightAff = this.propagateExpr(expr.right);
+        if (expr.left.kind === "Identifier" &&
+            this.isNeutralAggregateExpr(expr.right) &&
+            !this.isMeaningfulAffinity(rightAff)) {
+          const neutralAff: RuntimeAffinity = {
+            runtime: this.defaultRuntime,
+            confidence: "fallback",
+            evidence: [{ type: "fallback", detail: "neutral declaration literal" }],
+          };
+          this.affinityMap.set(expr, { ...neutralAff });
+          this.affinityMap.set(expr.left, { ...neutralAff });
+          this.affinityMap.set(expr.right, { ...neutralAff });
+          this.symbolTable.define(expr.left.name, {
+            name: expr.left.name,
+            affinity: { ...neutralAff },
+            declNode: expr,
+          });
+          return neutralAff;
+        }
         if (expr.left.kind === "Identifier" && rightAff.confidence !== "fallback") {
           this.affinityMap.set(expr.left, { ...rightAff });
           this.symbolTable.define(expr.left.name, {
@@ -273,11 +345,45 @@ export class Pass2Propagation {
         return this.propagateLambda(expr);
 
       case "ArrayLiteral":
-        for (const el of expr.elements) this.propagateExpr(el);
+        {
+          let arrayAff: RuntimeAffinity | undefined;
+          for (const el of expr.elements) {
+            arrayAff = this.preferAggregateValueAffinity(arrayAff, this.propagateExpr(el));
+          }
+          if (this.isMeaningfulAffinity(arrayAff)) {
+            const existing = this.affinityMap.get(expr);
+            if (!existing || existing.confidence === "fallback" || this.isWeakScopeAffinity(existing)) {
+              this.affinityMap.set(expr, {
+                ...arrayAff,
+                evidence: [
+                  { type: "scope", detail: `array literal value: ${arrayAff.runtime}` },
+                  ...arrayAff.evidence,
+                ],
+              });
+            }
+          }
+        }
         return this.getOrDefault(expr);
 
       case "ObjectLiteral":
-        for (const prop of expr.properties) this.propagateExpr(prop.value);
+        {
+          let objectAff: RuntimeAffinity | undefined;
+          for (const prop of expr.properties) {
+            objectAff = this.preferAggregateValueAffinity(objectAff, this.propagateExpr(prop.value));
+          }
+          if (this.isMeaningfulAffinity(objectAff)) {
+            const existing = this.affinityMap.get(expr);
+            if (!existing || existing.confidence === "fallback" || this.isWeakScopeAffinity(existing)) {
+              this.affinityMap.set(expr, {
+                ...objectAff,
+                evidence: [
+                  { type: "scope", detail: `object literal value: ${objectAff.runtime}` },
+                  ...objectAff.evidence,
+                ],
+              });
+            }
+          }
+        }
         return this.getOrDefault(expr);
 
       case "Spread":
@@ -353,7 +459,7 @@ export class Pass2Propagation {
     for (const arg of node.args) {
       const argAff = this.affinityMap.get(arg);
       if (argAff) {
-        const hasSyntaxEvidence = arg.kind !== "Identifier" && argAff.evidence.some(e => e.type === "syntax");
+        const hasSyntaxEvidence = arg.kind !== "Identifier" && argAff.evidence[0]?.type === "syntax";
         if (hasSyntaxEvidence) {
           syntaxVotes.set(argAff.runtime, (syntaxVotes.get(argAff.runtime) || 0) + 1);
         }
@@ -376,6 +482,16 @@ export class Pass2Propagation {
     // If multiple syntax votes (collision): callee provenance breaks tie (already set above)
 
     const nodeAff = this.getOrDefault(node);
+    if (this.isMeaningfulAffinity(nodeAff)) {
+      for (const arg of node.args) {
+        if (arg.kind === "Identifier") {
+          this.refineNeutralAggregateIdentifier(arg, nodeAff.runtime, {
+            type: "scope",
+            detail: `neutral aggregate adopted by ${nodeAff.runtime} call argument`,
+          });
+        }
+      }
+    }
 
     // Check for async: if this is an await expression wrapping a call
     // (handled at the Unary level for 'await' operator)
@@ -438,6 +554,10 @@ export class Pass2Propagation {
     const qualifiedRuntime = lookupQualifiedGlobalAffinity(this.memberChainParts(node));
 
     const existing = this.affinityMap.get(node);
+    const refinedObjectAff = methodName && methodRuntime
+      ? this.refineNeutralAggregateOwnerFromMethod(node, methodName, methodRuntime)
+      : undefined;
+    const effectiveObjAff = refinedObjectAff || objAff;
 
     // Key rule: object provenance beats method name tables.
     // If `files` came from `os.listdir()` (Python), then `files.map()` should
@@ -446,25 +566,25 @@ export class Pass2Propagation {
     // The method table only wins when:
     //   1. The object has no opinion (fallback confidence), OR
     //   2. The method's runtime MATCHES the object's runtime (reinforcing, not contradicting)
-    const objIsKnown = objAff.confidence !== "fallback" &&
-      !(objAff.confidence === "inferred" && objAff.evidence[0]?.type === "scope" &&
-        objAff.evidence[0]?.detail.startsWith("scope majority"));
+    const objIsKnown = effectiveObjAff.confidence !== "fallback" &&
+      !(effectiveObjAff.confidence === "inferred" && effectiveObjAff.evidence[0]?.type === "scope" &&
+        effectiveObjAff.evidence[0]?.detail.startsWith("scope majority"));
 
-    if (objIsKnown) {
-      // Object has a real runtime — inherit from object
-      this.affinityMap.set(node, {
-        runtime: objAff.runtime,
-        confidence: objAff.confidence,
-        evidence: [
-          { type: "scope", detail: `inherited from object: ${objAff.runtime}` },
-          ...objAff.evidence,
-        ],
-      });
-    } else if (qualifiedRuntime && (!existing || existing.confidence !== "definite")) {
+    if (qualifiedRuntime && (!existing || existing.confidence !== "definite")) {
       this.affinityMap.set(node, {
         runtime: qualifiedRuntime,
         confidence: "inferred",
         evidence: [{ type: "builtin", detail: `qualified global: ${this.memberChainParts(node).join(".")}` }],
+      });
+    } else if (objIsKnown) {
+      // Object has a real runtime — inherit from object
+      this.affinityMap.set(node, {
+        runtime: effectiveObjAff.runtime,
+        confidence: effectiveObjAff.confidence,
+        evidence: [
+          { type: "scope", detail: `inherited from object: ${effectiveObjAff.runtime}` },
+          ...effectiveObjAff.evidence,
+        ],
       });
     } else if (methodRuntime && (!existing || existing.confidence !== "definite") && !objIsKnown) {
       // Object is unknown (fallback) — method name provides the best evidence
@@ -478,7 +598,7 @@ export class Pass2Propagation {
         ...aff,
         evidence: [
           ...aff.evidence,
-          ...objAff.evidence,
+          ...effectiveObjAff.evidence,
         ],
       });
     } else if (propertyAff && propertyAff.confidence !== "fallback" &&
@@ -491,6 +611,19 @@ export class Pass2Propagation {
     }
 
     return this.getOrDefault(node);
+  }
+
+  private refineNeutralAggregateOwnerFromMethod(
+    node: AST.Member,
+    methodName: string,
+    runtime: OmniRuntime,
+  ): RuntimeAffinity | undefined {
+    return node.object.kind === "Identifier"
+      ? this.refineNeutralAggregateIdentifier(node.object, runtime, {
+          type: "method",
+          detail: `neutral aggregate adopted by .${methodName}()`,
+        })
+      : undefined;
   }
 
   private propagateBinary(node: AST.Binary): RuntimeAffinity {
@@ -521,19 +654,22 @@ export class Pass2Propagation {
 
     // Async infection: await propagates async flag
     if (node.op === "await") {
-      const aff = this.getOrDefault(node);
-      aff.async = true;
-      this.affinityMap.set(node, aff);
-
-      // await makes the enclosing context async in JS
-      if (!this.affinityMap.has(node)) {
+      if (argAff.confidence !== "fallback") {
+        this.affinityMap.set(node, { ...argAff });
+      } else if (!this.affinityMap.has(node)) {
+        const scopeRuntime = this.scopeRuntimeStack.length > 0
+          ? this.scopeRuntimeStack[this.scopeRuntimeStack.length - 1]
+          : OmniRuntime.JavaScript;
         this.ensureAffinity(node, {
-          runtime: OmniRuntime.JavaScript,
+          runtime: scopeRuntime,
           confidence: "inferred",
-          evidence: [{ type: "node_type", detail: "await expression" }],
+          evidence: [{ type: "node_type", detail: `await expression in ${scopeRuntime} scope` }],
           async: true,
         });
       }
+      const aff = this.getOrDefault(node);
+      aff.async = true;
+      this.affinityMap.set(node, aff);
     }
 
     // Channel receive <-ch inherits Go affinity (set in Pass 1)
@@ -602,6 +738,10 @@ export class Pass2Propagation {
   }
 
   private propagateFuncDecl(node: AST.FuncDecl): RuntimeAffinity {
+    for (const decorator of node.decorators || []) {
+      this.propagateDecorator(decorator);
+    }
+
     // Push the function's declared runtime so body statements inherit it
     const funcAff = this.affinityMap.get(node);
     if (funcAff && funcAff.confidence !== "fallback") {
@@ -629,12 +769,81 @@ export class Pass2Propagation {
 
     for (const stmt of block.statements) {
       const stmtAff = this.propagateNode(stmt);
-      if (!blockAffinity) {
+      if (!blockAffinity || this.isWeakScopeAffinity(blockAffinity)) {
         blockAffinity = stmtAff;
       }
     }
 
     return blockAffinity || this.getOrDefault(block);
+  }
+
+  private propagateDecorator(decorator: AST.Decorator): RuntimeAffinity | undefined {
+    if (decorator.expression) {
+      return this.propagateExpr(decorator.expression);
+    }
+    const nameAff = this.propagateExpr(decorator.name);
+    for (const arg of decorator.args || []) this.propagateExpr(arg);
+    return nameAff;
+  }
+
+  private propagateClassFromDecorators(node: AST.ClassDecl): void {
+    const existing = this.affinityMap.get(node);
+    if (existing && existing.confidence !== "fallback") return;
+
+    for (const decorator of node.decorators || []) {
+      const aff = decorator.expression
+        ? this.affinityMap.get(decorator.expression)
+        : this.affinityMap.get(decorator.name);
+      if (aff && aff.confidence !== "fallback") {
+        this.affinityMap.set(node, {
+          runtime: aff.runtime,
+          confidence: aff.confidence,
+          evidence: [{ type: "scope", detail: `class decorator: ${aff.runtime}` }, ...aff.evidence],
+        });
+        return;
+      }
+    }
+    for (const member of node.members) {
+      for (const decorator of member.decorators || []) {
+        const aff = decorator.expression
+          ? this.affinityMap.get(decorator.expression)
+          : this.affinityMap.get(decorator.name);
+        if (aff && aff.confidence !== "fallback") {
+          this.affinityMap.set(node, {
+            runtime: aff.runtime,
+            confidence: aff.confidence,
+            evidence: [{ type: "scope", detail: `member decorator: ${aff.runtime}` }, ...aff.evidence],
+          });
+          return;
+        }
+      }
+    }
+  }
+
+  private propagateCatchClause(clause: AST.CatchClause): RuntimeAffinity {
+    const catchAff = this.affinityMap.get(clause.body);
+    const scopedCatch = catchAff && catchAff.confidence !== "fallback" ? catchAff : undefined;
+
+    if (scopedCatch) {
+      this.scopeRuntimeStack.push(scopedCatch.runtime);
+    }
+    this.symbolTable.pushScope();
+
+    if (clause.param && scopedCatch) {
+      this.ensureAffinity(clause.param, scopedCatch);
+      this.symbolTable.define(clause.param.name, {
+        name: clause.param.name,
+        affinity: { ...scopedCatch },
+      });
+    }
+
+    const bodyAff = this.propagateBlock(clause.body);
+    this.symbolTable.popScope();
+    if (scopedCatch) {
+      this.scopeRuntimeStack.pop();
+    }
+
+    return bodyAff;
   }
 
   // --- Helpers ---
@@ -709,6 +918,140 @@ export class Pass2Propagation {
     if (!this.affinityMap.has(node)) {
       this.affinityMap.set(node, { ...affinity });
     }
+  }
+
+  private preferRuntimeAffinity(
+    primary: RuntimeAffinity | undefined,
+    secondary: RuntimeAffinity | undefined,
+  ): RuntimeAffinity | undefined {
+    if (primary && primary.confidence !== "fallback" && !this.isWeakScopeAffinity(primary)) {
+      return primary;
+    }
+    if (secondary && secondary.confidence !== "fallback" && !this.isWeakScopeAffinity(secondary)) {
+      return secondary;
+    }
+    return primary || secondary;
+  }
+
+  private preferAggregateValueAffinity(
+    current: RuntimeAffinity | undefined,
+    candidate: RuntimeAffinity | undefined,
+  ): RuntimeAffinity | undefined {
+    if (!this.isMeaningfulAffinity(candidate)) {
+      return current;
+    }
+    if (!this.isMeaningfulAffinity(current)) {
+      return candidate;
+    }
+
+    const candidateDirect = this.hasDirectRuntimeEvidence(candidate);
+    const currentDirect = this.hasDirectRuntimeEvidence(current);
+    if (candidateDirect && !currentDirect) {
+      return candidate;
+    }
+    if (candidateDirect === currentDirect && candidate.confidence === "definite" && current.confidence !== "definite") {
+      return candidate;
+    }
+    return current;
+  }
+
+  private hasDirectRuntimeEvidence(affinity: RuntimeAffinity): boolean {
+    const first = affinity.evidence[0];
+    return first?.type === "syntax" || first?.type === "builtin" || first?.type === "keyword";
+  }
+
+  private isWeakScopeAffinity(affinity: RuntimeAffinity | undefined): boolean {
+    return !!affinity &&
+      affinity.confidence === "inferred" &&
+      affinity.evidence[0]?.type === "scope" &&
+      affinity.evidence[0]?.detail.startsWith("scope majority");
+  }
+
+  private isMeaningfulAffinity(affinity: RuntimeAffinity | undefined): affinity is RuntimeAffinity {
+    return !!affinity && affinity.confidence !== "fallback" && !this.isWeakScopeAffinity(affinity);
+  }
+
+  private isNeutralDeclarationAffinity(affinity: RuntimeAffinity | undefined): boolean {
+    return !!affinity &&
+      affinity.confidence === "fallback" &&
+      affinity.evidence[0]?.type === "fallback" &&
+      affinity.evidence[0]?.detail === "neutral declaration literal";
+  }
+
+  private refineNeutralAggregateIdentifier(
+    identifier: AST.Identifier,
+    runtime: OmniRuntime,
+    evidence: AffinityEvidence,
+  ): RuntimeAffinity | undefined {
+    const symbol = this.symbolTable.lookup(identifier.name);
+    if (!symbol?.declNode || !this.isNeutralAggregateBinding(symbol.declNode, identifier.name)) {
+      return undefined;
+    }
+
+    if (!this.isNeutralDeclarationAffinity(symbol.affinity)) {
+      return undefined;
+    }
+
+    const affinity: RuntimeAffinity = {
+      runtime,
+      confidence: "inferred",
+      evidence: [evidence],
+    };
+
+    this.affinityMap.set(symbol.declNode, { ...affinity });
+    const value = this.singleDeclarationValue(symbol.declNode);
+    if (value) {
+      this.affinityMap.set(value, {
+        ...affinity,
+        evidence: [
+          { type: "scope", detail: `neutral aggregate declaration adopted by ${runtime}` },
+          ...affinity.evidence,
+        ],
+      });
+    }
+    this.affinityMap.set(identifier, { ...affinity });
+    this.symbolTable.update(identifier.name, {
+      ...symbol,
+      affinity: { ...affinity },
+    });
+
+    return affinity;
+  }
+
+  private isNeutralAggregateDeclaration(
+    node: AST.Decl | AST.Stmt | AST.Expr,
+  ): node is AST.VarDecl | AST.ConstDecl {
+    if (node.kind !== "VarDecl" && node.kind !== "ConstDecl") {
+      return false;
+    }
+    if (node.names.length !== 1 || !node.values || node.values.length !== 1) {
+      return false;
+    }
+    const value = node.values[0];
+    return this.isNeutralAggregateExpr(value);
+  }
+
+  private isNeutralAggregateBinding(
+    node: AST.Decl | AST.Stmt | AST.Expr,
+    name: string,
+  ): node is AST.VarDecl | AST.ConstDecl | AST.Assign {
+    if (node.kind === "Assign") {
+      return node.left.kind === "Identifier" &&
+        node.left.name === name &&
+        this.isNeutralAggregateExpr(node.right);
+    }
+    return this.isNeutralAggregateDeclaration(node) && node.names[0].name === name;
+  }
+
+  private singleDeclarationValue(node: AST.VarDecl | AST.ConstDecl | AST.Assign): AST.Expr | undefined {
+    if (node.kind === "Assign") {
+      return node.right;
+    }
+    return node.values && node.values.length === 1 ? node.values[0] : undefined;
+  }
+
+  private isNeutralAggregateExpr(expr: AST.Expr): boolean {
+    return expr.kind === "ArrayLiteral" || expr.kind === "ObjectLiteral";
   }
 
   private getOrDefault(node: AST.Decl | AST.Stmt | AST.Expr): RuntimeAffinity {

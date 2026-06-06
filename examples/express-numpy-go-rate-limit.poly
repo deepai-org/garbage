@@ -1,4 +1,4 @@
-import express
+import express from "express"
 import numpy
 
 func allow_request(route, bucket) {

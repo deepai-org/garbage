@@ -32,6 +32,14 @@ describe("unchanged source compatibility corpus", () => {
 
     const rankUser = manifest.ops.find((op: any) => op.op === "func_def" && op.name === "rank_user") as any;
     expect(rankUser?.bodyRuntime).toBe("python");
+
+    const sample = manifest.ops.find((op: any) => op.op === "eval" && op.bind === "sample") as any;
+    expect(sample?.runtime).toBe("python");
+    expect(sample?.code).toContain('"id": "u-42"');
+
+    const result = manifest.ops.find((op: any) => op.op === "eval" && op.bind === "result") as any;
+    expect(result).toMatchObject({ runtime: "python", code: "rank_user(sample)" });
+    expect(result?.captures ?? {}).not.toHaveProperty("sample");
   });
 
   test("runs TypeScript modules without executing type-only declarations", () => {

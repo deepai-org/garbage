@@ -892,7 +892,10 @@ export function parseTry(host: ControlFlowHost, ): AST.Try {
         // Java-style: catch (Type variable) — type comes first
         // JS-style: catch (variable) — no type, or catch (variable: Type)
         const afterFirst = host.peekAt(1);
-        if (afterFirst && afterFirst.type === TokenType.Identifier && host.peekAt(2)?.value === ")") {
+        if (looksLikeJavaCatchParameter(host)) {
+          type = host.parseType();
+          param = host.parseIdentifier();
+        } else if (afterFirst && afterFirst.type === TokenType.Identifier && host.peekAt(2)?.value === ")") {
           // Java: catch (ExceptionType varName)
           type = host.parseType();
           param = host.parseIdentifier();
@@ -956,6 +959,42 @@ export function parseTry(host: ControlFlowHost, ): AST.Try {
     finallyBody,
     span: host.createSpan(start, host.current - 1)
   };
+}
+
+function looksLikeJavaCatchParameter(host: ControlFlowHost): boolean {
+  let pos = host.current;
+  let depth = 0;
+  const clauseTokens: Token[] = [];
+
+  while (pos < host.tokens.length) {
+    const token = host.tokens[pos];
+    if (token.value === "(") {
+      depth++;
+    } else if (token.value === ")") {
+      if (depth === 0) break;
+      depth--;
+    }
+    if (depth === 0) {
+      clauseTokens.push(token);
+    }
+    pos++;
+  }
+
+  if (clauseTokens.length < 2) return false;
+  if (clauseTokens.some(token => token.value === ":" || token.value === ",")) return false;
+
+  const last = clauseTokens[clauseTokens.length - 1];
+  if (last.type !== TokenType.Identifier && last.type !== TokenType.Keyword) return false;
+
+  const typeTokens = clauseTokens.slice(0, -1);
+  if (typeTokens.length === 1 && typeTokens[0].type === TokenType.Identifier) {
+    return /^[A-Z_$]/.test(typeTokens[0].value);
+  }
+
+  return typeTokens.some(token =>
+    token.value === "." || token.value === "|" || token.value === "<" || token.value === "[" ||
+    (token.type === TokenType.Identifier && /^[A-Z_$]/.test(token.value))
+  );
 }
 
 export function parseUsing(host: ControlFlowHost, ): AST.Using {
