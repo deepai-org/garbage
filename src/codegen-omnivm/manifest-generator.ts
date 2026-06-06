@@ -1485,13 +1485,22 @@ export class ManifestCodeGenerator {
     if (!type) return;
     if (this.isTableType(type)) {
       this.typedBindingKinds.set(name, "table");
-      this.typedBindingRuntimeHints.set(name, this.tableRuntimeHint(type));
+      const runtimeHint = this.tableRuntimeHint(type);
+      if (runtimeHint) {
+        this.typedBindingRuntimeHints.set(name, runtimeHint);
+      }
     } else if (this.isStreamLikeType(type)) {
       this.typedBindingKinds.set(name, "stream");
-      this.typedBindingRuntimeHints.set(name, this.streamRuntimeHint(type));
+      const runtimeHint = this.streamRuntimeHint(type);
+      if (runtimeHint) {
+        this.typedBindingRuntimeHints.set(name, runtimeHint);
+      }
     } else if (this.isResourceLikeType(type)) {
       this.typedBindingKinds.set(name, "resource");
-      this.typedBindingRuntimeHints.set(name, this.resourceRuntimeHint(type));
+      const runtimeHint = this.resourceRuntimeHint(type);
+      if (runtimeHint) {
+        this.typedBindingRuntimeHints.set(name, runtimeHint);
+      }
       const disposer = this.resourceDisposerHint(type);
       if (disposer) {
         this.resourceDisposers.set(name, disposer);
@@ -1499,13 +1508,11 @@ export class ManifestCodeGenerator {
     }
   }
 
-  private tableRuntimeHint(type: AST.TypeNode): OmniRuntime {
+  private tableRuntimeHint(type: AST.TypeNode): OmniRuntime | undefined {
     const name = this.typeName(type).toLowerCase();
     if (/(bytebuffer|directbytebuffer|intbuffer|floatbuffer|doublebuffer|longbuffer|shortbuffer|charbuffer)/.test(name)) return OmniRuntime.Java;
     if (/(arraybuffer|dataview|typedarray|uint8array|uint8clampedarray|uint16array|uint32array|int8array|int16array|int32array|float32array|float64array|bigint64array|biguint64array)/.test(name)) return OmniRuntime.JavaScript;
-    if (/(dataframe|recordbatch|ndarray|tensor|dlpack)/.test(name)) return OmniRuntime.Python;
-    if (/(arrowtable|datatable)/.test(name) || this.matchesTypeName(name, ["table"])) return OmniRuntime.Python;
-    return this.defaultRuntime;
+    return undefined;
   }
 
   private isTableType(type: AST.TypeNode): boolean {
@@ -1514,9 +1521,9 @@ export class ManifestCodeGenerator {
       || this.matchesTypeName(name, ["table"]);
   }
 
-  private streamRuntimeHint(type: AST.TypeNode): OmniRuntime {
+  private streamRuntimeHint(type: AST.TypeNode): OmniRuntime | undefined {
     const name = this.typeName(type).toLowerCase();
-    return this.streamRuntimeForTypeName(name) || this.defaultRuntime;
+    return this.streamRuntimeForTypeName(name);
   }
 
   private isStreamLikeType(type: AST.TypeNode): boolean {
@@ -1535,21 +1542,12 @@ export class ManifestCodeGenerator {
       "readablestream", "nodereadable", "readable", "webstream",
       "stream.readable", "node.stream.readable",
     ])) return OmniRuntime.JavaScript;
-    if (this.matchesStreamType(name, [
-      "queryset", "asyncresult", "scalarresult", "result", "cursorresult",
-      "mappingresult", "chunkediteratorresult", "query",
-      "asyncscalarresult", "asyncmappingresult",
-      "cursor", "asynccursor", "dbcursor",
-      "databasecursor", "servercursor",
-      "paginator", "pager", "pageiterator", "scaniterator", "scaniter",
-      "iterator", "httpiterator", "grpciterator", "commandcursor", "resourcecollection",
-    ])) return OmniRuntime.Python;
     return undefined;
   }
 
-  private resourceRuntimeHint(type: AST.TypeNode): OmniRuntime {
+  private resourceRuntimeHint(type: AST.TypeNode): OmniRuntime | undefined {
     const name = this.typeName(type).toLowerCase();
-    return this.resourceRuntimeForTypeName(name) || this.defaultRuntime;
+    return this.resourceRuntimeForTypeName(name);
   }
 
   private isResourceLikeType(type: AST.TypeNode): boolean {

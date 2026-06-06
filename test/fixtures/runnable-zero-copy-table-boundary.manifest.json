@@ -3,6 +3,13 @@
   "defaultRuntime": "javascript",
   "ops": [
     {
+      "op": "import",
+      "path": "numpy",
+      "runtime": "python",
+      "bind": "np",
+      "sourceArtifact": "import numpy as np"
+    },
+    {
       "op": "table",
       "action": "export",
       "runtime": "python",
@@ -12,7 +19,7 @@
       "release": "producer",
       "value": {
         "kind": "literal",
-        "value": "arrow:orders"
+        "value": "np.array([1, 2, 3])"
       }
     },
     {
@@ -36,15 +43,22 @@
       }
     }
   ],
+  "typeSummary": {
+    "crossings": 1,
+    "safe": 1,
+    "coerce": 0,
+    "check": 0,
+    "errors": 0
+  },
   "diagnostics": [
     {
       "severity": "info",
       "code": "runtime-boundary-capture",
-      "message": "Inserted capture boundary for 'orders' from python to javascript. Source binding: python (inferred; scope: manifest binding recorded during lowering). Target expression: javascript (inferred; scope: inherited from callee: javascript; scope: inherited from object: javascript; builtin: global: console).",
+      "message": "Inserted capture boundary for 'orders' from python to javascript. Source binding: python (definite; scope: inherited from callee: python; scope: inherited from object: python; syntax: Python import syntax). Target expression: javascript (inferred; scope: inherited from callee: javascript; scope: inherited from object: javascript; builtin: global: console).",
       "span": {
-        "start": 128,
-        "end": 175,
-        "line": 4,
+        "start": 227,
+        "end": 274,
+        "line": 7,
         "column": 1
       }
     }

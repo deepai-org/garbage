@@ -2461,7 +2461,7 @@ console.log(sessionInfo, connectionOptions, transactionRecord)
 
   test('typed table declarations lower to zero-copy table manifest ops automatically', () => {
     const code = `
-const orders: PandasDataFrame = "arrow-buffer"
+const orders: Table = "arrow-buffer"
 console.log(orders)
 `;
     const m = parseAndManifest(code);
@@ -2469,21 +2469,22 @@ console.log(orders)
 
     expect(tables.map(op => op.action)).toEqual(["export"]);
     expect(tables[0]).toMatchObject({
-      runtime: "python",
+      runtime: "javascript",
       bind: "orders",
       format: "arrow_c_data",
       ownership: "borrowed",
       release: "producer",
       value: { kind: "literal", value: "arrow-buffer" },
     });
-    expect(m.bridges).toEqual(expect.arrayContaining([
-      expect.objectContaining({ binding: "orders", op: "share_memory" }),
+    expect(m.bridges).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ binding: "orders", op: "share_memory", from: "python" }),
     ]));
   });
 
-  test('typed native-memory declarations infer table runtimes from ecosystem types', () => {
+  test('typed native-memory declarations infer table runtimes from syntax or platform types', () => {
     const code = `
-const features: JaxTensor = "jax-buffer"
+import numpy as np
+const features: Tensor = np.arange(4)
 const payload: Uint8Array = "js-buffer"
 const javaBytes: DirectByteBuffer = "java-buffer"
 console.log(features, payload, javaBytes)
@@ -2526,7 +2527,8 @@ console.log(Array.from(chunks))
 
   test('typed generic lazy declarations infer stream runtime hints', () => {
     const code = `
-const rows: QuerySet = load_rows()
+import itertools
+const rows: Stream<string> = itertools.count()
 const events: Publisher = load_events()
 const upload: ReadableStream = load_upload()
 console.log(Array.from(rows), Array.from(events), Array.from(upload))
@@ -2548,35 +2550,31 @@ console.log(Array.from(rows), Array.from(events), Array.from(upload))
     expect(m.diagnostics?.some(d => d.code === "non-stream-materialization")).not.toBe(true);
   });
 
-  test('qualified generic stream type annotations infer runtime hints by shape name', () => {
+  test('qualified generic stream type annotations infer runtime hints from platform names', () => {
     const code = `
 const rows: app.data.QuerySet = load_rows()
-const result: app.data.Result = load_result()
-const asyncResult: app.data.AsyncResult = load_async_result()
 const reader: java.io.Reader = load_reader()
 const readable: node.stream.Readable = load_readable()
-console.log(Array.from(rows), Array.from(result), Array.from(asyncResult), Array.from(reader), Array.from(readable))
+console.log(Array.from(rows), Array.from(reader), Array.from(readable))
 `;
     const m = parseAndManifest(code);
     const evals = findAllOps(m, "eval") as any[];
 
-    expect(evals.find(op => op.bind === "rows")).toMatchObject({ runtime: "python" });
-    expect(evals.find(op => op.bind === "result")).toMatchObject({ runtime: "python" });
-    expect(evals.find(op => op.bind === "asyncResult")).toMatchObject({ runtime: "python" });
+    expect(evals.find(op => op.bind === "rows")).toMatchObject({ runtime: "javascript" });
     expect(evals.find(op => op.bind === "reader")).toMatchObject({ runtime: "java" });
     expect(evals.find(op => op.bind === "readable")).toMatchObject({ runtime: "javascript" });
     expect(m.bridges).toEqual(expect.arrayContaining([
-      expect.objectContaining({ binding: "result", op: "stream_proxy", from: "python", to: "javascript" }),
       expect.objectContaining({ binding: "reader", op: "stream_proxy", from: "java", to: "javascript" }),
     ]));
     expect(m.bridges).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ binding: "rows", op: "stream_proxy" }),
       expect.objectContaining({ binding: "readable", op: "stream_proxy" }),
     ]));
     expect(m.diagnostics?.some(d => d.code === "unknown-stream-materialization")).not.toBe(true);
     expect(m.diagnostics?.some(d => d.code === "non-stream-materialization")).not.toBe(true);
   });
 
-  test('qualified framework stream annotations only use generic final-segment names', () => {
+  test('qualified framework stream annotations do not pick runtimes by package names', () => {
     const code = `
 const query: sqlalchemy.orm.Query = load_query()
 const dynamicRelation: sqlalchemy.orm.dynamic.AppenderQuery = load_dynamic_relation()
@@ -2590,19 +2588,17 @@ console.log(query, dynamicRelation, relationshipRows, related, asyncScalars, asy
     const m = parseAndManifest(code);
     const evals = findAllOps(m, "eval") as any[];
 
-    expect(evals.find(op => op.bind === "query")).toMatchObject({ runtime: "python" });
-    expect(evals.find(op => op.bind === "asyncScalars")).toMatchObject({ runtime: "python" });
-    expect(evals.find(op => op.bind === "asyncMappings")).toMatchObject({ runtime: "python" });
+    expect(evals.find(op => op.bind === "query")).toMatchObject({ runtime: "javascript" });
+    expect(evals.find(op => op.bind === "asyncScalars")).toMatchObject({ runtime: "javascript" });
+    expect(evals.find(op => op.bind === "asyncMappings")).toMatchObject({ runtime: "javascript" });
     expect(evals.find(op => op.bind === "dynamicRelation")).toMatchObject({ runtime: "javascript" });
     expect(evals.find(op => op.bind === "relationshipRows")).toMatchObject({ runtime: "javascript" });
     expect(evals.find(op => op.bind === "related")).toMatchObject({ runtime: "javascript" });
     expect(evals.find(op => op.bind === "cursorFactory")).toMatchObject({ runtime: "javascript" });
-    expect(m.bridges).toEqual(expect.arrayContaining([
-      expect.objectContaining({ binding: "query", op: "stream_proxy", from: "python", to: "javascript" }),
-      expect.objectContaining({ binding: "asyncScalars", op: "stream_proxy", from: "python", to: "javascript" }),
-      expect.objectContaining({ binding: "asyncMappings", op: "stream_proxy", from: "python", to: "javascript" }),
-    ]));
     expect(m.bridges).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ binding: "query", op: "stream_proxy" }),
+      expect.objectContaining({ binding: "asyncScalars", op: "stream_proxy" }),
+      expect.objectContaining({ binding: "asyncMappings", op: "stream_proxy" }),
       expect.objectContaining({ binding: "dynamicRelation", op: "stream_proxy" }),
       expect.objectContaining({ binding: "relationshipRows", op: "stream_proxy" }),
       expect.objectContaining({ binding: "related", op: "stream_proxy" }),
@@ -2612,7 +2608,7 @@ console.log(query, dynamicRelation, relationshipRows, related, asyncScalars, asy
     expect(m.diagnostics?.some(d => d.code === "non-stream-materialization")).not.toBe(true);
   });
 
-  test('qualified generic pager and cursor type annotations infer Python stream hints', () => {
+  test('qualified generic pager and cursor type annotations avoid Python stream guesses', () => {
     const code = `
 const filePages: app.pagination.PageIterator = list_file_pages()
 const rows: app.collections.ResourceCollection = scan_rows()
@@ -2623,15 +2619,15 @@ console.log(Array.from(filePages), Array.from(rows), Array.from(httpPages), Arra
     const m = parseAndManifest(code);
     const evals = findAllOps(m, "eval") as any[];
 
-    expect(evals.find(op => op.bind === "filePages")).toMatchObject({ runtime: "python" });
-    expect(evals.find(op => op.bind === "rows")).toMatchObject({ runtime: "python" });
-    expect(evals.find(op => op.bind === "httpPages")).toMatchObject({ runtime: "python" });
-    expect(evals.find(op => op.bind === "commandCursor")).toMatchObject({ runtime: "python" });
-    expect(m.bridges).toEqual(expect.arrayContaining([
-      expect.objectContaining({ binding: "filePages", op: "stream_proxy", from: "python", to: "javascript" }),
-      expect.objectContaining({ binding: "rows", op: "stream_proxy", from: "python", to: "javascript" }),
-      expect.objectContaining({ binding: "httpPages", op: "stream_proxy", from: "python", to: "javascript" }),
-      expect.objectContaining({ binding: "commandCursor", op: "stream_proxy", from: "python", to: "javascript" }),
+    expect(evals.find(op => op.bind === "filePages")).toMatchObject({ runtime: "javascript" });
+    expect(evals.find(op => op.bind === "rows")).toMatchObject({ runtime: "javascript" });
+    expect(evals.find(op => op.bind === "httpPages")).toMatchObject({ runtime: "javascript" });
+    expect(evals.find(op => op.bind === "commandCursor")).toMatchObject({ runtime: "javascript" });
+    expect(m.bridges).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ binding: "filePages", op: "stream_proxy" }),
+      expect.objectContaining({ binding: "rows", op: "stream_proxy" }),
+      expect.objectContaining({ binding: "httpPages", op: "stream_proxy" }),
+      expect.objectContaining({ binding: "commandCursor", op: "stream_proxy" }),
     ]));
     expect(m.diagnostics?.some(d => d.code === "unknown-stream-materialization")).not.toBe(true);
     expect(m.diagnostics?.some(d => d.code === "non-stream-materialization")).not.toBe(true);

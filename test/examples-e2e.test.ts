@@ -585,7 +585,7 @@ describe("Example files: end-to-end pipeline", () => {
         format: "arrow_c_data",
         ownership: "borrowed",
       });
-      expect(tables[0].value).toEqual({ kind: "literal", value: "arrow:orders" });
+      expect(tables[0].value).toEqual({ kind: "literal", value: "np.array([1, 2, 3])" });
       expect(manifest.bridges).toEqual(expect.arrayContaining([
         expect.objectContaining({ binding: "orders", op: "share_memory" }),
       ]));

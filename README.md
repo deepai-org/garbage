@@ -173,10 +173,13 @@ For tabular data, the intended long-term boundary is a zero-copy Arrow handle,
 not JSON rows. Garbage should eventually lower DataFrame/Arrow-friendly library
 values to an OmniVM `table` handle using the Arrow C Data Interface in-process,
 with Arrow IPC or an explicit copy only when pointer sharing is not available.
-The current contract is type/library-driven, not a source-level helper:
+The current contract is syntax/protocol-driven, not a source-level helper or
+package-name runtime guess:
 
 ```polyscript
-const orders: PandasDataFrame = load_orders()
+import numpy as np
+
+const orders: Table = np.array([1, 2, 3])
 console.log(orders)  // captures an Arrow/table proxy, not JSON rows
 ```
 
