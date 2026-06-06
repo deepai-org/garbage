@@ -315,10 +315,9 @@ export const BUILTIN_AFFINITY: Record<string, OmniRuntime> = {
 /**
  * Package/global roots that are meaningful even when they are not imported.
  *
- * Java examples often use fully-qualified class names such as
- * `java.util.List`, `org.jsoup.Jsoup`, or `new com.google.gson.Gson()`.
- * Those roots should carry Java affinity before member propagation has a
- * chance to fall back to the default runtime.
+ * Java code often uses fully-qualified class names such as `java.*`, `org.*`,
+ * or `com.*`. Those roots should carry Java affinity before member propagation
+ * has a chance to fall back to the default runtime.
  */
 export const GLOBAL_AFFINITY: Record<string, OmniRuntime> = {
   // JavaScript constructor/object roots and host globals.
