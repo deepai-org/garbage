@@ -3576,9 +3576,21 @@ export class ManifestCodeGenerator {
       if (node.iterable) {
         loopOp.iterable = this.foreachIterableValue(node.iterable);
       }
+      const iterationMode = this.foreachIterationMode(node);
+      if (iterationMode) {
+        loopOp.iterationMode = iterationMode;
+      }
     }
 
     return loopOp;
+  }
+
+  private foreachIterationMode(node: AST.Loop): "values" | "keys" | "auto" | undefined {
+    if (node.iterationKind !== "in") {
+      return undefined;
+    }
+    const raw = this.source ? this.source.slice(node.span.start, node.span.end).trim() : nodeToSourceCode(node, this.source).trim();
+    return /^for\s*\(/.test(raw) ? "keys" : "auto";
   }
 
   private foreachIterableValue(expr: AST.Expr): ManifestValue {

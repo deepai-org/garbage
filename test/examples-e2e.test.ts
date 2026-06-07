@@ -345,6 +345,10 @@ describe("Example files: end-to-end pipeline", () => {
         runtimes: ["python", "javascript"],
       },
       {
+        file: "javascript-python-dict-enumeration-docs.poly",
+        runtimes: ["javascript", "python"],
+      },
+      {
         file: "python-dataframe-js-table-docs.poly",
         runtimes: ["python", "javascript"],
       },

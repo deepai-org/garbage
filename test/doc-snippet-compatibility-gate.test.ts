@@ -339,6 +339,70 @@ loop_names.sort()
     expect(jsCodes).toContain("loop_names.push(key)");
   });
 
+  test("keeps Python dict-style iteration natural over JavaScript object proxies", () => {
+    const { manifest } = compileSnippet(`
+const payload = Object.freeze({
+  "items": ["alpha", "beta"],
+  "keys": ["id", "name"],
+  "then": "field-then",
+  "get": "field-get",
+  "close": "field-close",
+  "length": 2,
+  "count": 7,
+  "rows": [
+    {"items": "first", "count": 1},
+    {"items": "second", "count": 2}
+  ]
+})
+
+names = []
+for key in payload:
+  names.append(key)
+names = sorted(names)
+
+selected_parts = []
+for key in ["then", "get", "close", "length", "count"]:
+  selected_parts.append(f"{key}={payload[key]}")
+
+rows = payload.rows
+row_labels = []
+for row in rows:
+  row_labels.append(f"{row.items}:{row.count}")
+`);
+
+    const text = manifestText(manifest);
+    expect(text).not.toMatch(bridgeHelperPattern);
+
+    const ops = allOps(manifest);
+    const jsProducer = ops.find((op: any) =>
+      op.runtime === "javascript" && String(op.code ?? op.source ?? "").includes("Object.freeze")
+    );
+    expect(jsProducer).toBeDefined();
+
+    const loops = ops.filter((op: any) => op.op === "loop" && op.mode === "foreach");
+    expect(loops).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        variable: "key",
+        iterable: expect.objectContaining({ kind: "ref", name: "payload" }),
+        iterationMode: "auto",
+      }),
+      expect.objectContaining({
+        variable: "row",
+        iterable: expect.objectContaining({ kind: "ref", name: "rows" }),
+        iterationMode: "auto",
+      }),
+    ]));
+
+    const pyCodes = ops
+      .filter((op: any) => op.runtime === "python")
+      .map((op: any) => String(op.code ?? op.source ?? ""))
+      .join("\n");
+    expect(pyCodes).toContain("names.append(key)");
+    expect(pyCodes).toContain("sorted(names)");
+    expect(pyCodes).toContain('selected_parts.append(f"{key}={payload[key]}")');
+    expect(pyCodes).toContain('row_labels.append(f"{row.items}:{row.count}")');
+  });
+
   test("keeps lazy iterable snippets lazy and helper-free across a runtime boundary", () => {
     const { manifest } = compileSnippet(`
 import itertools

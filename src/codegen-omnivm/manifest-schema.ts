@@ -161,6 +161,7 @@ export const DISPATCH_MANIFEST_SCHEMA = {
         condition: {},
         variable: { type: "string" },
         iterable: {},
+        iterationMode: { enum: ["values", "keys", "auto"] },
         body: { type: "array" },
       },
       additionalProperties: false,

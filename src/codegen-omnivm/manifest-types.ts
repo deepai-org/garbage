@@ -271,6 +271,7 @@ export interface LoopOp {
   test?: ConditionExpr;
   variable?: string;
   iterable?: ManifestValue;
+  iterationMode?: "values" | "keys" | "auto";
   body: ManifestOp[];
 }
 
