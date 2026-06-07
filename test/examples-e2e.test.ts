@@ -357,6 +357,10 @@ describe("Example files: end-to-end pipeline", () => {
         runtimes: ["javascript", "python"],
       },
       {
+        file: "javascript-generator-python-islice-docs.poly",
+        runtimes: ["javascript", "python"],
+      },
+      {
         file: "javascript-ruby-mapping-methods-docs.poly",
         runtimes: ["javascript", "ruby"],
       },

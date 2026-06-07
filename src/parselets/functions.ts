@@ -53,7 +53,11 @@ export function parseFuncDecl(
   decorators?: AST.Expr[],
   decoratorStart?: number
 ): AST.FuncDecl {
-  const keywordStart = host.current - 1;
+  const previousIndex = host.current - 1;
+  const keywordStart = host.tokens[previousIndex]?.value === "*" &&
+    host.tokens[previousIndex - 1]?.value === "function"
+    ? previousIndex - 1
+    : previousIndex;
   const start = decoratorStart ?? keywordStart;
 
   const declKeywordValue = host.tokens[keywordStart]?.value;

@@ -709,6 +709,57 @@ for (const row of row_stream()) {
     )).toBe(false);
   });
 
+  test("keeps Python itertools partial consumption over JavaScript generators natural and cancellable", () => {
+    const { manifest } = compileSnippet(`
+import itertools
+
+closed = []
+produced = []
+
+function* js_rows(label) {
+  try {
+    for (const value of [0, 1, 2, 3]) {
+      produced.push(value)
+      yield {"items": value, "close": label, "count": value + 1}
+    }
+  } finally {
+    closed.push(label)
+  }
+}
+
+first_rows = list(itertools.islice(js_rows("slice"), 2))
+labels = [f"{row.items}:{row.close}:{row.count}" for row in first_rows]
+`);
+
+    const text = manifestText(manifest);
+    expect(text).not.toMatch(bridgeHelperPattern);
+
+    const jsProducer = allOps(manifest).find(
+      (op: any) => op.op === "func_def" &&
+        op.generator === true &&
+        op.name === "js_rows" &&
+        String(op.sourceArtifact?.functionSource ?? "").includes("function* js_rows")
+    );
+    expect(jsProducer).toBeDefined();
+    expect(jsProducer?.bodyRuntime).toBe("javascript");
+
+    const pyCodes = allOps(manifest)
+      .filter((op: any) => op.runtime === "python")
+      .map((op: any) => String(op.code ?? op.source ?? ""))
+      .join("\n");
+    expect(pyCodes).toContain("list(itertools.islice(js_rows(\"slice\"), 2))");
+    expect(pyCodes).toContain('[f"{row.items}:{row.close}:{row.count}" for row in first_rows]');
+
+    const partialConsume = allOps(manifest).find(
+      (op: any) =>
+        op.runtime === "python" &&
+        String(op.code ?? "").includes("itertools.islice(js_rows")
+    );
+    expect(partialConsume).toBeDefined();
+    expect(JSON.stringify(manifest.ops)).not.toContain("omnivm.proxyGet");
+    expect(JSON.stringify(manifest.ops)).not.toContain("proxyGet");
+  });
+
   test("keeps Java collection-style collision access natural from docs-shaped JavaScript", () => {
     const { manifest } = compileSnippet(`
 const java_payload = new java.util.HashMap()

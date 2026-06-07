@@ -2955,7 +2955,8 @@ export class ManifestCodeGenerator {
    */
   private emitFuncDecl(node: AST.FuncDecl): ManifestOp[] {
     const aff = this.affinityMap.get(node);
-    const funcRuntime = aff?.runtime || this.defaultRuntime;
+    const syntaxRuntime = this.funcDeclSyntaxRuntime(node);
+    const funcRuntime = syntaxRuntime || aff?.runtime || this.defaultRuntime;
     this.recordBinding(node.name.name, funcRuntime, "function");
 
     // Go func_def: emit raw source for OmniVM to compile, not decomposed ops.
@@ -3015,7 +3016,7 @@ export class ManifestCodeGenerator {
 
     // Only set bodyRuntime if every block belongs to the same single runtime
     const runtimes = new Set(bodyBlocks.map(b => b.runtime));
-    const singleRuntime = runtimes.size === 1 ? [...runtimes][0] : undefined;
+    const singleRuntime = syntaxRuntime || (runtimes.size === 1 ? [...runtimes][0] : undefined);
 
     const funcDef: FuncDefOp = {
       op: "func_def",
@@ -3029,6 +3030,17 @@ export class ManifestCodeGenerator {
     };
 
     return [...hoisted, funcDef];
+  }
+
+  private funcDeclSyntaxRuntime(node: AST.FuncDecl): OmniRuntime | undefined {
+    switch (node.declKeyword) {
+      case "function":
+        return OmniRuntime.JavaScript;
+      case "func":
+        return OmniRuntime.Go;
+      default:
+        return undefined;
+    }
   }
 
   private paramDef(param: AST.Param): ParamDef {
