@@ -363,7 +363,7 @@ export function nodeToSourceCode(node: AST.Decl | AST.Stmt | AST.Expr, source?: 
     case "Continue":
       return node.label ? `continue ${node.label.name}` : "continue";
     case "Throw":
-      return `throw ${exprToCode(node.value, source)}`;
+      return spanExtract(node, source) || `throw ${exprToCode(node.value, source)}`;
     case "Pass":
       return "/* pass */";
     case "Echo":
@@ -941,6 +941,7 @@ function collectIds(
     }
     case "Throw":
       collectIds((node as AST.Throw).value, ids, locals);
+      if ((node as AST.Throw).cause) collectIds((node as AST.Throw).cause as AST.Expr, ids, locals);
       break;
     case "Defer": {
       const deferNode = node as AST.Defer;

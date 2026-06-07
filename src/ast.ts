@@ -443,6 +443,7 @@ export interface Echo {
 export interface Throw {
   kind: "Throw";
   value: Expr;
+  cause?: Expr;
   span: Span;
 }
 

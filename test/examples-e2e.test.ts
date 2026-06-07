@@ -333,6 +333,10 @@ describe("Example files: end-to-end pipeline", () => {
         runtimes: ["javascript", "python"],
       },
       {
+        file: "python-error-cause-js-catch.poly",
+        runtimes: ["python", "javascript"],
+      },
+      {
         file: "pydantic-zod-error-fidelity.poly",
         runtimes: ["python", "javascript"],
       },
@@ -432,6 +436,21 @@ describe("Example files: end-to-end pipeline", () => {
         expect(manifest.ops.length).toBeGreaterThan(1);
       });
     }
+
+    it("keeps Python raise-from cause chains inside the native Python statement", () => {
+      const { manifest } = compile(path.join(examplesDir, "python-error-cause-js-catch.poly"));
+      const func = manifest.ops.find(
+        (op: any) => op.op === "func_def" && op.name === "fail_checkout"
+      ) as any;
+      const strayPythonFragments = manifest.ops.filter(
+        (op: any) => op.op === "exec" && op.runtime === "python" && ["from", "cause"].includes(op.code)
+      );
+
+      expect(func?.sourceArtifact?.functionSource).toContain(
+        'raise RuntimeError("checkout failed") from cause'
+      );
+      expect(strayPythonFragments).toEqual([]);
+    });
 
     it("models async streams as explicit materialization and worker joins", () => {
       const { manifest } = compile(path.join(examplesDir, "async-httpx-rxjs-errgroup.poly"));

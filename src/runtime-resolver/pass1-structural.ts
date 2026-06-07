@@ -276,6 +276,7 @@ export class Pass1Structural {
 
       case "Throw":
         this.visitExpr(node.value);
+        if (node.cause) this.visitExpr(node.cause);
         break;
 
       case "Block":

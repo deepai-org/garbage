@@ -1273,12 +1273,17 @@ export function parseEcho(host: ControlFlowHost, ): AST.Echo {
 
 export function parseThrow(host: ControlFlowHost, ): AST.Throw {
   const start = host.current - 1;
+  const keyword = host.previous()?.value;
   const value = host.parseExpression();
+  const cause = keyword === "raise" && host.match("from")
+    ? host.parseExpression()
+    : undefined;
   host.consumeSemicolon();
   
   return {
     kind: "Throw",
     value,
+    ...(cause ? { cause } : {}),
     span: host.createSpan(start, host.current - 1)
   };
 }

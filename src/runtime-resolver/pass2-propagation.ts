@@ -132,6 +132,7 @@ export class Pass2Propagation {
 
       case "Throw":
         this.propagateExpr(node.value);
+        if (node.cause) this.propagateExpr(node.cause);
         return this.getOrDefault(node);
 
       case "Break":

@@ -3739,13 +3739,13 @@ export class ManifestCodeGenerator {
   }
 
   private emitThrow(node: AST.Throw): ThrowOp | ExecOp {
-    if (this.isSimpleLiteral(node.value)) {
+    if (!node.cause && this.isSimpleLiteral(node.value)) {
       return {
         op: "throw",
         value: { kind: "literal", value: this.literalValue(node.value) },
       };
     }
-    if (node.value.kind === "Identifier") {
+    if (!node.cause && node.value.kind === "Identifier") {
       return {
         op: "throw",
         value: { kind: "ref", name: node.value.name },
@@ -3756,20 +3756,20 @@ export class ManifestCodeGenerator {
     // objects preserve name/message/stack through the manifest catch boundary.
     const aff = this.affinityMap.get(node.value);
     const runtime = aff?.runtime || this.defaultRuntime;
-    const captures = this.computeCaptures(node.value, runtime);
+    const captures = this.computeCaptures(node, runtime);
     return {
       op: "exec",
       runtime,
-      code: this.throwStatementCode(node.value, runtime),
+      code: this.throwStatementCode(node.value, runtime, node.cause),
       ...(captures ? { captures } : {}),
     };
   }
 
-  private throwStatementCode(value: AST.Expr, runtime: OmniRuntime): string {
+  private throwStatementCode(value: AST.Expr, runtime: OmniRuntime, cause?: AST.Expr): string {
     const code = this.exprCode(value, runtime);
     switch (runtime) {
       case OmniRuntime.Python:
-        return `raise ${code}`;
+        return cause ? `raise ${code} from ${this.exprCode(cause, runtime)}` : `raise ${code}`;
       case OmniRuntime.Ruby:
         return `raise ${code}`;
       case OmniRuntime.Java:

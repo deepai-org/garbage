@@ -224,6 +224,7 @@ export class RuntimeResolver {
         break;
       case "Throw":
         children.push(node.value);
+        if (node.cause) children.push(node.cause);
         break;
       case "Try":
         children.push(...node.body.statements);
