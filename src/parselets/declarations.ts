@@ -290,7 +290,7 @@ export function parseDestructuringPattern(host: DeclHost): AST.ArrayPattern | AS
 
   if (token.value === "[") {
     host.advance();
-    const elements: (AST.Identifier | AST.ArrayPattern | AST.ObjectPattern | null)[] = [];
+    const elements: (AST.Identifier | AST.ArrayPattern | AST.ObjectPattern | AST.ArrayPatternElement | null)[] = [];
 
     while (!host.check("]") && !host.isAtEnd()) {
       while (host.peek().virtualSemi) host.advance();
@@ -301,15 +301,44 @@ export function parseDestructuringPattern(host: DeclHost): AST.ArrayPattern | AS
         continue;
       }
 
+      const elementStart = host.current;
+      let rest = false;
+      if (host.check("...")) {
+        host.advance();
+        rest = true;
+      }
+
+      let element: AST.Identifier | AST.ArrayPattern | AST.ObjectPattern;
       if (host.check("[") || host.check("{")) {
-        elements.push(parseDestructuringPattern(host));
+        element = parseDestructuringPattern(host);
       } else if (host.peek().type === TokenType.Identifier) {
-        elements.push(host.parseIdentifier());
+        element = host.parseIdentifier();
       } else {
         break;
       }
 
+      let defaultValue: AST.Expr | undefined;
+      if (!rest && host.match("=")) {
+        defaultValue = host.parseAssignmentExpression();
+      }
+
+      if (rest || defaultValue) {
+        elements.push({
+          kind: "ArrayPatternElement",
+          value: element,
+          rest,
+          defaultValue,
+          span: host.createSpan(elementStart, host.current - 1)
+        });
+      } else {
+        elements.push(element);
+      }
+
       while (host.peek().virtualSemi) host.advance();
+
+      if (rest) {
+        break;
+      }
 
       if (!host.match(",")) {
         break;
@@ -631,6 +660,10 @@ function extractPatternNames(pattern: AST.ArrayPattern | AST.ObjectPattern): AST
     for (const el of pattern.elements) {
       if (!el) continue;
       if (el.kind === "Identifier") names.push(el);
+      else if (el.kind === "ArrayPatternElement") {
+        if (el.value.kind === "Identifier") names.push(el.value);
+        else names.push(...extractPatternNames(el.value));
+      }
       else names.push(...extractPatternNames(el));
     }
   } else {

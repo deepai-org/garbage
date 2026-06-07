@@ -317,6 +317,14 @@ describe("Example files: end-to-end pipeline", () => {
         runtimes: ["javascript", "python"],
       },
       {
+        file: "javascript-rest-destructuring-docs.poly",
+        runtimes: ["javascript", "python"],
+      },
+      {
+        file: "javascript-array-destructuring-docs.poly",
+        runtimes: ["javascript", "python"],
+      },
+      {
         file: "javascript-error-cause-details.poly",
         runtimes: ["javascript", "python"],
       },

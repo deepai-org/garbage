@@ -182,6 +182,54 @@ const summary = \`\${items.length}:\${field_keys.length}:\${count}:\${close}:\${
     expect(destructured.every((op: any) => op.captures?.payload === "payload")).toBe(true);
   });
 
+  test("keeps JavaScript array rest/default destructuring natural over cross-runtime proxies", () => {
+    const { manifest } = compileSnippet(`
+def make_rows():
+  return [
+    {"items": "alpha", "count": 1, "close": "row-close"},
+    {"items": "beta", "count": 2, "close": "row-close"},
+    {"items": "gamma", "count": 3, "close": "row-close"}
+  ]
+
+def empty_rows():
+  return []
+
+const [first, second, ...rest] = make_rows()
+const [fallback = {"items": "fallback", "count": 0}] = empty_rows()
+const { items: first_items, count: first_count } = first
+const summary = \`\${first_items}:\${first_count}:\${second.items}:\${fallback.items}:\${rest.length}:\${rest[0].items}\`
+`);
+
+    const text = manifestText(manifest);
+    expect(text).not.toMatch(bridgeHelperPattern);
+
+    const ops = allOps(manifest);
+    expect(ops.some((op: any) =>
+      op.runtime === "python" && String(op.code ?? "").includes("make_rows()")
+    )).toBe(true);
+    expect(ops.some((op: any) =>
+      op.runtime === "python" && String(op.code ?? "").includes("empty_rows()")
+    )).toBe(true);
+
+    const jsCodes = ops
+      .filter((op: any) => op.runtime === "javascript")
+      .map((op: any) => String(op.code ?? op.source ?? ""))
+      .join("\n");
+    expect(jsCodes).toContain("[0]");
+    expect(jsCodes).toContain("[1]");
+    expect(jsCodes).toContain("Array.from(__destructure_");
+    expect(jsCodes).toContain(".slice(2)");
+    expect(jsCodes).toContain('(typeof __destructure_');
+    expect(jsCodes).toContain(' === "undefined" ? {"items": "fallback", "count": 0} : ');
+    expect(jsCodes).toContain("first.items");
+    expect(jsCodes).toContain("first.count");
+    expect(jsCodes).toContain("rest[0].items");
+
+    for (const name of ["first", "second", "rest", "fallback", "first_items", "first_count"]) {
+      expect(ops.some((op: any) => op.op === "eval" && op.runtime === "javascript" && op.bind === name)).toBe(true);
+    }
+  });
+
   test("keeps lazy iterable snippets lazy and helper-free across a runtime boundary", () => {
     const { manifest } = compileSnippet(`
 import itertools

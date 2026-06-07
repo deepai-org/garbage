@@ -678,7 +678,15 @@ export interface Param {
 // Destructuring patterns
 export interface ArrayPattern {
   kind: "ArrayPattern";
-  elements: (Identifier | ArrayPattern | ObjectPattern | null)[];  // null for holes like [a, , c]
+  elements: (Identifier | ArrayPattern | ObjectPattern | ArrayPatternElement | null)[];  // null for holes like [a, , c]
+  span: Span;
+}
+
+export interface ArrayPatternElement {
+  kind: "ArrayPatternElement";
+  value: Identifier | ArrayPattern | ObjectPattern;
+  rest?: boolean;
+  defaultValue?: Expr;
   span: Span;
 }
 

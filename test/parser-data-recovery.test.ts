@@ -48,6 +48,26 @@ describe('Parser Data Recovery - No Discarded Syntax', () => {
       expect((pattern.elements[1] as AST.ArrayPattern).kind).toBe('ArrayPattern');
     });
 
+    test('parses array rest and default destructuring in const declaration', () => {
+      const ast = parseCode('const [first, fallback = {"items": "fallback"}, ...rest] = rows');
+      expect(ast.body).toHaveLength(1);
+      const decl = ast.body[0] as AST.ConstDecl;
+      expect(decl.kind).toBe('ConstDecl');
+      expect(decl.destructurePattern?.kind).toBe('ArrayPattern');
+      const pattern = decl.destructurePattern as AST.ArrayPattern;
+      expect(pattern.elements).toHaveLength(3);
+      expect((pattern.elements[0] as AST.Identifier).name).toBe('first');
+      const fallback = pattern.elements[1] as AST.ArrayPatternElement;
+      expect(fallback.kind).toBe('ArrayPatternElement');
+      expect((fallback.value as AST.Identifier).name).toBe('fallback');
+      expect(fallback.defaultValue?.kind).toBe('ObjectLiteral');
+      const rest = pattern.elements[2] as AST.ArrayPatternElement;
+      expect(rest.kind).toBe('ArrayPatternElement');
+      expect(rest.rest).toBe(true);
+      expect((rest.value as AST.Identifier).name).toBe('rest');
+      expect(decl.names.map(name => name.name)).toEqual(['first', 'fallback', 'rest']);
+    });
+
     test('parses object destructuring with renaming', () => {
       const ast = parseCode('{name: userName, id: userId} := user');
       expect(ast.body).toHaveLength(1);

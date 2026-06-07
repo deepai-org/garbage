@@ -2759,11 +2759,16 @@ export class ManifestCodeGenerator {
     if (pattern.kind === "ArrayPattern") {
       pattern.elements.forEach((element, index) => {
         if (!element) return;
-        const access = `${baseExpr}[${index}]`;
-        if (element.kind === "Identifier") {
-          this.emitDestructuredBinding(element.name, access, runtime, mutable, ops);
+        const rest = element.kind === "ArrayPatternElement" && element.rest;
+        const target = element.kind === "ArrayPatternElement" ? element.value : element;
+        const access = rest ? `Array.from(${baseExpr}).slice(${index})` : `${baseExpr}[${index}]`;
+        const valueCode = element.kind === "ArrayPatternElement" && element.defaultValue
+          ? `(typeof ${access} === "undefined" ? ${this.exprCode(element.defaultValue, runtime)} : ${access})`
+          : access;
+        if (target.kind === "Identifier") {
+          this.emitDestructuredBinding(target.name, valueCode, runtime, mutable, ops);
         } else {
-          this.emitPatternBindings(element, access, runtime, mutable, ops);
+          this.emitPatternBindings(target, valueCode, runtime, mutable, ops);
         }
       });
       return;
