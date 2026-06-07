@@ -228,6 +228,11 @@ function exprToPythonCode(expr: AST.Expr, source?: string): string {
       return "None";
     case "ArrayLiteral":
       return `[${expr.elements.map(e => exprToPythonCode(e, source)).join(", ")}]`;
+    case "ListComprehension": {
+      const targets = expr.targets.map(t => t.name).join(", ");
+      const filter = expr.filter ? ` if ${exprToPythonCode(expr.filter, source)}` : "";
+      return `[${exprToPythonCode(expr.expression, source)} for ${targets} in ${exprToPythonCode(expr.iterable, source)}${filter}]`;
+    }
     case "ObjectLiteral": {
       const objProps = expr.properties.map(p => {
         if (p.value.kind === "Spread") {

@@ -403,6 +403,47 @@ for row in rows:
     expect(pyCodes).toContain('row_labels.append(f"{row.items}:{row.count}")');
   });
 
+  test("keeps Python mapping methods natural over JavaScript object proxies", () => {
+    const { manifest } = compileSnippet(`
+const payload = Object.freeze({
+  "alpha": "first",
+  "beta": "second",
+  "then": "field-then",
+  "close": "field-close",
+  "length": 2,
+  "count": 7
+})
+
+keys = sorted(payload.keys())
+pairs = sorted([f"{key}:{value}" for key, value in payload.items()])
+values = sorted([str(value) for value in payload.values()])
+selected = f"{payload.get('alpha')}:{payload.get('missing', 'fallback')}:{payload.close}:{payload.count}"
+copied = dict(payload)
+`);
+
+    const text = manifestText(manifest);
+    expect(text).not.toMatch(bridgeHelperPattern);
+
+    const ops = allOps(manifest);
+    const jsProducer = ops.find((op: any) =>
+      op.runtime === "javascript" && String(op.code ?? op.source ?? "").includes("Object.freeze")
+    );
+    expect(jsProducer).toBeDefined();
+
+    const pyCodes = ops
+      .filter((op: any) => op.runtime === "python")
+      .map((op: any) => String(op.code ?? op.source ?? ""))
+      .join("\n");
+    expect(pyCodes).toContain("sorted(payload.keys())");
+    expect(pyCodes).toContain('sorted([f"{key}:{value}" for key, value in payload.items()])');
+    expect(pyCodes).toContain("sorted([str(value) for value in payload.values()])");
+    expect(pyCodes).toContain("payload.get('alpha')");
+    expect(pyCodes).toContain("payload.get('missing', 'fallback')");
+    expect(pyCodes).toContain("payload.close");
+    expect(pyCodes).toContain("payload.count");
+    expect(pyCodes).toContain("dict(payload)");
+  });
+
   test("keeps lazy iterable snippets lazy and helper-free across a runtime boundary", () => {
     const { manifest } = compileSnippet(`
 import itertools
