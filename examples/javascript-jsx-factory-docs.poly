@@ -10,7 +10,7 @@ function h(type, props, ...children) {
 }
 
 function Badge(props) {
-  return h("span", { className: "badge" }, props.label)
+  return <span className="badge">{props.label}</span>
 }
 
 const tree = <>

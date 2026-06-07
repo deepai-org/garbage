@@ -636,10 +636,14 @@ const el = <Badge label="Poly" />
     const m = parseAndManifest(code);
     const badge = m.ops.find((candidate: any) => candidate.op === 'func_def' && candidate.name === 'Badge') as any;
     const returnCode = badge?.body?.find((op: any) => op.op === 'return')?.from?.code;
+    const functionSource = badge?.sourceArtifact?.functionSource;
     const el = m.ops.find((candidate: any) => candidate.bind === 'el') as any;
 
     expect(returnCode).toContain('h(Fragment, null');
     expect(returnCode).toContain('h("span", {className: "badge"}, props.label)');
+    expect(functionSource).toContain('h(Fragment, null');
+    expect(functionSource).toContain('h("span", {className: "badge"}, props.label)');
+    expect(functionSource).not.toContain('<span');
     expect(el.code).toContain('h(Badge, {label: "Poly"})');
     expect(JSON.stringify(m)).not.toContain('React.createElement');
     expect(JSON.stringify(m)).not.toContain('React.Fragment');

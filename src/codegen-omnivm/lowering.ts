@@ -1,6 +1,6 @@
 import * as AST from '../ast';
 import { AnnotatedProgram, OmniRuntime } from '../runtime-resolver/types';
-import { exprToCode } from './source-reconstruct';
+import { exprToCode, jsFuncDeclToCode } from './source-reconstruct';
 import {
   LoweredManifestIR,
   LoweredManifestNode,
@@ -232,7 +232,9 @@ class ManifestLowerer {
     const source = this.annotated.source || "";
     const slice = (span: AST.Span | undefined) =>
       source && span && span.end > span.start ? source.slice(span.start, span.end) : "";
-    const functionSource = slice(node.span);
+    const functionSource = node.declKeyword === "function"
+      ? jsFuncDeclToCode(node, source)
+      : slice(node.span);
     const executableSource = this.executableFunctionSource(node, functionSource);
     return {
       paramsSource: node.params.map(param => slice(param.span)),

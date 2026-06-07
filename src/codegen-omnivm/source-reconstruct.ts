@@ -320,7 +320,10 @@ export function nodeToSourceCode(node: AST.Decl | AST.Stmt | AST.Expr, source?: 
     case "ExprStmt":
       return exprToCode(node.expr, source);
     case "FuncDecl":
-      // For non-JS runtimes, prefer span extraction to get the original syntax
+      if (node.declKeyword === "function") {
+        return jsFuncDeclToCode(node, source);
+      }
+      // For non-JS runtimes, prefer span extraction to get the original syntax.
       return spanExtract(node, source) || (() => {
         const kw = node.declKeyword || "function";
         const params = node.params.map(p => paramToCode(p, source)).join(", ");
@@ -453,6 +456,13 @@ export function nodeToSourceCode(node: AST.Decl | AST.Stmt | AST.Expr, source?: 
       }
       return spanExtract(node, source) || `/* ${node.kind} */`;
   }
+}
+
+export function jsFuncDeclToCode(node: AST.FuncDecl, source?: string): string {
+  const asyncPrefix = node.async ? "async " : "";
+  const generatorMark = node.generator ? "*" : "";
+  const params = node.params.map(p => paramToCode(p, source)).join(", ");
+  return `${asyncPrefix}function${generatorMark} ${node.name.name}(${params}) { ${blockToCode(node.body, source)} }`;
 }
 
 export function paramToCode(param: AST.Param, source?: string): string {
