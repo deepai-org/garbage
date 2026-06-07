@@ -760,6 +760,70 @@ labels = [f"{row.items}:{row.close}:{row.count}" for row in first_rows]
     expect(JSON.stringify(manifest.ops)).not.toContain("proxyGet");
   });
 
+  test("keeps Python async for over JavaScript async generators natural and cancellable", () => {
+    const { manifest } = compileSnippet(`
+import asyncio
+
+closed = []
+produced = []
+
+async function* js_async_rows(label) {
+  try {
+    for (const value of [0, 1, 2, 3]) {
+      produced.push(value)
+      await Promise.resolve()
+      yield {"items": value, "close": label, "count": value + 1}
+    }
+  } finally {
+    closed.push(label)
+  }
+}
+
+async def collect_rows():
+  labels = []
+  async for row in js_async_rows("async"):
+    labels.append(f"{row.items}:{row.close}:{row.count}")
+    if len(labels) == 2:
+      break
+  return labels
+
+labels = asyncio.run(collect_rows())
+`);
+
+    const text = manifestText(manifest);
+    expect(text).not.toMatch(bridgeHelperPattern);
+
+    const jsProducer = allOps(manifest).find(
+      (op: any) => op.op === "func_def" &&
+        op.async === true &&
+        op.generator === true &&
+        op.name === "js_async_rows" &&
+        String(op.sourceArtifact?.functionSource ?? "").includes("async function* js_async_rows")
+    );
+    expect(jsProducer).toBeDefined();
+    expect(jsProducer?.bodyRuntime).toBe("javascript");
+
+    const pyConsumer = allOps(manifest).find(
+      (op: any) => op.op === "func_def" &&
+        op.async === true &&
+        op.name === "collect_rows"
+    );
+    expect(pyConsumer).toBeDefined();
+    expect(pyConsumer?.bodyRuntime).toBe("python");
+    const asyncLoop = pyConsumer?.body.find((op: any) =>
+      op.op === "loop" &&
+      op.await === true &&
+      op.iterable?.name === 'js_async_rows("async")'
+    );
+    expect(asyncLoop).toBeDefined();
+
+    const codes = allOpCodes(manifest).join("\n");
+    expect(codes).toContain("asyncio.run(collect_rows())");
+    expect(codes).toContain('labels.append(f"{row.items}:{row.close}:{row.count}")');
+    expect(JSON.stringify(manifest.ops)).not.toContain("omnivm.proxyGet");
+    expect(JSON.stringify(manifest.ops)).not.toContain("proxyGet");
+  });
+
   test("keeps Java collection-style collision access natural from docs-shaped JavaScript", () => {
     const { manifest } = compileSnippet(`
 const java_payload = new java.util.HashMap()
