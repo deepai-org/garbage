@@ -768,6 +768,24 @@ describe('Import-to-Usage Propagation', () => {
     )).toBe(true);
   });
 
+  test('explicit third-party Java imports bind fully qualified class usage', () => {
+    const result = resolve([
+      'import reactor.core.publisher.Flux',
+      'const flux = reactor.core.publisher.Flux.just("beta")',
+      'const first = flux.collectList().block().get(0)',
+    ].join('\n'));
+    const callRuntimes = [...result.affinityMap]
+      .filter(([node]) => node.kind === 'Call')
+      .map(([, aff]) => aff.runtime);
+
+    expect(callRuntimes).toEqual([
+      OmniRuntime.Java,
+      OmniRuntime.Java,
+      OmniRuntime.Java,
+      OmniRuntime.Java,
+    ]);
+  });
+
   test('third-party Java wildcard imports keep following class usage in Java by syntax', () => {
     const result = resolve([
       'import io.reactivex.rxjava3.core.*',

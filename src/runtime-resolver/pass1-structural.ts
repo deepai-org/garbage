@@ -26,6 +26,7 @@ export class Pass1Structural {
   private scopeStack: OmniRuntime[] = [];
   private source?: string;
   private importBindingNodes = new Map<string, AST.Import | AST.ImportDecl>();
+  private importedJavaQualifiedClasses = new Set<string>();
 
   constructor(
     symbolTable: SymbolTable,
@@ -436,6 +437,9 @@ export class Pass1Structural {
         detail: affinity.evidence[0]?.detail || `import: ${node.path}`,
       }], this.fileDirective || OmniRuntime.JavaScript));
       this.assign(node, aff.runtime, aff.confidence, ...aff.evidence);
+      if (affinity.runtime === OmniRuntime.Java && this.isJavaClassImportPath(node.path)) {
+        this.importedJavaQualifiedClasses.add(node.path.replace(/['"]/g, ""));
+      }
       // Register imported names. Java dotted imports bind the simple class name
       // (`import java.util.concurrent.CompletableFuture` -> `CompletableFuture`);
       // Python dotted imports bind the package root
@@ -981,7 +985,9 @@ export class Pass1Structural {
     const propertyAff = property && typeof property === "object" && "kind" in property && property.kind !== "Identifier"
       ? this.getAffinity(property as AST.Expr)
       : undefined;
-    const qualifiedRuntime = lookupQualifiedGlobalAffinity(this.memberChainParts(expr));
+    const chainParts = this.memberChainParts(expr);
+    const qualifiedRuntime = lookupQualifiedGlobalAffinity(chainParts);
+    const importedJavaClass = this.importedJavaClassForChain(chainParts);
     const rawMember = this.nodeSource(expr);
 
     if (rawMember?.includes("::")) {
@@ -1000,7 +1006,15 @@ export class Pass1Structural {
       return {
         runtime: qualifiedRuntime,
         confidence: "inferred",
-        evidence: [{ type: "builtin", detail: `qualified global: ${this.memberChainParts(expr).join(".")}` }],
+        evidence: [{ type: "builtin", detail: `qualified global: ${chainParts.join(".")}` }],
+      };
+    }
+
+    if (importedJavaClass) {
+      return {
+        runtime: OmniRuntime.Java,
+        confidence: "inferred",
+        evidence: [{ type: "import", detail: `Java imported qualified class: ${importedJavaClass}` }],
       };
     }
 
@@ -1016,6 +1030,17 @@ export class Pass1Structural {
     }
 
     return propertyAff && propertyAff.confidence !== "fallback" ? propertyAff : undefined;
+  }
+
+  private importedJavaClassForChain(parts: string[]): string | undefined {
+    if (parts.length === 0) return undefined;
+    const chain = parts.join(".");
+    for (const importedClass of this.importedJavaQualifiedClasses) {
+      if (chain === importedClass || chain.startsWith(`${importedClass}.`)) {
+        return importedClass;
+      }
+    }
+    return undefined;
   }
 
   private memberChainParts(expr: AST.Expr): string[] {

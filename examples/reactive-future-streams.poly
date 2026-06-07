@@ -15,6 +15,6 @@ const js_observable = rxjs.from(["js-a", "js-b"]).pipe(rxjs.map(item => item.toU
 const future_value = java_future.join()
 const flux_label = java_flux.collectList().block().get(0)
 const js_labels = ["js-a", "js-b"].map(item => item.toUpperCase())
-const all_labels = [future_value, flux_label] + js_labels
+const all_labels = Array.from([future_value, flux_label]).concat(js_labels)
 
 print(f"Reactive future streams labels={len(all_labels)} first={future_value}")
