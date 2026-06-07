@@ -1638,6 +1638,31 @@ function Counter() {
     expect(counterReturnCode).toContain('React.createElement("button"');
   });
 
+  test("keeps custom JSX factory snippets package-agnostic", () => {
+    const { manifest } = compileSnippet(`
+/** @jsx h */
+/** @jsxFrag Fragment */
+import { h, Fragment } from "preact"
+
+function Badge(props) {
+  return <>
+    <span className="badge">{props.label}</span>
+  </>;
+}
+`);
+
+    const text = manifestText(manifest);
+    expect(text).not.toMatch(bridgeHelperPattern);
+
+    const badge = allOps(manifest).find((op: any) => op.op === "func_def" && op.name === "Badge");
+    expect(badge?.bodyRuntime).toBe("javascript");
+    const returnCode = badge?.body?.find((op: any) => op.op === "return")?.from?.code;
+    expect(returnCode).toContain('h(Fragment, null');
+    expect(returnCode).toContain('h("span", {className: "badge"}, props.label)');
+    expect(returnCode).not.toContain("React.createElement");
+    expect(returnCode).not.toContain("React.Fragment");
+  });
+
   test("keeps JavaScript callback block statement boundaries in Express-shaped snippets", () => {
     const { manifest } = compileSnippet(`
 import express from "express"

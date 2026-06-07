@@ -535,6 +535,25 @@ export function tagToRuntime(tag: string): OmniRuntime {
 
 // ─── JSX Lowering ──────────────────────────────────────────────────
 
+interface JSXLoweringOptions {
+  factory: string;
+  fragment: string;
+}
+
+const DEFAULT_JSX_FACTORY = "React.createElement";
+const DEFAULT_JSX_FRAGMENT = "React.Fragment";
+
+function jsxLoweringOptions(source?: string): JSXLoweringOptions {
+  if (!source) {
+    return { factory: DEFAULT_JSX_FACTORY, fragment: DEFAULT_JSX_FRAGMENT };
+  }
+
+  const name = "[A-Za-z_$][\\w$]*(?:\\.[A-Za-z_$][\\w$]*)*";
+  const factory = source.match(new RegExp(`@jsx\\s+(${name})`))?.[1] || DEFAULT_JSX_FACTORY;
+  const fragment = source.match(new RegExp(`@jsxFrag\\s+(${name})`))?.[1] || DEFAULT_JSX_FRAGMENT;
+  return { factory, fragment };
+}
+
 function jsxElementNameToCode(name: AST.JSXElementName): string {
   switch (name.kind) {
     case "JSXIdentifier":
@@ -629,6 +648,7 @@ function jsxChildToArg(child: AST.JSXChild, source?: string): string | null {
 }
 
 function jsxToCreateElement(node: AST.JSXElement, source?: string): string {
+  const options = jsxLoweringOptions(source);
   const type = jsxElementNameToArg(node.openingElement.name);
   const props = jsxAttrToProps(node.openingElement.attributes, source);
   const children = node.children
@@ -636,20 +656,21 @@ function jsxToCreateElement(node: AST.JSXElement, source?: string): string {
     .filter((c): c is string => c !== null);
 
   if (children.length === 0) {
-    return `React.createElement(${type}, ${props})`;
+    return `${options.factory}(${type}, ${props})`;
   }
-  return `React.createElement(${type}, ${props}, ${children.join(", ")})`;
+  return `${options.factory}(${type}, ${props}, ${children.join(", ")})`;
 }
 
 function jsxFragmentToCreateElement(node: AST.JSXFragment, source?: string): string {
+  const options = jsxLoweringOptions(source);
   const children = node.children
     .map(c => jsxChildToArg(c, source))
     .filter((c): c is string => c !== null);
 
   if (children.length === 0) {
-    return `React.createElement(React.Fragment, null)`;
+    return `${options.factory}(${options.fragment}, null)`;
   }
-  return `React.createElement(React.Fragment, null, ${children.join(", ")})`;
+  return `${options.factory}(${options.fragment}, null, ${children.join(", ")})`;
 }
 
 // ─── Match Expression Lowering ─────────────────────────────────────

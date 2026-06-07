@@ -1269,6 +1269,38 @@ describe('Import-to-Usage Propagation', () => {
 
     expect(callRuntimes).toEqual([OmniRuntime.Go]);
   });
+
+  test('unknown JavaScript side-effect imports infer JavaScript from syntax', () => {
+    expect(analyzeImportPath('react-dom/server')).toBeUndefined();
+
+    const result = resolve('import "react-dom/server"');
+    const importNode = result.program.body[0] as AST.Import;
+    const affinity = result.affinityMap.get(importNode);
+
+    expect(affinity?.runtime).toBe(OmniRuntime.JavaScript);
+    expect(affinity?.evidence).toContainEqual({
+      type: "syntax",
+      detail: "JavaScript side-effect import syntax",
+    });
+  });
+
+  test('unknown domain-like quoted imports bind Go packages from syntax', () => {
+    expect(analyzeImportPath('example.com/private/pkg')).toBeUndefined();
+
+    const result = resolve('import "example.com/private/pkg"\nconst client = pkg.NewClient()');
+    const importNode = result.program.body[0] as AST.Import;
+    const importAffinity = result.affinityMap.get(importNode);
+    const callRuntimes = [...result.affinityMap]
+      .filter(([node]) => node.kind === 'Call')
+      .map(([, aff]) => aff.runtime);
+
+    expect(importAffinity?.runtime).toBe(OmniRuntime.Go);
+    expect(importAffinity?.evidence).toContainEqual({
+      type: "syntax",
+      detail: "Go quoted import syntax",
+    });
+    expect(callRuntimes).toEqual([OmniRuntime.Go]);
+  });
 });
 
 // --- Global Root Propagation ---

@@ -608,6 +608,32 @@ describe('JSX Lowering', () => {
     expect(op.code).toContain('React.Fragment');
   });
 
+  test('custom JSX factory pragma lowers without React package assumptions', () => {
+    const code = `
+/** @jsx h */
+/** @jsxFrag Fragment */
+import { h, Fragment } from "preact"
+const el = <><button className="primary">Go</button></>
+`;
+    const m = parseAndManifest(code);
+    const op = m.ops.find((candidate: any) => candidate.bind === 'el') as any;
+    expect(op.code).toContain('h(Fragment, null');
+    expect(op.code).toContain('h("button", {className: "primary"}, "Go")');
+    expect(op.code).not.toContain('React.createElement');
+    expect(op.code).not.toContain('React.Fragment');
+  });
+
+  test('custom JSX member factory pragma lowers components generically', () => {
+    const code = `
+/** @jsx view.create */
+const el = <Panel title="Orders" />
+`;
+    const m = parseAndManifest(code);
+    const op = m.ops[0] as any;
+    expect(op.code).toContain('view.create(Panel, {title: "Orders"})');
+    expect(op.code).not.toContain('React.createElement');
+  });
+
   test('expression container lowers child expression', () => {
     const m = parseAndManifest('const el = <div>{message}</div>');
     const op = m.ops[0] as any;
@@ -888,6 +914,15 @@ describe('Lambda Body Lowering', () => {
     const m = parseAndManifest(code);
     const op = m.ops[0] as any;
     expect(op.code).toContain('React.createElement');
+    expect(op.code).not.toContain('<Card');
+  });
+
+  test('lambda with custom JSX factory lowers through pragma', () => {
+    const code = '/** @jsx h */\nconst render = (item) => <Card key={item.id}>{item.name}</Card>';
+    const m = parseAndManifest(code);
+    const op = m.ops[0] as any;
+    expect(op.code).toContain('h(Card');
+    expect(op.code).not.toContain('React.createElement');
     expect(op.code).not.toContain('<Card');
   });
 

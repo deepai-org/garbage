@@ -397,6 +397,9 @@ export class Pass1Structural {
     const javaStaticImport = !quotedImport && this.isJavaStaticImportPath(path);
     const javaClassImport = !quotedImport && this.isJavaClassImportPath(path);
     const javaWildcardImport = !quotedImport && this.isJavaWildcardImport(raw, path);
+    const quotedSyntaxAffinity = quotedImport && !analyzedAffinity
+      ? this.quotedImportSyntaxAffinity(path)
+      : undefined;
     const pythonSyntaxImport = raw
       ? /^\s*import\s+[A-Za-z_][\w]*(?:\.[A-Za-z_][\w]*)*(?:\s+as\s+[A-Za-z_][\w]*)?\s*;?\s*$/.test(raw)
       : !quotedImport && /^[A-Za-z_][\w]*(?:\.[A-Za-z_][\w]*)*$/.test(node.path);
@@ -425,7 +428,7 @@ export class Pass1Structural {
           confidence: "definite" as const,
           evidence: [{ type: "syntax" as const, detail: "Python import syntax" }],
         }
-      : undefined);
+      : undefined) || quotedSyntaxAffinity;
 
     const bindingNames = affinity
       ? this.importBindingNames(node.path, affinity.runtime, node.alias?.name)
@@ -475,6 +478,24 @@ export class Pass1Structural {
     }
     const cleaned = path.replace(/['"]/g, "");
     return /^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+\.\*$/.test(cleaned);
+  }
+
+  private quotedImportSyntaxAffinity(path: string): RuntimeAffinity | undefined {
+    const runtime = this.fileDirective === OmniRuntime.Go || this.isDomainLikeGoImportPath(path)
+      ? OmniRuntime.Go
+      : OmniRuntime.JavaScript;
+    return {
+      runtime,
+      confidence: "inferred",
+      evidence: [{
+        type: "syntax",
+        detail: runtime === OmniRuntime.Go ? "Go quoted import syntax" : "JavaScript side-effect import syntax",
+      }],
+    };
+  }
+
+  private isDomainLikeGoImportPath(path: string): boolean {
+    return /^[A-Za-z0-9_.-]+\.[A-Za-z0-9_.-]+\//.test(path);
   }
 
   private visitImportDecl(node: AST.ImportDecl): void {
