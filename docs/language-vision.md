@@ -81,6 +81,8 @@ Import syntax should stay donor-language-shaped:
 
 When the same spelling could belong to more than one runtime, syntax and surrounding context should decide. If there is no reliable signal, the resolver should stay conservative instead of adding a package-name table.
 
+For practical examples, see [`imports-and-runtime-inference.md`](imports-and-runtime-inference.md).
+
 ## Example Style
 
 Public `.poly` examples should demonstrate the intended mental model:

@@ -236,6 +236,9 @@ Raw package names such as `django`, `zod`, `sqlalchemy`, `active_record`, and
 `react-dom/server` are not enough by themselves to choose a runtime; the source
 form that imports or uses them supplies the runtime evidence.
 
+For practical import examples across Python, JavaScript, Go, Ruby, and Java,
+see [`docs/imports-and-runtime-inference.md`](docs/imports-and-runtime-inference.md).
+
 ## Type System
 
 PolyScript's type system is **permissive by default** — like TypeScript, but with `any` as the starting point rather than an opt-out. Untyped code runs without interference. Types only come into play when you write them, and only known-incompatible crossings are blocked.
