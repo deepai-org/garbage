@@ -444,6 +444,64 @@ copied = dict(payload)
     expect(pyCodes).toContain("dict(payload)");
   });
 
+  test("keeps Ruby mapping methods natural over JavaScript object proxies", () => {
+    const { manifest } = compileSnippet(`
+const payload = Object.freeze({
+  "alpha": "first",
+  "beta": "second",
+  "then": "field-then",
+  "close": "field-close",
+  "length": 2,
+  "count": 7
+})
+
+class PayloadSummary
+  def self.summarize(payload)
+    ruby_keys = payload.keys.sort
+    ruby_pairs = payload.each.map { |key, value| "#{key}:#{value}" }.sort
+    ruby_values = payload.values.map { |value| value.to_s }.sort
+    ruby_selected = "#{payload.fetch('alpha')}:#{payload.fetch('missing', 'fallback')}:#{payload.close}:#{payload.count}"
+    ruby_copied = payload.to_h
+    [ruby_keys.join(","), ruby_pairs.join("|"), ruby_values.join("|"), ruby_selected, ruby_copied["beta"]].join(";")
+  end
+end
+
+const summary = PayloadSummary.summarize(payload)
+`);
+
+    const text = manifestText(manifest);
+    expect(text).not.toMatch(bridgeHelperPattern);
+
+    const ops = allOps(manifest);
+    const jsProducer = ops.find((op: any) =>
+      op.runtime === "javascript" && String(op.code ?? op.source ?? "").includes("Object.freeze")
+    );
+    expect(jsProducer).toBeDefined();
+
+    const rubyCodes = ops
+      .filter((op: any) => op.runtime === "ruby")
+      .map((op: any) => String(op.code ?? op.source ?? ""))
+      .join("\n");
+    expect(ops.some((op: any) =>
+      op.op === "native" &&
+      op.runtime === "ruby" &&
+      String(op.code ?? "").includes("class PayloadSummary")
+    )).toBe(true);
+    expect(ops.some((op: any) =>
+      op.op === "eval" &&
+      op.runtime === "ruby" &&
+      String(op.code ?? "").includes("PayloadSummary.summarize(payload)")
+    )).toBe(true);
+    expect(rubyCodes).toContain("payload.keys.sort");
+    expect(rubyCodes).toContain('payload.each.map { |key, value| "#{key}:#{value}" }.sort');
+    expect(rubyCodes).toContain("payload.values.map { |value| value.to_s }.sort");
+    expect(rubyCodes).toContain("payload.fetch('alpha')");
+    expect(rubyCodes).toContain("payload.fetch('missing', 'fallback')");
+    expect(rubyCodes).toContain("payload.close");
+    expect(rubyCodes).toContain("payload.count");
+    expect(rubyCodes).toContain("payload.to_h");
+  });
+
   test("keeps lazy iterable snippets lazy and helper-free across a runtime boundary", () => {
     const { manifest } = compileSnippet(`
 import itertools

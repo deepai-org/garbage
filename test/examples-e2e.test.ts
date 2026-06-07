@@ -353,6 +353,10 @@ describe("Example files: end-to-end pipeline", () => {
         runtimes: ["javascript", "python"],
       },
       {
+        file: "javascript-ruby-mapping-methods-docs.poly",
+        runtimes: ["javascript", "ruby"],
+      },
+      {
         file: "python-dataframe-js-table-docs.poly",
         runtimes: ["python", "javascript"],
       },
