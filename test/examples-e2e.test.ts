@@ -309,6 +309,10 @@ describe("Example files: end-to-end pipeline", () => {
         runtimes: ["javascript"],
       },
       {
+        file: "javascript-map-set-docs.poly",
+        runtimes: ["javascript", "python"],
+      },
+      {
         file: "javascript-error-cause-details.poly",
         runtimes: ["javascript", "python"],
       },
@@ -417,6 +421,24 @@ describe("Example files: end-to-end pipeline", () => {
       expect(collector?.async).toBe(true);
       expect(asyncExec).toBeDefined();
       expect(asyncExec?.captures).toMatchObject({ row_stream: "row_stream" });
+    });
+
+    it("keeps JavaScript Map and Set docs snippets live across Python", () => {
+      const { manifest } = compile(path.join(examplesDir, "javascript-map-set-docs.poly"));
+      const pySummary = manifest.ops.find(
+        (op: any) => op.op === "eval" && op.bind === "py_label"
+      ) as any;
+      const mapMutation = manifest.ops.find(
+        (op: any) => op.runtime === "javascript" && String(op.code ?? "").includes('registry.set("gamma"')
+      ) as any;
+      const setMutation = manifest.ops.find(
+        (op: any) => op.runtime === "javascript" && String(op.code ?? "").includes('tags.add("closed")')
+      ) as any;
+
+      expect(pySummary?.runtime).toBe("python");
+      expect(pySummary?.captures).toMatchObject({ registry: "registry", tags: "tags" });
+      expect(mapMutation?.captures).toMatchObject({ registry: "registry" });
+      expect(setMutation?.captures).toMatchObject({ tags: "tags" });
     });
 
     it("keeps framework handlers and server rendering in native runtimes", () => {
