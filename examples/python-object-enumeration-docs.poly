@@ -23,8 +23,14 @@ const selected = Object.fromEntries(
     .map(([key, value]) => [key, Array.isArray(value) ? value.length : value])
 )
 const copied = {...payload}
+const assigned = Object.assign({}, payload)
 const values_count = Object.values(payload).length
 const row_summary = payload.rows.map(row => `${row.items}:${row.count}`).join("|")
 const has_items = Object.prototype.hasOwnProperty.call(payload, "items")
+const loop_names = []
+for (const key in payload) {
+  loop_names.push(key)
+}
+loop_names.sort()
 
-console.log(`Python object enumeration docs names=${names.join(",")} selected=${JSON.stringify(selected)} copied=${copied.items.length}:${copied.keys.length}:${copied.close} values=${values_count} rows=${row_summary} has=${has_items}`)
+console.log(`Python object enumeration docs names=${names.join(",")} loop=${loop_names.join(",")} selected=${JSON.stringify(selected)} copied=${copied.items.length}:${copied.keys.length}:${copied.close} assigned=${assigned.items.length}:${assigned.keys.length}:${assigned.close} values=${values_count} rows=${row_summary} has=${has_items}`)

@@ -324,6 +324,7 @@ export function parseLoop(host: ControlFlowHost, ): AST.Loop {
           mode: "foreach",
           variable,
           iterable,
+          iterationKind: "of",
           body,
           await: true,
           span: host.createSpan(start, host.current - 1)
@@ -347,6 +348,7 @@ export function parseLoop(host: ControlFlowHost, ): AST.Loop {
               span: host.createSpanFrom(secondId)
             };
             if (host.match("of", "in")) {
+              const iterType = host.previous()?.value === "in" ? "in" : "of";
               const variable: AST.ArrayPattern = {
                 kind: "ArrayPattern",
                 elements: [firstVar, secondVar],
@@ -360,6 +362,7 @@ export function parseLoop(host: ControlFlowHost, ): AST.Loop {
                 mode: "foreach",
                 variable,
                 iterable,
+                iterationKind: iterType,
                 body,
                 span: host.createSpan(start, host.current - 1)
               };
@@ -391,6 +394,7 @@ export function parseLoop(host: ControlFlowHost, ): AST.Loop {
             mode: "foreach",
             variable,
             iterable,
+            iterationKind: "in",
             body,
             span: host.createSpan(start, host.current - 1)
           };
@@ -498,7 +502,7 @@ export function parseLoop(host: ControlFlowHost, ): AST.Loop {
 
         // Check for 'of' or 'in'
         if (host.match("of", "in")) {
-          const iterType = host.previous()?.value; // "of" or "in"
+          const iterType = host.previous()?.value === "in" ? "in" : "of";
           const iterable = host.parseExpression();
           host.consume(")", "Expected ')' after for-of/for-in");
           const body = host.parseBlockOrStatement();
@@ -508,6 +512,7 @@ export function parseLoop(host: ControlFlowHost, ): AST.Loop {
             mode: "foreach",
             variable,
             iterable,
+            iterationKind: iterType,
             body,
             span: host.createSpan(start, host.current - 1)
           };
@@ -537,7 +542,7 @@ export function parseLoop(host: ControlFlowHost, ): AST.Loop {
         if (host.check(")") && (host.peekNext()?.value === "in" || host.peekNext()?.value === "of")) {
           host.advance(); // consume )
           host.advance(); // consume in/of
-          const iterType = host.previous()?.value; // "in" or "of"
+          const iterType = host.previous()?.value === "in" ? "in" : "of";
           const iterable = host.parseExpression();
           const body = host.parseBlockOrStatement();
           
@@ -554,13 +559,14 @@ export function parseLoop(host: ControlFlowHost, ): AST.Loop {
             mode: "foreach",
             variable,
             iterable,
+            iterationKind: iterType,
             body,
             span: host.createSpan(start, host.current - 1)
           };
         }
       } else if (host.match("of", "in")) {
         // Simple identifier with in/of
-        const iterType = host.previous()?.value; // "of" or "in"
+        const iterType = host.previous()?.value === "in" ? "in" : "of";
         const iterable = host.parseExpression();
         host.consume(")", "Expected ')' after for-of/for-in");
         const body = host.parseBlockOrStatement();
@@ -570,6 +576,7 @@ export function parseLoop(host: ControlFlowHost, ): AST.Loop {
           mode: "foreach",
           variable: firstId,
           iterable,
+          iterationKind: iterType,
           body,
           span: host.createSpan(start, host.current - 1)
         };

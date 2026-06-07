@@ -304,9 +304,15 @@ const selected = Object.fromEntries(
     .map(([key, value]) => [key, Array.isArray(value) ? value.length : value])
 )
 const copied = {...payload}
+const assigned = Object.assign({}, payload)
 const values_count = Object.values(payload).length
 const row_summary = payload.rows.map(row => \`\${row.items}:\${row.count}\`).join("|")
 const has_items = Object.prototype.hasOwnProperty.call(payload, "items")
+const loop_names = []
+for (const key in payload) {
+  loop_names.push(key)
+}
+loop_names.sort()
 `);
 
     const text = manifestText(manifest);
@@ -325,9 +331,12 @@ const has_items = Object.prototype.hasOwnProperty.call(payload, "items")
     expect(jsCodes).toContain("Object.entries(payload)");
     expect(jsCodes).toContain("Object.fromEntries(");
     expect(jsCodes).toContain("{...payload}");
+    expect(jsCodes).toContain("Object.assign({}, payload)");
     expect(jsCodes).toContain("Object.values(payload).length");
     expect(jsCodes).toContain("payload.rows.map");
     expect(jsCodes).toContain('Object.prototype.hasOwnProperty.call(payload, "items")');
+    expect(jsCodes).toContain("for (const key in payload)");
+    expect(jsCodes).toContain("loop_names.push(key)");
   });
 
   test("keeps lazy iterable snippets lazy and helper-free across a runtime boundary", () => {

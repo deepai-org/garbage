@@ -343,6 +343,7 @@ export interface Loop {
   step?: Expr;
   iterable?: Expr;
   variable?: Identifier | ArrayPattern | ObjectPattern;
+  iterationKind?: "of" | "in";
   body: Block;
   label?: Identifier;
   await?: boolean;

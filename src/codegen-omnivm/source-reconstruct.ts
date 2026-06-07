@@ -402,7 +402,8 @@ export function nodeToSourceCode(node: AST.Decl | AST.Stmt | AST.Expr, source?: 
             : "item";
           const iter = loopNode.iterable ? exprToCode(loopNode.iterable, source) : "[]";
           const kw = loopNode.await ? "for await" : "for";
-          return `${kw} (const ${varName} of ${iter}) { ${blockToCode(loopNode.body, source)} }`;
+          const iterKind = loopNode.iterationKind === "in" && !loopNode.await ? "in" : "of";
+          return `${kw} (const ${varName} ${iterKind} ${iter}) { ${blockToCode(loopNode.body, source)} }`;
         }
         case "infinite":
           return `while (true) { ${blockToCode(loopNode.body, source)} }`;

@@ -240,6 +240,8 @@ export class Pass1Structural {
           const rawLoop = this.nodeSource(node)?.trim();
           if (rawLoop && this.isPythonForLoopSource(rawLoop)) {
             this.assign(node, OmniRuntime.Python, "definite", { type: "syntax", detail: "Python for-in loop syntax" });
+          } else if (rawLoop && this.isJavaScriptForEachLoopSource(rawLoop)) {
+            this.assign(node, OmniRuntime.JavaScript, "definite", { type: "syntax", detail: "JavaScript for-of/in loop syntax" });
           }
         }
         if (node.test) this.visitExpr(node.test);
@@ -573,6 +575,11 @@ export class Pass1Structural {
   private isPythonForLoopSource(raw: string): boolean {
     const firstLine = raw.split(/\r?\n/, 1)[0]?.trim() || "";
     return /^(?:async\s+)?for\s+[^():]+\s+in\s+.+:\s*$/.test(firstLine);
+  }
+
+  private isJavaScriptForEachLoopSource(raw: string): boolean {
+    const firstLine = raw.split(/\r?\n/, 1)[0]?.trim() || "";
+    return /^for\s+(?:await\s+)?\([^)]*\b(?:of|in)\b/.test(firstLine);
   }
 
   private isPythonClassSource(raw: string): boolean {
