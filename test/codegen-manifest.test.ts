@@ -623,6 +623,28 @@ const el = <><button className="primary">Go</button></>
     expect(op.code).not.toContain('React.Fragment');
   });
 
+  test('Preact-shaped JSX pragma lowers fragments and components through h', () => {
+    const code = `
+/** @jsx h */
+/** @jsxFrag Fragment */
+import { h, Fragment } from "preact"
+function Badge(props) {
+  return <><span className="badge">{props.label}</span></>;
+}
+const el = <Badge label="Poly" />
+`;
+    const m = parseAndManifest(code);
+    const badge = m.ops.find((candidate: any) => candidate.op === 'func_def' && candidate.name === 'Badge') as any;
+    const returnCode = badge?.body?.find((op: any) => op.op === 'return')?.from?.code;
+    const el = m.ops.find((candidate: any) => candidate.bind === 'el') as any;
+
+    expect(returnCode).toContain('h(Fragment, null');
+    expect(returnCode).toContain('h("span", {className: "badge"}, props.label)');
+    expect(el.code).toContain('h(Badge, {label: "Poly"})');
+    expect(JSON.stringify(m)).not.toContain('React.createElement');
+    expect(JSON.stringify(m)).not.toContain('React.Fragment');
+  });
+
   test('custom JSX member factory pragma lowers components generically', () => {
     const code = `
 /** @jsx view.create */
@@ -632,6 +654,20 @@ const el = <Panel title="Orders" />
     const op = m.ops[0] as any;
     expect(op.code).toContain('view.create(Panel, {title: "Orders"})');
     expect(op.code).not.toContain('React.createElement');
+  });
+
+  test('member factory and member fragment pragmas lower without package assumptions', () => {
+    const code = `
+/** @jsx view.create */
+/** @jsxFrag view.Fragment */
+const el = <><Panel title="Orders" /></>
+`;
+    const m = parseAndManifest(code);
+    const op = m.ops[0] as any;
+    expect(op.code).toContain('view.create(view.Fragment, null');
+    expect(op.code).toContain('view.create(Panel, {title: "Orders"})');
+    expect(op.code).not.toContain('React.createElement');
+    expect(op.code).not.toContain('React.Fragment');
   });
 
   test('expression container lowers child expression', () => {

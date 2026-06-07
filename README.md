@@ -167,6 +167,7 @@ Core rules:
 | Spawn handles | `const h = go worker(args)` binds a spawn handle. Prefer named handles plus `wait(h)` or `wait(h1, h2)` over bare fire-and-forget spawns when later code depends on worker completion. |
 | Resources, tables, and jobs | Runtime-owned resources, Arrow/DataFrame tables, and queued jobs lower to first-class OmniVM manifest ops. Live request/response, transaction, table, connection, stream, and queued-job internals should cross as inferred handles or proxies. |
 | Worker shape | Long-term portable workers are named Go functions that return a value and use manifest helpers such as `recv("channel")` and `send("channel", value)`. Inline spawn closures may parse, but they are not the durable contract for OmniVM joins. |
+| JSX | JSX is JavaScript-family syntax, not React-specific syntax. By default it lowers to `React.createElement`/`React.Fragment`; `/** @jsx factory */` and `/** @jsxFrag Fragment */` select another factory such as Preact's `h` or an application-local member factory. |
 | Diagnostics | The compiler emits manifest diagnostics for likely runtime-boundary mistakes, including `wait(...)` on non-handles, channel operations on unknown/non-channel bindings, and spawn forms OmniVM cannot reliably join. |
 
 For tabular data, the intended long-term boundary is a zero-copy Arrow handle,
@@ -191,11 +192,22 @@ materializing rows.
 
 The runtime resolver determines which language owns each statement — fully automatically, with no annotations or pragmas required. It uses a two-pass analysis:
 
-**Pass 1 (Structural)** tags nodes with evidence from syntax and imports:
+**Pass 1 (Structural)** tags nodes with evidence from syntax and imports. Import
+syntax is runtime evidence; third-party package names are not a runtime table.
+For example, `import pandas as pd` is Python because it is Python syntax,
+`import { h } from "preact"` is JavaScript because it is ES import-from syntax,
+`import "github.com/acme/pkg-name"` is Go because it is quoted Go module syntax,
+`require "dry/validation"` is Ruby because it is Ruby require syntax, and
+`import java.util.concurrent.CompletableFuture` is Java because it is Java dotted
+class syntax.
 
 | Signal | Language | Example |
 |--------|----------|---------|
 | `import os` | Python | Import provenance |
+| `import { h } from "preact"` | JavaScript | ES import-from syntax |
+| `import "github.com/acme/pkg-name"` | Go | Quoted Go module syntax |
+| `require "dry/validation"` | Ruby | Ruby require syntax |
+| `import java.util.List` | Java | Java dotted class syntax |
 | `=>` arrow functions | JavaScript | Syntactic dominance (impossible in Python) |
 | `===`, `!==` | JavaScript | Strict equality operators |
 | `[x for x in ...]` | Python | List comprehension |
@@ -218,6 +230,11 @@ const files = os.listdir("/data")          // Python (import provenance)
 const loud = files.map(f => f.toUpperCase()) // JS (arrow override) — captures `files` from Python
 const ordered = sorted(loud)               // Python (builtin) — captures `loud` from JS
 ```
+
+The resolver intentionally stays conservative for ambiguous third-party names.
+Raw package names such as `django`, `zod`, `sqlalchemy`, `active_record`, and
+`react-dom/server` are not enough by themselves to choose a runtime; the source
+form that imports or uses them supplies the runtime evidence.
 
 ## Type System
 
@@ -337,6 +354,17 @@ PolyScript parses real syntax from each donor language — nothing is invented.
 | Swift      | `guard`, operator declarations                                           |
 | Elixir     | Pipe operator `\|>`, `defmacro`, `do...end`                              |
 
+Import forms cover runtime package ecosystems without package-specific parser
+rules:
+
+| Runtime | Import forms |
+|---------|--------------|
+| Python | `import package`, `import package.module as alias`, `from package.module import name as alias` |
+| JavaScript | default, namespace, named, side-effect, scoped-package, and package-subpath ES imports |
+| Go | quoted imports, grouped imports, aliases, domain-style module paths, and package paths containing dashes |
+| Ruby | `require "gem"` and `require "gem/subpath"` |
+| Java | dotted class imports, static imports, and wildcard imports |
+
 ## Dispatch Manifest
 
 The manifest is a sequence of ops that OmniVM executes. No language is "on top" — OmniVM is the orchestrator.
@@ -409,7 +437,7 @@ examples/                 # Polyglot example files
 
 ## Examples
 
-See [`examples/`](examples/) for complete polyglot programs. All runtimes are **autodetected** — the comments in the files are just for human readers.
+See [`examples/`](examples/) for complete polyglot programs. All runtimes are **autodetected**. Aside from documented source pragmas such as JSX factory comments, comments in the files are just for human readers.
 
 The sibling OmniVM repo documents how these examples map onto CPython-hosted `libomnivm` and prefork deployments in `docs/example-suite.md` and `docs/passenger-django-polyscript.md`.
 
@@ -430,6 +458,7 @@ The sibling OmniVM repo documents how these examples map onto CPython-hosted `li
 - **orm-model-client-flow.poly** — SQLAlchemy metadata/query values, Prisma-shaped lookups, Zod model validation, Pandas rows, and Java HTTP client objects
 - **python-docs-popular-packages.poly** — Docs-style Pandas, NumPy, Pydantic, Jinja2, and BeautifulSoup usage that runs unchanged through OmniVM manifests
 - **javascript-docs-popular-packages.poly** — Docs-style Express, Zod, Lodash, Cheerio, and Marked usage
+- **javascript-jsx-factory-docs.poly** — JSX lowered through a local factory/fragment pair rather than React
 - **java-docs-popular-packages.poly** — Docs-style Gson, jsoup, OkHttp, and Apache Commons CSV usage
 - **ruby-docs-popular-packages.poly** — Docs-style Nokogiri and Rack usage
 - **go-docs-popular-packages.poly** — Docs-style Go `net/http` and `encoding/json` usage

@@ -375,6 +375,119 @@ describe('Import Analysis', () => {
   });
 });
 
+describe('Import syntax coverage', () => {
+  function importOps(code: string) {
+    const ast = parseCode(code);
+    const resolver = new RuntimeResolver();
+    const annotated = resolver.resolve(ast, code);
+    const nodes: Array<AST.Import | AST.ImportDecl> = [];
+
+    for (const node of annotated.program.body) {
+      if (node.kind === 'Import' || node.kind === 'ImportDecl') {
+        nodes.push(node);
+      } else if (node.kind === 'GroupedImport') {
+        nodes.push(...node.imports);
+      }
+    }
+
+    return nodes.map(node => ({
+      node,
+      runtime: annotated.affinityMap.get(node)?.runtime,
+      confidence: annotated.affinityMap.get(node)?.confidence,
+    }));
+  }
+
+  test('Python imports cover dotted packages, aliases, and from-import aliases', () => {
+    const imports = importOps(`
+import package_name.submodule as pkg
+from package_name.submodule import factory as make_factory
+`);
+
+    expect(imports).toHaveLength(2);
+    expect(imports.map(item => item.runtime)).toEqual([OmniRuntime.Python, OmniRuntime.Python]);
+    expect((imports[0].node as AST.Import).path).toBe('package_name.submodule');
+    expect(((imports[0].node as AST.Import).alias as AST.Identifier).name).toBe('pkg');
+    expect((imports[1].node as AST.ImportDecl).path).toBe('package_name.submodule');
+    expect((imports[1].node as AST.ImportDecl).specifiers).toEqual([
+      { imported: 'factory', local: 'make_factory' },
+    ]);
+  });
+
+  test('JavaScript imports cover scoped packages, subpaths, side effects, and namespace imports', () => {
+    const imports = importOps(`
+import client from "@scope/pkg-name/subpath"
+import { render as mount } from "pkg-name/render"
+import * as tools from "pkg-name/tools"
+import "pkg-name/register"
+`);
+
+    expect(imports).toHaveLength(4);
+    expect(imports.map(item => item.runtime)).toEqual([
+      OmniRuntime.JavaScript,
+      OmniRuntime.JavaScript,
+      OmniRuntime.JavaScript,
+      OmniRuntime.JavaScript,
+    ]);
+    expect((imports[0].node as AST.ImportDecl).defaultImport?.name).toBe('client');
+    expect((imports[1].node as AST.ImportDecl).specifiers).toEqual([{ imported: 'render', local: 'mount' }]);
+    expect((imports[2].node as AST.ImportDecl).namespaceImport?.name).toBe('tools');
+    expect((imports[3].node as AST.Import).path).toBe('pkg-name/register');
+  });
+
+  test('Go imports cover quoted domain paths, aliases, grouped imports, and dashed path segments', () => {
+    const imports = importOps(`
+import (
+  "github.com/acme/pkg-name/subpkg"
+  tools "example.com/org/tool-kit"
+)
+`);
+
+    expect(imports).toHaveLength(2);
+    expect(imports.map(item => item.runtime)).toEqual([OmniRuntime.Go, OmniRuntime.Go]);
+    expect((imports[0].node as AST.Import).path).toBe('github.com/acme/pkg-name/subpkg');
+    expect((imports[1].node as AST.Import).path).toBe('example.com/org/tool-kit');
+    expect((imports[1].node as AST.Import).alias?.name).toBe('tools');
+  });
+
+  test('Ruby require imports cover gem names and slash subpaths', () => {
+    const imports = importOps(`
+require "dry/validation"
+require "active_record"
+require "my-gem/subpath"
+`);
+
+    expect(imports).toHaveLength(3);
+    expect(imports.map(item => item.runtime)).toEqual([
+      OmniRuntime.Ruby,
+      OmniRuntime.Ruby,
+      OmniRuntime.Ruby,
+    ]);
+    expect(imports.map(item => (item.node as AST.Import).path)).toEqual([
+      'dry/validation',
+      'active_record',
+      'my-gem/subpath',
+    ]);
+  });
+
+  test('Java imports cover class, static, and wildcard imports', () => {
+    const imports = importOps(`
+import java.util.concurrent.CompletableFuture
+import static java.util.concurrent.TimeUnit.SECONDS
+import java.util.*
+`);
+
+    expect(imports).toHaveLength(3);
+    expect(imports.map(item => item.runtime)).toEqual([
+      OmniRuntime.Java,
+      OmniRuntime.Java,
+      OmniRuntime.Java,
+    ]);
+    expect((imports[0].node as AST.Import).path).toBe('java.util.concurrent.CompletableFuture');
+    expect((imports[1].node as AST.Import).path).toBe('static java.util.concurrent.TimeUnit.SECONDS');
+    expect((imports[2].node as AST.Import).path).toBe('java.util.*');
+  });
+});
+
 // --- Symbol Table ---
 
 describe('Symbol Table', () => {

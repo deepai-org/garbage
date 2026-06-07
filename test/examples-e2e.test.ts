@@ -421,6 +421,10 @@ describe("Example files: end-to-end pipeline", () => {
         runtimes: ["javascript"],
       },
       {
+        file: "javascript-jsx-factory-docs.poly",
+        runtimes: ["javascript"],
+      },
+      {
         file: "java-jackson-reactor-docs.poly",
         runtimes: ["java", "python"],
       },
