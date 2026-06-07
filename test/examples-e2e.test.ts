@@ -604,6 +604,10 @@ describe("Example files: end-to-end pipeline", () => {
         runtimes: ["python", "javascript"],
       },
       {
+        file: "python-arrow-table-js-inspect-docs.poly",
+        runtimes: ["python", "javascript"],
+      },
+      {
         file: "reactive-future-streams.poly",
         runtimes: ["python", "javascript", "java"],
       },
