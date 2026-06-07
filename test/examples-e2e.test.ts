@@ -385,6 +385,10 @@ describe("Example files: end-to-end pipeline", () => {
         runtimes: ["python", "javascript"],
       },
       {
+        file: "python-async-generator-js-error.poly",
+        runtimes: ["python", "javascript"],
+      },
+      {
         file: "python-async-context-docs.poly",
         runtimes: ["python", "javascript"],
       },
