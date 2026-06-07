@@ -133,6 +133,55 @@ const natural = JSON.stringify({
     expect(pyText).toContain('frame.loc[frame["keys"] == "field-keys", ["items", "keys"]]');
   });
 
+  test("keeps JavaScript destructuring and spread natural over cross-runtime proxies", () => {
+    const { manifest } = compileSnippet(`
+def make_payload():
+  return {
+    "items": ["alpha", "beta"],
+    "keys": ["id"],
+    "count": 2,
+    "close": "field-close"
+  }
+
+const payload = make_payload()
+const { items, keys: field_keys, count, close, missing = "fallback" } = payload
+const spread_items = [...items]
+const copy = { ...payload }
+const summary = \`\${items.length}:\${field_keys.length}:\${count}:\${close}:\${missing}:\${spread_items[0]}:\${copy.items.length}:\${copy.keys.length}\`
+`);
+
+    const text = manifestText(manifest);
+    expect(text).not.toMatch(bridgeHelperPattern);
+
+    const ops = allOps(manifest);
+    expect(ops.some((op: any) =>
+      op.runtime === "python" && String(op.code ?? "").includes("make_payload()")
+    )).toBe(true);
+
+    const jsCodes = ops
+      .filter((op: any) => op.runtime === "javascript")
+      .map((op: any) => String(op.code ?? op.source ?? ""))
+      .join("\n");
+    expect(jsCodes).toContain("payload.items");
+    expect(jsCodes).toContain("payload.keys");
+    expect(jsCodes).toContain("payload.count");
+    expect(jsCodes).toContain("payload.close");
+    expect(jsCodes).toContain('(typeof payload.missing === "undefined" ? "fallback" : payload.missing)');
+    expect(jsCodes).toContain("[...items]");
+    expect(jsCodes).toContain("{...payload}");
+    expect(jsCodes).not.toContain("{...: ...payload}");
+
+    for (const name of ["items", "field_keys", "count", "close", "missing", "copy"]) {
+      expect(ops.some((op: any) => op.op === "eval" && op.runtime === "javascript" && op.bind === name)).toBe(true);
+    }
+    const destructured = ops.filter((op: any) =>
+      op.op === "eval" &&
+      op.runtime === "javascript" &&
+      ["items", "field_keys", "count", "close", "missing"].includes(op.bind)
+    );
+    expect(destructured.every((op: any) => op.captures?.payload === "payload")).toBe(true);
+  });
+
   test("keeps lazy iterable snippets lazy and helper-free across a runtime boundary", () => {
     const { manifest } = compileSnippet(`
 import itertools

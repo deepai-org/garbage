@@ -74,6 +74,7 @@ export class ManifestCodeGenerator {
   private affinityMap: Map<AST.Decl | AST.Stmt | AST.Expr, RuntimeAffinity> = new Map();
   private defaultRuntime: OmniRuntime = OmniRuntime.JavaScript;
   private source?: string;
+  private destructureCounter = 0;
   /** Tracks variable bindings and their defining runtime for captures analysis. */
   private bindingTable: Map<string, OmniRuntime> = new Map();
   /** Tracks manifest-visible binding roles for semantic diagnostics. */
@@ -2465,6 +2466,10 @@ export class ManifestCodeGenerator {
   // ─── Declarations ─────────────────────────────────────────────
 
   private emitVarDecl(node: AST.VarDecl): ManifestOp[] {
+    if (node.destructurePattern && node.values?.[0]) {
+      return this.emitDestructuringDecl(node.destructurePattern, node.values[0], true);
+    }
+
     const ops: ManifestOp[] = [];
     for (let i = 0; i < node.names.length; i++) {
       const name = node.names[i].name;
@@ -2595,6 +2600,10 @@ export class ManifestCodeGenerator {
   }
 
   private emitConstDecl(node: AST.ConstDecl): ManifestOp[] {
+    if (node.destructurePattern && node.values[0]) {
+      return this.emitDestructuringDecl(node.destructurePattern, node.values[0], false);
+    }
+
     const ops: ManifestOp[] = [];
     for (let i = 0; i < node.names.length; i++) {
       const name = node.names[i].name;
@@ -2712,6 +2721,102 @@ export class ManifestCodeGenerator {
       this.recordBinding(name, runtime, this.declaredBindingKind(name), valExpr);
     }
     return ops;
+  }
+
+  private emitDestructuringDecl(pattern: AST.ArrayPattern | AST.ObjectPattern, value: AST.Expr, mutable: boolean): ManifestOp[] {
+    const ops: ManifestOp[] = [];
+    const targetRuntime = OmniRuntime.JavaScript;
+    const valueAff = this.affinityMap.get(value);
+    const valueRuntime = valueAff?.runtime || this.defaultRuntime;
+    let baseName: string;
+
+    if (value.kind === "Identifier") {
+      baseName = value.name;
+    } else {
+      baseName = `__destructure_${++this.destructureCounter}`;
+      const captures = this.computeCaptures(value, valueRuntime);
+      ops.push({
+        op: "eval",
+        runtime: valueRuntime,
+        code: this.exprCode(value, valueRuntime),
+        bind: baseName,
+        ...(captures ? { captures } : {}),
+      });
+      this.recordBinding(baseName, valueRuntime, "value", value);
+    }
+
+    this.emitPatternBindings(pattern, baseName, targetRuntime, mutable, ops);
+    return ops;
+  }
+
+  private emitPatternBindings(
+    pattern: AST.ArrayPattern | AST.ObjectPattern,
+    baseExpr: string,
+    runtime: OmniRuntime,
+    mutable: boolean,
+    ops: ManifestOp[],
+  ): void {
+    if (pattern.kind === "ArrayPattern") {
+      pattern.elements.forEach((element, index) => {
+        if (!element) return;
+        const access = `${baseExpr}[${index}]`;
+        if (element.kind === "Identifier") {
+          this.emitDestructuredBinding(element.name, access, runtime, mutable, ops);
+        } else {
+          this.emitPatternBindings(element, access, runtime, mutable, ops);
+        }
+      });
+      return;
+    }
+
+    for (const property of pattern.properties) {
+      if (property.rest) {
+        // Rest destructuring needs runtime enumeration support; keep it in the JS syntax layer.
+        const excluded = pattern.properties
+          .filter(prop => !prop.rest)
+          .map(prop => prop.key.name);
+        const access = `Object.fromEntries(Object.entries(${baseExpr}).filter(([key]) => !${JSON.stringify(excluded)}.includes(key)))`;
+        if (property.value.kind === "Identifier") {
+          this.emitDestructuredBinding(property.value.name, access, runtime, mutable, ops);
+        }
+        continue;
+      }
+
+      const access = `${baseExpr}.${property.key.name}`;
+      const valueCode = property.defaultValue
+        ? `(typeof ${access} === "undefined" ? ${this.exprCode(property.defaultValue, runtime)} : ${access})`
+        : access;
+
+      if (property.value.kind === "Identifier") {
+        this.emitDestructuredBinding(property.value.name, valueCode, runtime, mutable, ops);
+      } else {
+        this.emitPatternBindings(property.value, access, runtime, mutable, ops);
+      }
+    }
+  }
+
+  private emitDestructuredBinding(
+    name: string,
+    code: string,
+    runtime: OmniRuntime,
+    mutable: boolean,
+    ops: ManifestOp[],
+  ): void {
+    const captures: CaptureMap = {};
+    for (const identifier of code.matchAll(/\b[A-Za-z_$][\w$]*\b/g)) {
+      const boundIn = this.bindingTable.get(identifier[0]);
+      if (boundIn && boundIn !== runtime) {
+        captures[identifier[0]] = identifier[0];
+      }
+    }
+    ops.push({
+      op: "eval",
+      runtime,
+      code,
+      bind: name,
+      ...(Object.keys(captures).length > 0 ? { captures } : {}),
+    });
+    this.recordBinding(name, runtime, mutable ? "value" : "value");
   }
 
   // ─── Short Declarations (:=) ────────────────────────────────────

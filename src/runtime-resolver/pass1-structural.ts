@@ -667,6 +667,25 @@ export class Pass1Structural {
   }
 
   private visitVarDecl(node: AST.VarDecl): void {
+    if (node.destructurePattern) {
+      for (const v of node.values ?? []) {
+        this.visitExpr(v);
+      }
+      const aff: RuntimeAffinity = {
+        runtime: OmniRuntime.JavaScript,
+        confidence: "definite",
+        evidence: [{ type: "syntax", detail: "JavaScript destructuring declaration" }],
+      };
+      this.affinityMap.set(node, aff);
+      for (const name of node.names) {
+        this.symbolTable.define(name.name, {
+          name: name.name,
+          affinity: aff,
+        });
+      }
+      return;
+    }
+
     let valueAff: RuntimeAffinity | undefined;
     if (node.values) {
       for (const v of node.values) {
@@ -685,6 +704,25 @@ export class Pass1Structural {
   }
 
   private visitConstDecl(node: AST.ConstDecl): void {
+    if (node.destructurePattern) {
+      for (const v of node.values) {
+        this.visitExpr(v);
+      }
+      const aff: RuntimeAffinity = {
+        runtime: OmniRuntime.JavaScript,
+        confidence: "definite",
+        evidence: [{ type: "syntax", detail: "JavaScript destructuring declaration" }],
+      };
+      this.affinityMap.set(node, aff);
+      for (const name of node.names) {
+        this.symbolTable.define(name.name, {
+          name: name.name,
+          affinity: aff,
+        });
+      }
+      return;
+    }
+
     let valueAff: RuntimeAffinity | undefined;
     for (const v of node.values) {
       this.visitExpr(v);
@@ -861,6 +899,9 @@ export class Pass1Structural {
         break;
       case "ArrayLiteral":
         for (const el of expr.elements) this.visitExpr(el);
+        if (this.hasSpreadElement(expr.elements)) {
+          this.assign(expr, OmniRuntime.JavaScript, "definite", { type: "syntax", detail: "JavaScript array spread" });
+        }
         break;
       case "ObjectLiteral":
         for (const prop of expr.properties) {
@@ -870,6 +911,8 @@ export class Pass1Structural {
           const rawObject = this.nodeSource(expr)?.trim();
           if (rawObject && this.isRubyHashRocketSource(rawObject)) {
             this.assign(expr, OmniRuntime.Ruby, "definite", { type: "syntax", detail: "Ruby hash rocket =>" });
+          } else if (this.hasSpreadProperty(expr.properties)) {
+            this.assign(expr, OmniRuntime.JavaScript, "definite", { type: "syntax", detail: "JavaScript object spread" });
           }
         }
         break;
@@ -1041,6 +1084,14 @@ export class Pass1Structural {
       }
     }
     return undefined;
+  }
+
+  private hasSpreadElement(elements: AST.Expr[]): boolean {
+    return elements.some(element => element.kind === "Spread");
+  }
+
+  private hasSpreadProperty(properties: AST.ObjectProperty[]): boolean {
+    return properties.some(property => property.value.kind === "Spread");
   }
 
   private memberChainParts(expr: AST.Expr): string[] {

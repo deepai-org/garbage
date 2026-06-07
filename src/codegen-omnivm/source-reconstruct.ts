@@ -84,6 +84,9 @@ export function exprToCode(expr: AST.Expr, source?: string): string {
       return `[${expr.elements.map(e => exprToCode(e, source)).join(", ")}]`;
     case "ObjectLiteral": {
       const objProps = expr.properties.map(p => {
+        if (p.value.kind === "Spread") {
+          return exprToCode(p.value, source);
+        }
         if (p.shorthand && p.key.kind === "Identifier") {
           return p.key.name;
         }
@@ -191,6 +194,9 @@ function exprToJavaCode(expr: AST.Expr, source?: string): string {
         return "new java.util.LinkedHashMap()";
       }
       const entries = expr.properties.map(p => {
+        if (p.value.kind === "Spread") {
+          return exprToJavaCode(p.value, source);
+        }
         if (p.shorthand && p.key.kind === "Identifier") {
           return `java.util.Map.entry(${JSON.stringify(p.key.name)}, ${p.key.name})`;
         }
@@ -222,6 +228,9 @@ function exprToPythonCode(expr: AST.Expr, source?: string): string {
       return `[${expr.elements.map(e => exprToPythonCode(e, source)).join(", ")}]`;
     case "ObjectLiteral": {
       const objProps = expr.properties.map(p => {
+        if (p.value.kind === "Spread") {
+          return exprToPythonCode(p.value, source);
+        }
         const key = p.computed
           ? `[${exprToPythonCode(p.key as AST.Expr, source)}]`
           : (p.key.kind === "Identifier" ? JSON.stringify(p.key.name) : exprToPythonCode(p.key as AST.Expr, source));

@@ -615,6 +615,7 @@ export interface VarDecl {
   names: Identifier[];
   type?: TypeNode;
   values?: Expr[];
+  destructurePattern?: ArrayPattern | ObjectPattern;
   span: Span;
 }
 
@@ -623,6 +624,7 @@ export interface ConstDecl {
   names: Identifier[];
   type?: TypeNode;
   values: Expr[];
+  destructurePattern?: ArrayPattern | ObjectPattern;
   span: Span;
 }
 
@@ -690,6 +692,8 @@ export interface ObjectPatternProperty {
   key: Identifier;
   value: Identifier | ArrayPattern | ObjectPattern;
   shorthand?: boolean;
+  rest?: boolean;
+  defaultValue?: Expr;
   span: Span;
 }
 

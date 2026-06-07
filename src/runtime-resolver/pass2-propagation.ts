@@ -193,7 +193,9 @@ export class Pass2Propagation {
           });
         }
         const varAff = this.getOrDefault(node);
-        if (this.isMeaningfulAffinity(valAff)) {
+        if (node.destructurePattern) {
+          this.defineDeclaredNames(node.names, varAff, node);
+        } else if (this.isMeaningfulAffinity(valAff)) {
           this.defineDeclaredNames(node.names, valAff, node);
         } else if (varAff.runtime === OmniRuntime.JavaScript) {
           this.defineDeclaredNames(node.names, varAff, node);
@@ -218,7 +220,9 @@ export class Pass2Propagation {
           });
         }
         const constAff = this.getOrDefault(node);
-        if (this.isMeaningfulAffinity(constValAff)) {
+        if (node.destructurePattern) {
+          this.defineDeclaredNames(node.names, constAff, node);
+        } else if (this.isMeaningfulAffinity(constValAff)) {
           this.defineDeclaredNames(node.names, constValAff, node);
         } else if (constAff.runtime === OmniRuntime.JavaScript) {
           this.defineDeclaredNames(node.names, constAff, node);
