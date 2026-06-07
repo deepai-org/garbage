@@ -277,6 +277,59 @@ const summary = \`\${called}:\${missing_called}:\${item_count}:\${missing_count}
     expect(jsCodes).toContain("payload.close");
   });
 
+  test("keeps JavaScript object enumeration natural over Python mapping proxies", () => {
+    const { manifest } = compileSnippet(`
+def make_payload():
+  return {
+    "items": ["alpha", "beta"],
+    "keys": ["id", "name"],
+    "then": "field-then",
+    "get": "field-get",
+    "close": "field-close",
+    "length": 2,
+    "count": 7,
+    "rows": [
+      {"items": "first", "count": 1},
+      {"items": "second", "count": 2}
+    ]
+  }
+
+payload = make_payload()
+
+const names = Object.keys(payload).sort()
+const pairs = Object.entries(payload)
+const selected = Object.fromEntries(
+  pairs
+    .filter(([key]) => ["items", "keys", "then", "get", "close", "length", "count"].includes(key))
+    .map(([key, value]) => [key, Array.isArray(value) ? value.length : value])
+)
+const copied = {...payload}
+const values_count = Object.values(payload).length
+const row_summary = payload.rows.map(row => \`\${row.items}:\${row.count}\`).join("|")
+const has_items = Object.prototype.hasOwnProperty.call(payload, "items")
+`);
+
+    const text = manifestText(manifest);
+    expect(text).not.toMatch(bridgeHelperPattern);
+
+    const ops = allOps(manifest);
+    expect(ops.some((op: any) =>
+      op.runtime === "python" && String(op.code ?? op.source ?? "").includes("make_payload()")
+    )).toBe(true);
+
+    const jsCodes = ops
+      .filter((op: any) => op.runtime === "javascript")
+      .map((op: any) => String(op.code ?? op.source ?? ""))
+      .join("\n");
+    expect(jsCodes).toContain("Object.keys(payload).sort()");
+    expect(jsCodes).toContain("Object.entries(payload)");
+    expect(jsCodes).toContain("Object.fromEntries(");
+    expect(jsCodes).toContain("{...payload}");
+    expect(jsCodes).toContain("Object.values(payload).length");
+    expect(jsCodes).toContain("payload.rows.map");
+    expect(jsCodes).toContain('Object.prototype.hasOwnProperty.call(payload, "items")');
+  });
+
   test("keeps lazy iterable snippets lazy and helper-free across a runtime boundary", () => {
     const { manifest } = compileSnippet(`
 import itertools
