@@ -1421,6 +1421,22 @@ describe('Syntactic Dominance', () => {
     }
   });
 
+  test('optional chaining over Python provenance stays JavaScript syntax', () => {
+    const result = resolve('import os\npayload = os.environ\nconst called = payload.then?.("manual") ?? payload.items?.length ?? "missing"');
+    const optionalCall = [...result.affinityMap].find(([node]) =>
+      node.kind === 'Call' && (node as AST.Call).optional
+    );
+    expect(optionalCall?.[1].runtime).toBe(OmniRuntime.JavaScript);
+    expect(optionalCall?.[1].confidence).toBe('definite');
+    expect(optionalCall?.[1].evidence.some(e => e.type === 'syntax')).toBe(true);
+
+    const optionalMember = [...result.affinityMap].find(([node]) =>
+      node.kind === 'Member' && (node as AST.Member).optional
+    );
+    expect(optionalMember?.[1].runtime).toBe(OmniRuntime.JavaScript);
+    expect(optionalMember?.[1].confidence).toBe('definite');
+  });
+
   test('.map(x => x.name) on Python object → JS via syntax dominance', () => {
     const result = resolve('import os\nfiles = os.listdir("/tmp")\nfiles.map(f => f.toUpperCase())');
     for (const [node, aff] of result.affinityMap) {

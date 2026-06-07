@@ -79,6 +79,32 @@ describe('Parser Data Recovery - No Discarded Syntax', () => {
     });
   });
 
+  describe('Optional Calls', () => {
+    test('parses optional calls on collision-heavy member fields', () => {
+      const ast = parseCode('const called = payload.then?.("manual")');
+      expect(ast.body).toHaveLength(1);
+      const decl = ast.body[0] as AST.ConstDecl;
+      expect(decl.kind).toBe('ConstDecl');
+      expect(decl.values).toHaveLength(1);
+      const call = decl.values[0] as AST.Call;
+      expect(call.kind).toBe('Call');
+      expect(call.optional).toBe(true);
+      const callee = call.callee as AST.Member;
+      expect(callee.kind).toBe('Member');
+      expect(callee.property.name).toBe('then');
+    });
+
+    test('keeps following const declarations after optional calls as declarations', () => {
+      const ast = parseCode(`const called = payload.then?.("manual") ?? "missing"
+const missing_called = missing_payload.then?.("manual") ?? "missing"
+const item_count = missing_payload.items?.length ?? 0`);
+      expect(ast.body).toHaveLength(3);
+      expect(ast.body.map((node: any) => node.kind)).toEqual(['ConstDecl', 'ConstDecl', 'ConstDecl']);
+      expect((ast.body[1] as AST.ConstDecl).names[0].name).toBe('missing_called');
+      expect((ast.body[2] as AST.ConstDecl).names[0].name).toBe('item_count');
+    });
+  });
+
   describe('Where Clauses in Impl Blocks', () => {
     test('parses simple where clause', () => {
       const code = `impl<T> Container<T> where T: Clone {

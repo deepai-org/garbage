@@ -54,9 +54,11 @@ export function exprToCode(expr: AST.Expr, source?: string): string {
       const dot = expr.optional ? "?." : ".";
       return `${obj}${dot}${expr.property.name}`;
     }
-    case "Call":
+    case "Call": {
       const args = expr.args.map(a => exprToCode(a, source)).join(", ");
-      return `${exprToCode(expr.callee, source)}(${args})`;
+      const optional = expr.optional ? "?." : "";
+      return `${exprToCode(expr.callee, source)}${optional}(${args})`;
+    }
     case "NewExpr": {
       const args = expr.args.map(a => exprToCode(a, source)).join(", ");
       return `new ${exprToCode(expr.callee, source)}(${args})`;

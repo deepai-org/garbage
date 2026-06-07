@@ -563,6 +563,13 @@ export class Pass2Propagation {
       : undefined;
     const effectiveObjAff = refinedObjectAff || objAff;
 
+    if (existing?.confidence === "definite" && existing.evidence.some(e => e.type === "syntax")) {
+      if (effectiveObjAff.runtime !== existing.runtime) {
+        this.insertBridge(effectiveObjAff.runtime, existing.runtime, this.inferMarshalKind(node));
+      }
+      return existing;
+    }
+
     // Key rule: object provenance beats method name tables.
     // If `files` came from `os.listdir()` (Python), then `files.map()` should
     // stay Python — not flip to JS just because `.map` is in the JS method table.

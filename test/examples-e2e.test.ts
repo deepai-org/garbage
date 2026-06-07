@@ -325,6 +325,10 @@ describe("Example files: end-to-end pipeline", () => {
         runtimes: ["javascript", "python"],
       },
       {
+        file: "javascript-optional-call-docs.poly",
+        runtimes: ["javascript", "python"],
+      },
+      {
         file: "javascript-error-cause-details.poly",
         runtimes: ["javascript", "python"],
       },

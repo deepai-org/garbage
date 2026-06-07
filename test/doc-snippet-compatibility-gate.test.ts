@@ -230,6 +230,53 @@ const summary = \`\${first_items}:\${first_count}:\${second.items}:\${fallback.i
     }
   });
 
+  test("keeps JavaScript optional call and nullish access natural over cross-runtime proxies", () => {
+    const { manifest } = compileSnippet(`
+def callable_then(value=None):
+  return f"called:{value}"
+
+def make_payload(include_then):
+  payload = {
+    "items": ["alpha", "beta"],
+    "keys": ["id"],
+    "count": 2,
+    "close": "field-close"
+  }
+  if include_then:
+    payload["then"] = callable_then
+  return payload
+
+const payload = make_payload(True)
+const missing_payload = make_payload(False)
+const called = payload.then?.("manual") ?? "missing"
+const missing_called = missing_payload.then?.("manual") ?? "missing"
+const item_count = missing_payload.items?.length ?? 0
+const missing_count = missing_payload.missing?.length ?? 0
+const summary = \`\${called}:\${missing_called}:\${item_count}:\${missing_count}:\${payload.close}\`
+`);
+
+    const text = manifestText(manifest);
+    expect(text).not.toMatch(bridgeHelperPattern);
+
+    const ops = allOps(manifest);
+    expect(ops.some((op: any) =>
+      op.runtime === "python" && String(op.code ?? op.source ?? "").includes("make_payload(True)")
+    )).toBe(true);
+    expect(ops.some((op: any) =>
+      op.runtime === "python" && String(op.code ?? op.source ?? "").includes("make_payload(False)")
+    )).toBe(true);
+
+    const jsCodes = ops
+      .filter((op: any) => op.runtime === "javascript")
+      .map((op: any) => String(op.code ?? op.source ?? ""))
+      .join("\n");
+    expect(jsCodes).toContain('payload.then?.("manual") ?? "missing"');
+    expect(jsCodes).toContain('missing_payload.then?.("manual") ?? "missing"');
+    expect(jsCodes).toContain("missing_payload.items?.length ?? 0");
+    expect(jsCodes).toContain("missing_payload.missing?.length ?? 0");
+    expect(jsCodes).toContain("payload.close");
+  });
+
   test("keeps lazy iterable snippets lazy and helper-free across a runtime boundary", () => {
     const { manifest } = compileSnippet(`
 import itertools

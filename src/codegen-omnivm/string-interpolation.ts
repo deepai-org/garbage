@@ -154,19 +154,25 @@ export class StringInterpolationEmitter {
         return String(expr.value);
       case "NullLiteral":
         return "null";
-      case "Member":
-        return `${this.exprToCode(expr.object)}.${expr.property.name}`;
-      case "Call":
+      case "Member": {
+        const dot = expr.optional ? "?." : ".";
+        return `${this.exprToCode(expr.object)}${dot}${expr.property.name}`;
+      }
+      case "Call": {
         const args = expr.args.map(a => this.exprToCode(a)).join(", ");
-        return `${this.exprToCode(expr.callee)}(${args})`;
+        const optional = expr.optional ? "?." : "";
+        return `${this.exprToCode(expr.callee)}${optional}(${args})`;
+      }
       case "NewExpr": {
         const args = expr.args.map(a => this.exprToCode(a)).join(", ");
         return `new ${this.exprToCode(expr.callee)}(${args})`;
       }
       case "Binary":
         return `${this.exprToCode(expr.left)} ${expr.op} ${this.exprToCode(expr.right)}`;
-      case "Index":
-        return `${this.exprToCode(expr.object)}[${this.exprToCode(expr.index)}]`;
+      case "Index": {
+        const bracket = expr.optional ? "?.[" : "[";
+        return `${this.exprToCode(expr.object)}${bracket}${this.exprToCode(expr.index)}]`;
+      }
       default:
         return "/* unsupported expr */";
     }

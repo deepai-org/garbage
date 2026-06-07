@@ -664,6 +664,10 @@ export class Pass1Structural {
     if (rubyLabelArg) {
       this.assign(node, OmniRuntime.Ruby, "definite", { type: "syntax", detail: "Ruby keyword label argument" });
     }
+
+    if (node.optional) {
+      this.assign(node, OmniRuntime.JavaScript, "definite", { type: "syntax", detail: "JavaScript optional call ?." });
+    }
   }
 
   private visitVarDecl(node: AST.VarDecl): void {
@@ -881,6 +885,9 @@ export class Pass1Structural {
           this.assign(expr, memberAff.runtime, memberAff.confidence, ...memberAff.evidence);
           this.applyMemberRootSyntaxAffinity(expr, memberAff);
         }
+        if (expr.optional) {
+          this.assign(expr, OmniRuntime.JavaScript, "definite", { type: "syntax", detail: "JavaScript optional member access ?." });
+        }
         break;
       case "Index":
         this.visitExpr(expr.object);
@@ -890,6 +897,9 @@ export class Pass1Structural {
           if (rawIndex && this.isRubySymbolIndexSource(rawIndex) && this.hasRubyIndexContext(expr)) {
             this.assign(expr, OmniRuntime.Ruby, "definite", { type: "syntax", detail: "Ruby symbol index [:name]" });
           }
+        }
+        if (expr.optional) {
+          this.assign(expr, OmniRuntime.JavaScript, "definite", { type: "syntax", detail: "JavaScript optional index access ?." });
         }
         break;
       case "Ternary":
