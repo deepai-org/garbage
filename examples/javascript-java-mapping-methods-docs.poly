@@ -1,0 +1,16 @@
+const payload = Object.freeze({
+  "alpha": "first",
+  "beta": "second",
+  "then": "field-then",
+  "close": "field-close",
+  "length": 2,
+  "count": 7
+})
+
+const java_keys = java.lang.String.valueOf(new java.util.TreeSet(payload.keySet()))
+const java_pairs = java.lang.String.valueOf(payload.entrySet().stream().map(entry -> java.lang.String.valueOf(entry.getKey()) + ":" + java.lang.String.valueOf(entry.getValue())).sorted().collect(java.util.stream.Collectors.joining("|")))
+const java_values = java.lang.String.valueOf(payload.values().stream().map(value -> java.lang.String.valueOf(value)).sorted().collect(java.util.stream.Collectors.joining("|")))
+const java_selected = java.lang.String.valueOf(payload.get("alpha")) + ":" + java.lang.String.valueOf(payload.getOrDefault("missing", "fallback")) + ":" + java.lang.String.valueOf(payload.get("close")) + ":" + java.lang.String.valueOf(payload.get("count"))
+const java_copied = java.lang.String.valueOf(payload.get("beta"))
+
+console.log(`JavaScript Java mapping methods docs ${java_keys};${java_pairs};${java_values};${java_selected};${java_copied}`)

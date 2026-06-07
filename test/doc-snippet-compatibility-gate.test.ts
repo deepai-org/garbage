@@ -502,6 +502,50 @@ const summary = PayloadSummary.summarize(payload)
     expect(rubyCodes).toContain("payload.to_h");
   });
 
+  test("keeps Java mapping methods natural over JavaScript object proxies", () => {
+    const { manifest } = compileSnippet(`
+const payload = Object.freeze({
+  "alpha": "first",
+  "beta": "second",
+  "then": "field-then",
+  "close": "field-close",
+  "length": 2,
+  "count": 7
+})
+
+const java_keys = java.lang.String.valueOf(new java.util.TreeSet(payload.keySet()))
+const java_pairs = java.lang.String.valueOf(payload.entrySet().stream().map(entry -> java.lang.String.valueOf(entry.getKey()) + ":" + java.lang.String.valueOf(entry.getValue())).sorted().collect(java.util.stream.Collectors.joining("|")))
+const java_values = java.lang.String.valueOf(payload.values().stream().map(value -> java.lang.String.valueOf(value)).sorted().collect(java.util.stream.Collectors.joining("|")))
+const java_selected = java.lang.String.valueOf(payload.get("alpha")) + ":" + java.lang.String.valueOf(payload.getOrDefault("missing", "fallback")) + ":" + java.lang.String.valueOf(payload.get("close")) + ":" + java.lang.String.valueOf(payload.get("count"))
+const java_copied = java.lang.String.valueOf(payload.get("beta"))
+`);
+
+    const text = manifestText(manifest);
+    expect(text).not.toMatch(bridgeHelperPattern);
+
+    const ops = allOps(manifest);
+    expect(ops.some((op: any) =>
+      op.runtime === "javascript" && String(op.code ?? op.source ?? "").includes("Object.freeze")
+    )).toBe(true);
+    expect(ops.some((op: any) =>
+      op.op === "eval" &&
+      op.runtime === "java" &&
+      String(op.code ?? "").includes("payload.keySet()")
+    )).toBe(true);
+
+    const javaCodes = ops
+      .filter((op: any) => op.runtime === "java")
+      .map((op: any) => String(op.code ?? op.source ?? ""))
+      .join("\n");
+    expect(javaCodes).toContain("payload.keySet()");
+    expect(javaCodes).toContain("payload.entrySet()");
+    expect(javaCodes).toContain("payload.values()");
+    expect(javaCodes).toContain('payload.get("alpha")');
+    expect(javaCodes).toContain('payload.getOrDefault("missing", "fallback")');
+    expect(javaCodes).toContain('payload.get("close")');
+    expect(javaCodes).toContain('payload.get("count")');
+  });
+
   test("keeps lazy iterable snippets lazy and helper-free across a runtime boundary", () => {
     const { manifest } = compileSnippet(`
 import itertools
