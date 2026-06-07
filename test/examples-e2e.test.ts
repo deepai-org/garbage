@@ -565,8 +565,8 @@ describe("Example files: end-to-end pipeline", () => {
       const javaService = manifest.ops.find(
         (o: any) => o.runtime === "java" && String(o.code).includes("ObjectMapper")
       ) as any;
-      const rubyFiber = manifest.ops.find(
-        (o: any) => o.runtime === "ruby" && String(o.code).includes("Fiber.current")
+      const rubyStage = manifest.ops.find(
+        (o: any) => o.runtime === "ruby" && String(o.code).includes("ActiveRecord::Type::String")
       ) as any;
       const activeRecordImport = manifest.ops.find(
         (o: any) => o.op === "import" && o.path === "active_record"
@@ -585,9 +585,7 @@ describe("Example files: end-to-end pipeline", () => {
       expect(javaService?.code).toContain("ObjectMapper");
       expect(javaFuture?.code).toContain("CompletableFuture.completedFuture");
       expect(activeRecordImport?.runtime).toBe("ruby");
-      if (rubyFiber) {
-        expect(rubyFiber.code).toContain("Fiber.current");
-      }
+      expect(rubyStage?.code).toContain('"review-active"');
       expect(reactRender?.code).toContain("React.createElement");
       if (djangoResponse) {
         expect(djangoResponse.code).toContain("JsonResponse");

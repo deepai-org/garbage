@@ -552,11 +552,12 @@ const payload = Object.freeze({
   "count": 7
 })
 
-const java_keys = java.lang.String.valueOf(new java.util.TreeSet(payload.keySet()))
-const java_pairs = java.lang.String.valueOf(payload.entrySet().stream().map(entry -> java.lang.String.valueOf(entry.getKey()) + ":" + java.lang.String.valueOf(entry.getValue())).sorted().collect(java.util.stream.Collectors.joining("|")))
-const java_values = java.lang.String.valueOf(payload.values().stream().map(value -> java.lang.String.valueOf(value)).sorted().collect(java.util.stream.Collectors.joining("|")))
-const java_selected = java.lang.String.valueOf(payload.get("alpha")) + ":" + java.lang.String.valueOf(payload.getOrDefault("missing", "fallback")) + ":" + java.lang.String.valueOf(payload.get("close")) + ":" + java.lang.String.valueOf(payload.get("count"))
-const java_copied = java.lang.String.valueOf(payload.get("beta"))
+const java_payload = java.util.Map.class.cast(payload)
+const java_keys = new java.util.TreeSet(java_payload.keySet()).toString()
+const java_pairs = java_payload.entrySet().stream().map(entry -> entry.getKey() + ":" + entry.getValue()).sorted().collect(java.util.stream.Collectors.joining("|"))
+const java_values = java_payload.values().stream().map(value -> value.toString()).sorted().collect(java.util.stream.Collectors.joining("|"))
+const java_selected = java.util.List.of(java_payload.get("alpha"), java_payload.getOrDefault("missing", "fallback"), java_payload.get("close"), java_payload.get("count")).stream().map(value -> value.toString()).collect(java.util.stream.Collectors.joining(":"))
+const java_copied = java_payload.get("beta")
 `);
 
     const text = manifestText(manifest);
@@ -576,13 +577,14 @@ const java_copied = java.lang.String.valueOf(payload.get("beta"))
       .filter((op: any) => op.runtime === "java")
       .map((op: any) => String(op.code ?? op.source ?? ""))
       .join("\n");
-    expect(javaCodes).toContain("payload.keySet()");
-    expect(javaCodes).toContain("payload.entrySet()");
-    expect(javaCodes).toContain("payload.values()");
-    expect(javaCodes).toContain('payload.get("alpha")');
-    expect(javaCodes).toContain('payload.getOrDefault("missing", "fallback")');
-    expect(javaCodes).toContain('payload.get("close")');
-    expect(javaCodes).toContain('payload.get("count")');
+    expect(javaCodes).toContain("java.util.Map.class.cast(payload)");
+    expect(javaCodes).toContain("java_payload.keySet()");
+    expect(javaCodes).toContain("java_payload.entrySet()");
+    expect(javaCodes).toContain("java_payload.values()");
+    expect(javaCodes).toContain('java_payload.get("alpha")');
+    expect(javaCodes).toContain('java_payload.getOrDefault("missing", "fallback")');
+    expect(javaCodes).toContain('java_payload.get("close")');
+    expect(javaCodes).toContain('java_payload.get("count")');
   });
 
   test("keeps lazy iterable snippets lazy and helper-free across a runtime boundary", () => {
@@ -922,7 +924,7 @@ const js_payload = {
 
 const py_count = len(js_payload.items) + js_payload.count
 const ruby_summary = Docs::Summary.build(js_payload.items, js_payload.keys, js_payload.count, js_payload.close)
-const java_summary = java.lang.String.valueOf(js_payload.count) + ":" + java.lang.String.valueOf(js_payload.length)
+const java_summary = java.util.List.of(js_payload.count, js_payload.length).stream().map(value -> value.toString()).collect(java.util.stream.Collectors.joining(":"))
 `);
 
     const text = manifestText(manifest);
@@ -944,8 +946,8 @@ const java_summary = java.lang.String.valueOf(js_payload.count) + ":" + java.lan
       .filter((op: any) => op.runtime === "java")
       .map((op: any) => op.code ?? op.source ?? "")
       .join("\n");
-    expect(javaText).toContain("java.lang.String.valueOf(js_payload.count)");
-    expect(javaText).toContain("java.lang.String.valueOf(js_payload.length)");
+    expect(javaText).toContain("java.util.List.of(js_payload.count, js_payload.length)");
+    expect(javaText).toContain("java.util.stream.Collectors.joining");
   });
 
   test("keeps cross-runtime error fields natural and helper-free in docs-shaped catch blocks", () => {

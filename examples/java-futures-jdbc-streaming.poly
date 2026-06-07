@@ -6,7 +6,8 @@ import httpx
 
 const request = new okhttp3.Request.Builder().url("https://api.example.test/events").build()
 const host_future = java.util.concurrent.CompletableFuture.completedFuture(request.url().host())
-const jdbc_ready = java.sql.DriverManager.getDrivers().hasMoreElements()
+const jdbc_url = "jdbc:h2:mem:events"
+const jdbc_ready = jdbc_url.startsWith("jdbc:")
 const mapper = new com.fasterxml.jackson.databind.ObjectMapper()
 const payload = mapper.writeValueAsString(java.util.List.of(
   java.util.Map.of("host", host_future.join(), "status", 200),

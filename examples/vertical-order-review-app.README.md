@@ -2,7 +2,7 @@
 
 `vertical-order-review-app.poly` is the canonical public example for Poly:
 one order-review workflow spanning Django, FastAPI, Pydantic, Express, Zod,
-React server rendering, Java/Jackson futures, Ruby ActiveRecord/Fiber state,
+React server rendering, Java/Jackson futures, Ruby ActiveRecord casting,
 and Go workers.
 
 Compile it to an OmniVM manifest:
@@ -23,7 +23,7 @@ docker run --rm \
 The app prints one summary line:
 
 ```text
-Vertical order app order=ord-42 routes=5 django=200 react=71 java=priority ruby=fiber-active workers=2 adjustment=7
+Vertical order app order=ord-42 routes=6 django=200 react=71 java=priority ruby=review-active workers=2 adjustment=7
 ```
 
 That line is checked in as `test/fixtures/vertical-order-review-app.output.txt`

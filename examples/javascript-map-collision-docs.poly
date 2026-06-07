@@ -12,7 +12,14 @@ def summarize_py(payload):
   return f"{len(payload.items)}:{payload.items[0]}:{len(payload.keys)}:{payload.keys[0]}:{payload.then}:{payload.get}:{payload.close}:{payload.length}:{payload.count}"
 
 const py_summary = summarize_py(js_payload)
-const ruby_summary = Fiber.current.object_id && [js_payload.items.length, js_payload.items[0], js_payload.keys.length, js_payload.keys[0], js_payload.then, js_payload.get, js_payload.close, js_payload.length, js_payload.count].join(":")
-const java_summary = java.lang.String.valueOf(js_payload.count) + ":" + java.lang.String.valueOf(js_payload.length) + ":" + java.lang.String.valueOf(js_payload.then)
+
+class JsPayloadRubySummary
+  def self.summarize(payload)
+    [payload.items.length, payload.items[0], payload.keys.length, payload.keys[0], payload.then, payload.get, payload.close, payload.length, payload.count].join(":")
+  end
+end
+
+const ruby_summary = JsPayloadRubySummary.summarize(js_payload)
+const java_summary = java.util.List.of(js_payload.count, js_payload.length, js_payload.then).stream().map(value -> value.toString()).collect(java.util.stream.Collectors.joining(":"))
 
 console.log(`JavaScript map collision docs py=${py_summary} ruby=${ruby_summary} java=${java_summary}`)

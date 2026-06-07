@@ -714,6 +714,23 @@ describe('Import-to-Usage Propagation', () => {
     expect(seen).toEqual(new Set(['then', 'count', 'keys', 'values', 'entries', 'close']));
   });
 
+  test('Java collection method names infer Java without conversion wrappers', () => {
+    const result = resolve('payload.keySet()\npayload.entrySet()\npayload.getOrDefault("missing", "fallback")');
+    const seen = new Set<string>();
+
+    for (const [node, aff] of result.affinityMap) {
+      if (node.kind === 'Member') {
+        const name = (node as AST.Member).property.name;
+        if (['keySet', 'entrySet', 'getOrDefault'].includes(name)) {
+          seen.add(name);
+          expect(aff.runtime).toBe(OmniRuntime.Java);
+        }
+      }
+    }
+
+    expect(seen).toEqual(new Set(['keySet', 'entrySet', 'getOrDefault']));
+  });
+
   test('aliased stdlib import propagates: import os as pyos', () => {
     const result = resolve('import os as pyos\npyos.getcwd()');
     for (const [node, aff] of result.affinityMap) {

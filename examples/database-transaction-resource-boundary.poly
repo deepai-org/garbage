@@ -9,7 +9,7 @@ const engine = sqlalchemy.create_engine("sqlite://")
 const statement = sqlalchemy.text("select id, total from orders where paid = true")
 const prisma = new PrismaClient()
 const active_table = ActiveRecord::Base.connection.quote_table_name("orders")
-const jdbc_url = java.sql.DriverManager.getLoginTimeout()
+const jdbc_url = "jdbc:h2:mem:orders"
 
 const materialized_rows = [
   {"id": 1, "total": 20, "source": active_table},

@@ -60,7 +60,7 @@ const enrichment = json.loads(enrichment_json)
 const adjustment_value = enrichment["adjustment"]
 
 const cast_adjustment = ActiveRecord::Type::Integer.new.cast(adjustment_value.to_s)
-const lifecycle_stage = ActiveRecord::Type::String.new.cast(Fiber.current.object_id && "fiber-active")
+const lifecycle_stage = ActiveRecord::Type::String.new.cast("review-active")
 
 func score_worker(label) {
   return label
