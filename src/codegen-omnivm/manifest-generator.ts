@@ -1848,6 +1848,7 @@ export class ManifestCodeGenerator {
       const runtime = valueAff?.runtime || declAff?.runtime || blockRuntime;
       if (resourceName && value && runtime === OmniRuntime.Python) {
         const contextName = `__using_context_${++this.usingCounter}`;
+        const asyncContext = node.async === true;
         const captures = this.computeCaptures(value, runtime);
         resourceOps.push({
           op: "eval",
@@ -1860,12 +1861,15 @@ export class ManifestCodeGenerator {
           op: "eval",
           runtime,
           bind: resourceName,
-          code: `${contextName}.__enter__()`,
+          code: asyncContext ? `await ${contextName}.__aenter__()` : `${contextName}.__enter__()`,
+          ...(asyncContext ? { async: true } : {}),
         });
         this.recordBinding(contextName, runtime, "value", value);
         this.recordBinding(resourceName, runtime, "value", node.resource);
         cleanupRuntime = runtime;
-        cleanupCode = `${contextName}.__exit__(None, None, None)`;
+        cleanupCode = asyncContext
+          ? `await ${contextName}.__aexit__(None, None, None)`
+          : `${contextName}.__exit__(None, None, None)`;
         resourceName = contextName;
       } else {
         resourceOps.push(...(node.resource.kind === "VarDecl"
@@ -1907,6 +1911,7 @@ export class ManifestCodeGenerator {
           target: resourceName,
           ...(cleanupRuntime ? { runtime: cleanupRuntime } : {}),
           ...(cleanupCode ? { code: cleanupCode } : {}),
+          ...(node.async === true ? { async: true } : {}),
         }
       : { op: "resource", action: "close", target: "__unknown_resource" };
 

@@ -333,6 +333,10 @@ describe("Example files: end-to-end pipeline", () => {
         runtimes: ["python", "javascript"],
       },
       {
+        file: "python-async-context-docs.poly",
+        runtimes: ["python", "javascript"],
+      },
+      {
         file: "java-docs-popular-packages.poly",
         runtimes: ["java", "python"],
       },
@@ -609,9 +613,9 @@ describe("Example files: end-to-end pipeline", () => {
       );
       expect(contextManagerEvals).toEqual([
         expect.objectContaining({ runtime: "python", code: "httpx.AsyncClient()", bind: "__using_context_1" }),
-        expect.objectContaining({ runtime: "python", code: "__using_context_1.__enter__()", bind: "client" }),
+        expect.objectContaining({ runtime: "python", code: "await __using_context_1.__aenter__()", bind: "client", async: true }),
         expect.objectContaining({ runtime: "python", code: "client.stream(\"GET\", url)", bind: "__using_context_2" }),
-        expect.objectContaining({ runtime: "python", code: "__using_context_2.__enter__()", bind: "response" }),
+        expect.objectContaining({ runtime: "python", code: "await __using_context_2.__aenter__()", bind: "response", async: true }),
       ]);
       expect(JSON.stringify(contextManagerEvals)).not.toContain(" as ");
       const contextCloses = nestedOps.filter((o: any) => o.op === "resource" && o.action === "close");
@@ -619,12 +623,14 @@ describe("Example files: end-to-end pipeline", () => {
         expect.objectContaining({
           target: "__using_context_1",
           runtime: "python",
-          code: "__using_context_1.__exit__(None, None, None)",
+          code: "await __using_context_1.__aexit__(None, None, None)",
+          async: true,
         }),
         expect.objectContaining({
           target: "__using_context_2",
           runtime: "python",
-          code: "__using_context_2.__exit__(None, None, None)",
+          code: "await __using_context_2.__aexit__(None, None, None)",
+          async: true,
         }),
       ]));
       expect(manifest.ops).not.toContainEqual(

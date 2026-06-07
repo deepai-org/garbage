@@ -598,16 +598,16 @@ async def fetch_docs(url):
     const tryOps = ops.filter((op: any) => op.op === "try");
     const sessionTry = tryOps.find((op: any) =>
       JSON.stringify(op.body).includes("aiohttp.ClientSession") &&
-      JSON.stringify(op.body).includes("__enter__") &&
-      JSON.stringify(op.finallyBody ?? []).includes("__exit__(None, None, None)") &&
+      JSON.stringify(op.body).includes("await __using_context_1.__aenter__()") &&
+      JSON.stringify(op.finallyBody ?? []).includes("await __using_context_1.__aexit__(None, None, None)") &&
       JSON.stringify(op.finallyBody ?? []).includes('"action":"close"')
     );
     expect(sessionTry).toBeDefined();
 
     const responseTry = tryOps.find((op: any) =>
       JSON.stringify(op.body).includes("session.get") &&
-      JSON.stringify(op.body).includes("__enter__") &&
-      JSON.stringify(op.finallyBody ?? []).includes("__exit__(None, None, None)") &&
+      JSON.stringify(op.body).includes(".__aenter__()") &&
+      JSON.stringify(op.finallyBody ?? []).includes(".__aexit__(None, None, None)") &&
       JSON.stringify(op.finallyBody ?? []).includes('"action":"close"')
     );
     expect(responseTry).toBeDefined();

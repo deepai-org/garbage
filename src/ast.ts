@@ -405,6 +405,7 @@ export interface Using {
   kind: "Using";
   resource: Expr | Decl;
   body: Block;
+  async?: boolean;
   span: Span;
 }
 

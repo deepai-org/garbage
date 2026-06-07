@@ -125,6 +125,7 @@ export interface EvalOp {
   op: "eval";
   runtime: string;
   code?: string;
+  async?: boolean;
   /** Pre-registered function name (Go runtime). */
   func?: string;
   /** Arguments for pre-registered function call. */
@@ -417,6 +418,7 @@ export interface ResourceOp {
   op: "resource";
   action: "open" | "close";
   runtime?: string;
+  async?: boolean;
   bind?: string;
   target?: string;
   kind?: string;

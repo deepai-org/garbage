@@ -60,6 +60,7 @@ describe('Parser', () => {
       expect(func.body.statements).toHaveLength(1);
       const using = func.body.statements[0] as AST.Using;
       expect(using.kind).toBe('Using');
+      expect(using.async).toBe(true);
       const resource = using.resource as AST.VarDecl;
       expect(resource.kind).toBe('VarDecl');
       expect(resource.names[0].name).toBe('client');
