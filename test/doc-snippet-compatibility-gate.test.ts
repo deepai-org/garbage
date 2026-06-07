@@ -444,6 +444,45 @@ copied = dict(payload)
     expect(pyCodes).toContain("dict(payload)");
   });
 
+  test("keeps Python mapping methods natural over JavaScript Map proxies", () => {
+    const { manifest } = compileSnippet(`
+const payload = new Map([
+  ["alpha", "first"],
+  ["beta", "second"],
+  ["close", "field-close"],
+  ["count", 7]
+])
+
+keys = sorted(payload.keys())
+pairs = sorted([f"{key}:{value}" for key, value in payload.items()])
+values = sorted([str(value) for value in payload.values()])
+selected = f"{payload.get('alpha')}:{payload.get('missing', 'fallback')}:{payload.get('close')}:{payload.get('count')}"
+copied = dict(payload)
+`);
+
+    const text = manifestText(manifest);
+    expect(text).not.toMatch(bridgeHelperPattern);
+
+    const ops = allOps(manifest);
+    const jsProducer = ops.find((op: any) =>
+      op.runtime === "javascript" && String(op.code ?? op.source ?? "").includes("new Map")
+    );
+    expect(jsProducer).toBeDefined();
+
+    const pyCodes = ops
+      .filter((op: any) => op.runtime === "python")
+      .map((op: any) => String(op.code ?? op.source ?? ""))
+      .join("\n");
+    expect(pyCodes).toContain("sorted(payload.keys())");
+    expect(pyCodes).toContain('sorted([f"{key}:{value}" for key, value in payload.items()])');
+    expect(pyCodes).toContain("sorted([str(value) for value in payload.values()])");
+    expect(pyCodes).toContain("payload.get('alpha')");
+    expect(pyCodes).toContain("payload.get('missing', 'fallback')");
+    expect(pyCodes).toContain("payload.get('close')");
+    expect(pyCodes).toContain("payload.get('count')");
+    expect(pyCodes).toContain("dict(payload)");
+  });
+
   test("keeps Ruby mapping methods natural over JavaScript object proxies", () => {
     const { manifest } = compileSnippet(`
 const payload = Object.freeze({
